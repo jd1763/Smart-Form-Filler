@@ -1,0 +1,14 @@
+About the job
+As a Cloud Consultant at Accenture, you will help clients design and implement cloud solutions to modernize their business.
+
+Responsibilities:
+- Assess current IT infrastructure and design cloud migration strategies.
+- Implement solutions using AWS, Azure, or Google Cloud.
+- Provide guidance on cost optimization and security.
+- Work with cross-functional teams to deliver end-to-end solutions.
+
+Qualifications:
+- Bachelor’s degree in Computer Science, IT, or related field.
+- 2+ years of experience with cloud platforms.
+- Knowledge of networking, databases, and security best practices.
+- Strong communication and consulting skills.

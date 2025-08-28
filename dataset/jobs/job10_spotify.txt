@@ -1,0 +1,14 @@
+About the job
+Spotify is seeking a UX Designer to create user-friendly and engaging experiences for our music streaming platform.
+
+Responsibilities:
+- Conduct user research and usability testing.
+- Design wireframes, prototypes, and final UI elements.
+- Collaborate with product managers and engineers to ship features.
+- Ensure accessibility and performance across devices.
+
+Qualifications:
+- Bachelor’s degree in Design, HCI, or related field.
+- Proficiency in Figma, Sketch, or similar tools.
+- Strong portfolio showcasing UX/UI design work.
+- Experience working in Agile environments.

@@ -1,0 +1,20 @@
+{
+    "firstName": "Jorgeluis",
+    "lastName": "Done",
+    "gender": "Male",
+    "dob": "08/20/2002",
+    "phoneNumber": "8482035238",
+    "email": "jd1763@scarletmail.rutgers.edu",
+    "address": "598 Elizabeth st, Perth Amboy, NJ, 08861",
+    "street": "598 Elizabeth st",
+    "city": "Perth Amboy",
+    "state": "New Jersey",
+    "zicode": "08861",
+    "county": "Middlesex",
+    "linkedin": "https://www.linkedin.com/in/jorgeluis-done/",
+    "github": "https://github.com/jd1763",
+    "job title": "Software Engineer",
+    "checkbox": true,
+    "radio": true
+  }
+  

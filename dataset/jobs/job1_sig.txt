@@ -1,0 +1,22 @@
+Overview
+As a Software Developer at Susquehanna, you’ll work alongside experienced software engineers on the development, delivery, support, and enhancement of our trading systems and infrastructure. With guidance and mentoring from your team, you’ll get hands-on experience beginning on your first day. In addition, we customize a learning and development plan to help you get to know the people you’ll be working with, what your team is responsible for, and our technical environment. This plan includes a combination of technical classes as well as overviews of our technology teams that will enhance your knowledge and allow you to grow further within your team.
+
+You will join a collaborative and supportive environment where you'll have the opportunity to grow your skills, contribute to meaningful projects, and learn from experienced mentors.
+
+We place software developers across our trading, business, and technology teams. Throughout the interview process, we’ll discuss your skills and goals so we can match you with the team where you’ll be successful from day one.
+
+What You Could Work On:
+- Designing and developing test automation for low-latency trading systems
+- Trader-facing front-ends
+- Events trading systems
+- Data analysis of algo decisions and performance
+- Design and develop simulators for external components
+- Broad exposure to options technology platforms and deep exposure to our options market making strategies
+
+What we’re looking for:
+- Students pursuing a BS or MS in Computer Science, Computer Engineering, or a similar major
+- Strong software development skills in any object-oriented language
+- Python preferred
+- Python data science (numpy, pandas) experience is a plus
+- C++, C#, Java are a plus
+- Visa sponsorship is available

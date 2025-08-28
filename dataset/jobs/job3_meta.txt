@@ -1,0 +1,17 @@
+About the job
+As a Data Analyst at Meta, you will turn data into insights that drive product decisions and business strategies. You’ll partner with product managers, engineers, and researchers to understand challenges and identify opportunities.
+
+Responsibilities:
+- Query and analyze large datasets to measure product performance.
+- Build dashboards and data visualizations.
+- Provide actionable insights to influence strategy.
+
+Minimum qualifications:
+- Bachelor’s degree in Statistics, Computer Science, or related field.
+- Proficiency in SQL and Python.
+- Experience with data visualization tools (Tableau, Power BI).
+
+Preferred qualifications:
+- Advanced degree in Analytics or Data Science.
+- Experience with machine learning methods.
+- Strong problem-solving and critical thinking skills.

@@ -1,0 +1,23 @@
+John Smith
+Email: john.smith@email.com | Phone: (555) 123-4567 | GitHub: github.com/johnsmith
+
+Summary:
+Full-stack software engineer with 3+ years of experience building and deploying enterprise web applications.
+
+Skills:
+- Java, Python, SQL, JavaScript (React/Node.js)
+- AWS, Docker, Kubernetes
+- Git, Agile, CI/CD pipelines
+
+Experience:
+Software Engineer | TechCorp | 2022–Present
+- Built microservices in Java Spring Boot and deployed to AWS.
+- Designed MySQL schemas for transactional systems.
+- Integrated third-party APIs and improved response times by 25%.
+
+Software Developer | WebSolutions | 2020–2022
+- Developed front-end React components for a SaaS dashboard.
+- Automated testing with JUnit and Selenium.
+
+Education:
+B.S. Computer Science, University of Maryland (2020)

@@ -1,0 +1,23 @@
+Michael Lee
+Email: michael.lee@email.com | Phone: (555) 321-7890 | LinkedIn: linkedin.com/in/michaellee
+
+Summary:
+Data Analyst with 2+ years of experience analyzing datasets and building dashboards to support business decisions.
+
+Skills:
+- SQL, Python (pandas, numpy), Excel
+- Tableau, Power BI
+- Statistical analysis, A/B testing
+
+Experience:
+Data Analyst | HealthData Inc. | 2022–Present
+- Built Tableau dashboards for healthcare data insights.
+- Queried SQL databases to identify cost-saving opportunities.
+- Conducted regression analysis to forecast patient outcomes.
+
+Business Analyst Intern | RetailCo | 2021
+- Developed Excel financial models for sales forecasting.
+- Partnered with stakeholders to design KPIs.
+
+Education:
+B.S. Statistics, Penn State University (2021)

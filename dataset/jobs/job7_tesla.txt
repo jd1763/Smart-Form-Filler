@@ -1,0 +1,14 @@
+About the job
+Tesla is seeking a Machine Learning Engineer to help build the next generation of AI systems for autonomous vehicles.
+
+Responsibilities:
+- Develop and train models for perception, planning, and prediction.
+- Optimize neural networks for real-time deployment on embedded hardware.
+- Collaborate with robotics, hardware, and software teams.
+- Analyze large-scale driving data to improve model performance.
+
+Qualifications:
+- Bachelor’s or Master’s degree in Computer Science or related field.
+- Experience with Python, C++, and deep learning frameworks.
+- Strong background in computer vision and reinforcement learning.
+- Ability to work in a fast-paced environment.

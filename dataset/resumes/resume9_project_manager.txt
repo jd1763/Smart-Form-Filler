@@ -1,0 +1,23 @@
+Daniel Carter
+Email: daniel.carter@email.com | Phone: (555) 333-2222 | LinkedIn: linkedin.com/in/dcarter
+
+Summary:
+Project Manager with 6+ years of experience leading cross-functional teams and delivering IT and software development projects on time and within budget.
+
+Skills:
+- Agile, Scrum, Jira, Confluence
+- Risk management, stakeholder communication
+- Budget planning, resource allocation
+
+Experience:
+Project Manager | FinTech Solutions | 2020–Present
+- Oversaw 10+ software development projects, coordinating teams of up to 15 engineers.
+- Implemented Agile best practices, improving project delivery by 20%.
+- Communicated with stakeholders to define project goals and milestones.
+
+Associate Project Manager | GlobalTech | 2017–2020
+- Assisted in managing multi-million dollar IT infrastructure projects.
+- Tracked KPIs and reported status updates to senior leadership.
+
+Education:
+B.S. Information Technology, University of Illinois (2017)

@@ -1,0 +1,23 @@
+Sara Patel
+Email: sara.patel@email.com | Phone: (555) 777-8888 | GitHub: github.com/sarap
+
+Summary:
+Machine Learning Engineer with 4+ years of experience developing models and deploying them to production environments.
+
+Skills:
+- Python (scikit-learn, TensorFlow, PyTorch)
+- SQL, Spark
+- AWS Sagemaker, Docker
+
+Experience:
+ML Engineer | AutoAI | 2021–Present
+- Developed deep learning models for autonomous driving perception.
+- Deployed models to cloud-based APIs with latency under 50ms.
+- Processed terabytes of data with Spark clusters.
+
+Data Scientist | AnalyticsHub | 2019–2021
+- Built churn prediction models using logistic regression.
+- Partnered with product managers to drive retention campaigns.
+
+Education:
+M.S. Data Science, Carnegie Mellon University (2019)

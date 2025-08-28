@@ -1,0 +1,23 @@
+Emily Zhang
+Email: emily.zhang@email.com | Phone: (555) 654-3210 | LinkedIn: linkedin.com/in/emilyzhang
+
+Summary:
+Product Manager with 5+ years of experience driving feature development and leading cross-functional teams.
+
+Skills:
+- Agile, Scrum, Jira
+- SQL, Excel
+- Market research, roadmapping
+
+Experience:
+Product Manager | AppWorks | 2020–Present
+- Defined product strategy for B2B SaaS platform used by 500+ clients.
+- Conducted user research and shaped product roadmap.
+- Partnered with engineering teams to deliver features on time.
+
+Associate PM | RetailTech | 2018–2020
+- Coordinated launches of e-commerce features.
+- Analyzed KPIs and presented metrics to leadership.
+
+Education:
+B.A. Business Administration, University of Michigan (2017)

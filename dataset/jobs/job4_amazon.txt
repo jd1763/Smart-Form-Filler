@@ -1,0 +1,19 @@
+About the job
+As a Web Developer at Amazon, you’ll build and optimize scalable e-commerce applications to support millions of customers worldwide.
+
+Responsibilities:
+- Develop responsive web applications using HTML, CSS, JavaScript, and React.
+- Implement REST APIs and integrate with backend services.
+- Optimize applications for performance and scalability.
+- Collaborate with designers and engineers to deliver high-quality user experiences.
+
+Basic qualifications:
+- Bachelor’s degree or equivalent experience.
+- Proficiency in JavaScript and frameworks such as React or Angular.
+- Familiarity with Node.js and REST APIs.
+- Knowledge of Git version control.
+
+Preferred qualifications:
+- Experience with AWS services.
+- Strong understanding of accessibility and performance best practices.
+- Excellent debugging and troubleshooting skills.

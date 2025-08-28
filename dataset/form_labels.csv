@@ -1,0 +1,128 @@
+label_text,field_type
+
+"First Name",first_name
+"First name", first_name
+"Full Name", full_name
+"Last name", last_name
+"Surname",last_name
+
+"Email",email
+"E-mail",email
+"Email Address",email
+"Work Email",email
+"Personal Email",email
+
+"Address Line 1",address_line1
+"Street Address",address_line1
+"Street",address_line1
+"Address",address_line1
+
+"Address Line 2",address_line2
+"Apt / Suite / Unit",address_line2
+"Apartment",address_line2
+
+"City",city
+"Town",city
+"Municipality",city
+
+"State",state
+"Province",state
+"Region",state
+
+"Zip Code",zip
+"Postal Code",zip
+"Postcode",zip
+
+"Country",country
+"Nation",country
+
+"Contact Number",phone
+"Phone Number",phone
+"Mobile Number",phone
+"Cell Number",phone
+"Telephone",phone
+
+"Company",company
+
+"Female", gender
+"Male", gender
+"Other", gender
+
+"Date of Birth",dob
+"Birth Date",dob
+"D.O.B.",dob
+"Date of Birth (MM/DD/YYYY)",dob
+
+"Job title at your previous role",job_title
+"Previous Job Title",job_title
+"Your Job Title",job_title
+
+"Name of your previous employer",employer
+"Previous Employer",employer
+"Company Name",employer
+"Organization",employer
+
+"When did you start at your latest role?",start_date
+"Start Date",start_date
+"Employment Start",start_date
+
+"End date of your latest role",end_date
+"End Date",end_date
+"Employment End",end_date
+"Date Left",end_date
+
+"Role description",role_description
+"Description of Responsibilities",role_description
+"Duties",role_description
+
+"Highest Degree",degree
+"Degree",degree
+"Educational Qualification",degree
+"Select Degree",degree
+"Education Level",degree
+"Qualification",degree
+
+"School",school
+"University",school
+"College",school
+"Institute",school
+
+"Certifications",certification
+"Relevant Certifications",certification
+"Professional Certificates",certification
+
+"Graduation Year",graduation_year
+"Year of Graduation",graduation_year
+"Year Graduated",graduation_year
+"Graduated In",graduation_year
+"Year Completed",graduation_year
+
+"How did you learn about us?",referral_source
+"Where did you hear about us?",referral_source
+"Referral Source",referral_source
+"How did you hear about this job?",referral_source
+
+"Background check consent",background_check_consent
+"Consent to background check",background_check_consent
+"I agree to a background check",background_check_consent
+
+"I agree to the Terms & Conditions and Privacy Policy",terms_consent
+"Accept Terms & Conditions",terms_consent
+"Agree to Terms of Service",terms_consent
+"I agree to the Privacy Policy",terms_consent
+
+"Confirm Email",confirm_email
+"LinkedIn Profile URL",linkedin
+"Portfolio / GitHub / Personal Website",portfolio
+"Upload Resume",resume_upload
+"Cover Letter / Additional Information",cover_letter
+
+"What is your ethnicity?",ethnicity
+"Are you authorized to work in the US?",work_auth_us
+"Are you authorized to work in Canada?",work_auth_canada
+"Are you authorized to work in the United Kingdom?",work_auth_uk
+"Will you now or in the future require sponsorship for employment visa status?",visa_sponsorship
+"Do you have a disability?",disability
+"Do you identify as LGBTQ+?",lgbtq
+"What is your gender?",gender
+"Are you a veteran?",veteran

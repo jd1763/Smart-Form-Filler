@@ -1,0 +1,20 @@
+Jane Doe
+Email: jane.doe@email.com | Phone: (555) 555-5555 | LinkedIn: linkedin.com/in/janedoe
+
+Objective:
+Recent Computer Science graduate passionate about building scalable applications and learning industry best practices.
+
+Skills:
+- Languages: Java, Python, SQL
+- Web: HTML, CSS, JavaScript
+- Tools: Git, VS Code, Eclipse
+
+Experience:
+Software Engineering Intern | StartupX | Summer 2024
+- Developed RESTful API endpoints in Python Flask.
+- Wrote SQL queries to improve database performance.
+- Collaborated in Agile sprints with 4 other developers.
+
+Education:
+B.S. Computer Science, Rutgers University (2025)
+Dean’s List, ALPFA Member

@@ -1,0 +1,14 @@
+About the job
+As a Data Scientist at IBM, you will work with large datasets, build predictive models, and develop machine learning solutions to support clients across industries.
+
+Responsibilities:
+- Design and implement machine learning algorithms.
+- Work with Python, R, and SQL for data cleaning and analysis.
+- Collaborate with engineers and product teams to deploy models.
+- Communicate results and insights to stakeholders.
+
+Required qualifications:
+- Bachelor’s or Master’s degree in Computer Science, Statistics, or related field.
+- Experience with Python, R, and SQL.
+- Strong knowledge of machine learning libraries (scikit-learn, TensorFlow, PyTorch).
+- Excellent communication skills.

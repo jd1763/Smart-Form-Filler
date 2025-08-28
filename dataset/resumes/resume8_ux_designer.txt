@@ -1,0 +1,23 @@
+Sophia Martinez
+Email: sophia.martinez@email.com | Phone: (555) 111-2222 | Portfolio: sophia.design
+
+Summary:
+UX Designer with 4 years of experience creating user-centered web and mobile applications.
+
+Skills:
+- Figma, Sketch, Adobe XD
+- HTML, CSS, basic JavaScript
+- Wireframing, prototyping, usability testing
+
+Experience:
+UX Designer | Spotify | 2021–Present
+- Designed user flows and prototypes for new playlist features.
+- Conducted A/B tests that improved retention by 10%.
+- Partnered with developers to ensure high-quality implementation.
+
+UI/UX Designer | CreativeStudio | 2019–2021
+- Delivered website redesigns for 20+ small business clients.
+- Conducted user interviews and created wireframes.
+
+Education:
+B.S. Human-Computer Interaction, Georgia Tech (2019)

@@ -1,0 +1,24 @@
+Alex Rivera
+Email: alex.rivera@email.com | Phone: (555) 222-7777 | LinkedIn: linkedin.com/in/alexrivera
+
+Summary:
+Cybersecurity Analyst with 3+ years of experience monitoring, detecting, and responding to cyber threats in enterprise environments.
+
+Skills:
+- SIEM tools (Splunk, QRadar)
+- Vulnerability scanning, penetration testing
+- Network security, firewalls, incident response
+
+Experience:
+Cybersecurity Analyst | SecureNet | 2021–Present
+- Monitored enterprise systems and detected security threats using SIEM tools.
+- Conducted vulnerability assessments and recommended mitigation steps.
+- Supported SOC team during live incident response.
+
+IT Security Intern | FinanceCo | 2020
+- Assisted with firewall rule management and phishing simulation campaigns.
+- Documented security incidents and supported risk assessments.
+
+Education:
+B.S. Cybersecurity, University of Texas (2020)
+CompTIA Security+ Certified

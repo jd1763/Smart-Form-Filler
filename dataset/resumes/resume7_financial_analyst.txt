@@ -1,0 +1,23 @@
+David Brown
+Email: david.brown@email.com | Phone: (555) 888-9999
+
+Summary:
+Financial Analyst with 3+ years of experience in investment banking and corporate finance.
+
+Skills:
+- Excel, SQL, financial modeling
+- Valuation, forecasting
+- Presentation skills (PowerPoint)
+
+Experience:
+Analyst | Goldman Sachs | 2021–Present
+- Built financial models to support equity investment decisions.
+- Created presentations for client pitches.
+- Researched market conditions to identify trends.
+
+Junior Analyst | FinanceCorp | 2019–2021
+- Assisted with quarterly earnings reports.
+- Conducted discounted cash flow analysis.
+
+Education:
+B.S. Finance, NYU Stern School of Business (2019)

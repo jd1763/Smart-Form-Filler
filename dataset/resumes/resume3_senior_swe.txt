@@ -1,0 +1,25 @@
+Alice Johnson
+Email: alice.johnson@email.com | Phone: (555) 444-2222 | Portfolio: alicejohnson.dev
+
+Summary:
+Senior software engineer with 8+ years of experience in backend systems, cloud infrastructure, and team leadership.
+
+Skills:
+- Python, Java, C++, SQL
+- AWS, GCP, Docker, Kubernetes
+- Architecture design, mentoring, Agile practices
+
+Experience:
+Senior Engineer | Cloudify | 2020–Present
+- Led a team of 5 engineers to design distributed systems handling 10M+ daily transactions.
+- Architected CI/CD pipelines using Jenkins and GitHub Actions.
+- Mentored junior engineers in Python best practices.
+
+Software Engineer | FinTech Inc. | 2015–2020
+- Built trading system modules in C++ and Java.
+- Designed REST APIs integrated with payment providers.
+- Optimized SQL queries improving latency by 30%.
+
+Education:
+M.S. Computer Science, Columbia University (2015)
+B.S. Computer Science, NYU (2013)

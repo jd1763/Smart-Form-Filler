@@ -1,0 +1,17 @@
+About the job
+Google’s software engineers develop the next-generation technologies that change how billions of users connect, explore, and interact. Our products need to handle information at massive scale, and extend well beyond web search. We’re looking for engineers who bring fresh ideas from all areas, including information retrieval, distributed computing, large-scale system design, networking, data storage, security, artificial intelligence, and more.
+
+Responsibilities:
+- Design, develop, test, deploy, maintain, and improve software systems.
+- Manage priorities, deadlines, and deliverables with a team of engineers.
+- Collaborate with cross-functional teams.
+
+Minimum qualifications:
+- Bachelor’s degree in Computer Science or related technical field.
+- Experience with one or more programming languages (Java, C++, Python).
+- Knowledge of data structures and algorithms.
+
+Preferred qualifications:
+- Master’s degree or PhD in Computer Science.
+- Experience with distributed systems, cloud infrastructure, or machine learning.
+- Excellent communication and collaboration skills.
