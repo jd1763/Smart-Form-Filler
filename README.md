@@ -33,7 +33,7 @@ A Chrome Extension that:
 
 ---
 
-### Week 1 — Data & Setup ✅ (completed)
+### Week 1 — Data & Setup (completed)
 **Form Filler side**
 - [x] Collected real-world forms (Techlistic, W3Schools, job portals).
 - [x] Saved HTML snippets in `dataset/forms/`.
