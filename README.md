@@ -130,9 +130,8 @@ Run tests:
 
 ## Continuous Integration
 
-This project uses GitHub Actions to run tests on every push.
-CI workflow: .github/workflows/ci.yml
+This project uses GitHub Actions to run tests on every push.  
+CI workflow: `.github/workflows/ci.yml`
 
-Badge:
-    ![CI](https://github.com/jd1763/AI-job-application-assistant/actions/workflows/ci.yml/badge.svg)
-
+**Build Status:**  
+![CI](https://github.com/jd1763/AI-job-application-assistant/actions/workflows/ci.yml/badge.svg)
