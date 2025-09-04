@@ -1,42 +1,36 @@
 import os
 import glob
-import nltk
 import re
+import nltk
+from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# Download resources if missing
+# Ensure resources are available (safe in CI too)
 nltk.download("punkt", quiet=True)
-nltk.download("punkt_tab", quiet=True)
+nltk.download("stopwords", quiet=True)
 nltk.download("wordnet", quiet=True)
 nltk.download("omw-1.4", quiet=True)
 
 lemmatizer = WordNetLemmatizer()
-
+stop_words = set(stopwords.words("english"))
 
 def normalize_text(text: str) -> str:
-    """
-    Clean and normalize text for TF-IDF.
-    Steps:
-    1. Lowercase
-    2. Remove punctuation/numbers
-    3. Tokenize into words
-    4. Lemmatize each word (developer, developing -> develop)
-    """
-    # Lowercase
-    text = text.lower()
-    # Remove punctuation & digits
-    text = re.sub(r"[^a-z\s]", " ", text)
-    # Tokenize
-    tokens = nltk.word_tokenize(text)
-    # Lemmatize each word
-    tokens = [lemmatizer.lemmatize(tok) for tok in tokens]
-    return " ".join(tokens)
+    """Lowercase, remove punctuation, remove stopwords, and lemmatize words."""
+    # Lowercase and tokenize
+    tokens = nltk.word_tokenize(text.lower())
+
+    # Remove punctuation and stopwords, then lemmatize
+    cleaned = [
+        lemmatizer.lemmatize(word)
+        for word in tokens
+        if re.match(r"[a-z]+$", word) and word not in stop_words
+    ]
+
+    return " ".join(cleaned)
 
 # --- Function to load all .txt files from a folder ---
-
-
 def load_texts_from_folder(folder_path):
     texts = {}
     for filepath in glob.glob(os.path.join(folder_path, "*.txt")):
