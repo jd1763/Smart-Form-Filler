@@ -49,8 +49,8 @@ A Chrome Extension that:
 
 ### Week 2 — Baseline Models
 **Form Filler side**
-- [ ] Train a baseline classifier (scikit-learn TF-IDF + Logistic Regression) on `form_labels.csv`.
-- [ ] Save as `form_model.pkl`.
+- [x] Train a baseline classifier (scikit-learn TF-IDF + Logistic Regression) on `form_labels.csv`.
+- [x] Save as `form_model.pkl`.
 
 **Matcher side**
 - [ ] Use TF-IDF similarity (cosine similarity) between resumes and job descriptions.
