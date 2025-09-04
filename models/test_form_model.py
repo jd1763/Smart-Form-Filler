@@ -78,22 +78,23 @@ for label, probs in zip(sample_labels, probabilities):
 #         pred = model.predict([label])[0]
 #         print(f"Label: '{label}' -> Predicted (ML): {pred}")
 
-# Interactive loop
-while True:
-    user_input = input("\nEnter a form label (or type 'quit' to exit): ")
-    if user_input.lower() == "quit":
-        break
+if __name__ == "__main__":
+    # Interactive loop (only runs if you execute `python models/test_form_model.py`)
+    while True:
+        user_input = input("\nEnter a form label (or type 'quit' to exit): ")
+        if user_input.lower() == "quit":
+            break
 
-    # Uncomment below to re-enable regex later
-    # rule = regex_fallback(user_input)
-    # if rule:
-    #     print(f"Predicted (rule): {rule}")
-    # else:
-    #     pred = model.predict([user_input])[0]
-    #     print(f"Predicted (ML): {pred}")
+        # Uncomment below to re-enable regex later
+        # rule = regex_fallback(user_input)
+        # if rule:
+        #     print(f"Predicted (rule): {rule}")
+        # else:
+        #     pred = model.predict([user_input])[0]
+        #     print(f"Predicted (ML): {pred}")
 
-    probs = model.predict_proba([user_input])[0]
-    pred_idx = np.argmax(probs)
-    pred_class = classes[pred_idx]
-    confidence = probs[pred_idx]
-    print(f"Predicted: '{pred_class}' (confidence: {confidence:.2f})")
+        probs = model.predict_proba([user_input])[0]
+        pred_idx = np.argmax(probs)
+        pred_class = classes[pred_idx]
+        confidence = probs[pred_idx]
+        print(f"Predicted: '{pred_class}' (confidence: {confidence:.2f})")
