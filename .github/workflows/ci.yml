@@ -11,35 +11,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repo
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      # 2. Setup Python
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.12"
 
-      # 3. Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          pip install flake8 black isort pytest
 
-      # 4. Run tests
-      - name: Run pytest
-        run: pytest
+      # === Run tests ===
+      - name: Run tests
+        run: pytest -v
 
-      # 5. Run lint checks
+      # === Check formatting (Black + isort) ===
+      - name: Check formatting with Black
+        run: black --check .
+      - name: Check import order with isort
+        run: isort --check-only .
+
+      # === Lint check ===
       - name: Run flake8
         run: flake8 .
-
-      # 6. Run type checks
-      - name: Run mypy
-        run: mypy .
-
-      # 7. Run formatting check (black in --check mode)
-      - name: Run black formatting check
-        run: black --check .

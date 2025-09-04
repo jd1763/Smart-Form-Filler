@@ -10,6 +10,7 @@ nltk.download("stopwords")
 # Load the list of English stopwords into a set for fast lookup
 stop_words = set(stopwords.words("english"))
 
+
 def clean_text(text: str) -> str:
     """
     Cleans and normalizes text for NLP.
@@ -22,18 +23,19 @@ def clean_text(text: str) -> str:
     """
     # Lowercase all text
     text = text.lower()
-    
+
     # Replace anything not a-z, 0-9, or space with a space
     text = re.sub(r"[^a-z0-9\s]", " ", text)
-    
+
     # Split string into list of words
     tokens = text.split()
-    
+
     # Remove common stopwords (e.g., "and", "the", "of")
     tokens = [t for t in tokens if t not in stop_words]
-    
+
     # Join tokens back into one string
     return " ".join(tokens)
+
 
 def process_folder(input_folder: str, output_folder: str):
     """
@@ -48,7 +50,7 @@ def process_folder(input_folder: str, output_folder: str):
     for filename in os.listdir(input_folder):
         if filename.endswith(".txt"):  # only process text files
             in_path = os.path.join(input_folder, filename)   # input file path
-            out_path = os.path.join(output_folder, filename) # output file path
+            out_path = os.path.join(output_folder, filename)  # output file path
 
             # Read raw file contents
             with open(in_path, "r", encoding="utf-8") as f:
@@ -62,6 +64,7 @@ def process_folder(input_folder: str, output_folder: str):
                 f.write(cleaned)
 
             print(f"Processed {filename} -> {out_path}")
+
 
 if __name__ == "__main__":
     # Figure out where the dataset folder is
