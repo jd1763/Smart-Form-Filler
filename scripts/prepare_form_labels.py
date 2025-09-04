@@ -1,0 +1,161 @@
+import pandas as pd
+
+# Step 1: Load dataset
+df = pd.read_csv("dataset/form_labels.csv")
+
+# Step 2: Clean field_type
+df["field_type"] = df["field_type"].str.strip().str.lower()
+
+# Step 3: Merge into broader categories
+merge_map = {
+    "first_name": "name", "last_name": "name", "full_name": "name",
+    "address_line1": "address", "address_line2": "address", "city": "address",
+    "state": "address", "zip": "address", "country": "address",
+    "dob": "birth_date",
+    "work_auth_us": "work_auth", "work_auth_canada": "work_auth", "work_auth_uk": "work_auth",
+    "ethnicity": "demographics", "gender": "demographics", "disability": "demographics",
+    "lgbtq": "demographics", "veteran": "demographics",
+    "degree": "education", "graduation_year": "education",
+    "school": "education", "certification": "education"
+}
+df["field_type"] = df["field_type"].replace(merge_map)
+
+# Step 4: Add synonym expansions (variety for each class)
+synonyms = {
+    "name": [
+        "First Name", "Last Name", "Full Name", "Given Name", "Middle Name",
+        "Surname", "Applicant Name", "Preferred Name", "Legal Name", "Family Name",
+        "Primary Name", "Official Name", "Your Name", "Contact Name", "Display Name"
+    ],
+    "email": [
+        "Email", "E-mail", "Email Address", "Work Email", "Personal Email",
+        "Confirm Email", "Alternate Email", "Business Email", "School Email",
+        "Primary Email", "Contact Email", "Corporate Email", "Professional Email",
+        "Email ID", "Email Login", "Recovery Email"
+    ],
+    "phone": [
+        "Phone Number", "Mobile Number", "Cell Number", "Telephone", "Contact Number",
+        "Work Phone", "Home Phone", "Primary Phone", "Secondary Phone", "Business Phone",
+        "Direct Line", "Office Phone", "Main Phone", "Personal Phone", "Landline"
+    ],
+    "address": [
+        "Address Line 1", "Address Line 2", "Street Address", "Street", "Address",
+        "City", "Town", "Municipality", "State", "Province", "Region", "Zip Code",
+        "Postal Code", "Postcode", "Country", "Nation", "Mailing Address",
+        "Residential Address", "Permanent Address", "Work Address", "Company HQ Address"
+    ],
+    "birth_date": [
+        "Date of Birth", "Birth Date", "D.O.B.", "Birthday", "Birthdate",
+        "DOB (MM/DD/YYYY)", "Date of Birth (DD/MM/YYYY)", "Your Birth Date",
+        "Birth Information", "Date Born", "Birth Details", "Birth Record",
+        "Date of Birth Field", "Birth Day", "Official DOB"
+    ],
+    "company": [
+        "Company", "Employer Name", "Organization", "Business Name", "Workplace",
+        "Current Employer", "Previous Employer", "Company Name", "Organization Name",
+        "Business", "Hiring Company", "Corporation", "Firm", "Office", "Employer"
+    ],
+    "education": [
+        "Highest Degree", "Degree", "Educational Qualification", "Select Degree",
+        "Education Level", "Qualification", "School", "University", "College",
+        "Institute", "Graduation Year", "Year of Graduation", "Year Graduated",
+        "Graduated In", "Year Completed", "Certifications", "Professional Certificates",
+        "Diploma", "Training Program", "Field of Study"
+    ],
+    "demographics": [
+        "Ethnicity", "What is your ethnicity?", "Race", "Racial Group", "Ethnic Group",
+        "Ethnic Background", "Cultural Background", "Heritage", "Nationality",
+        "Origin", "Demographic Info", "Demographic Category", "Minority Group",
+        "Gender", "Sex", "Gender Identity", "Sexual Orientation", "LGBTQ+ Identity",
+        "Disability Status", "Do you have a disability?", "Veteran Status",
+        "Military Service", "Military Background", "Protected Veteran", "Community Group"
+    ],
+    "referral_source": [
+        "Referral Source", "How did you learn about us?", "Where did you hear about us?",
+        "How did you hear about this job?", "Job Board Source", "Friend Referral",
+        "Colleague Referral", "Career Fair", "Recruiter", "Advertisement",
+        "Online Ad", "Social Media Ad", "Employee Referral", "Internal Referral",
+        "Website Referral"
+    ],
+    "role_description": [
+        "Role description", "Description of Responsibilities", "Duties",
+        "Responsibilities", "Main Tasks", "Key Responsibilities", "Job Duties",
+        "Work Responsibilities", "Job Functions", "Position Duties",
+        "Task Description", "Employment Duties", "Daily Tasks", "Main Role", "Primary Duties"
+    ],
+    "job_title": [
+        "Job Title", "Previous Job Title", "Your Job Title", "Position Title", "Role",
+        "Job Position", "Employment Title", "Official Job Title", "Work Title",
+        "Current Position", "Past Position", "Title at Company", "Professional Title",
+        "Designation", "Career Title"
+    ],
+    "start_date": [
+        "Start Date", "When did you start at your latest role?", "Employment Start",
+        "Job Start", "Contract Start", "Employment Start Date", "Work Start", "Date Hired",
+        "Hire Date", "Start of Employment", "Start of Work", "Begin Date", "Joining Date",
+        "Commencement Date"
+    ],
+    "end_date": [
+        "End Date", "End date of your latest role", "Employment End", "Date Left",
+        "Contract End", "Job End", "Employment End Date", "Termination Date", "Date Finished",
+        "End of Employment", "End of Contract", "Date of Exit", "Finish Date"
+    ],
+    "social": [
+        "LinkedIn Profile URL", "Portfolio / GitHub / Personal Website", "LinkedIn URL",
+        "GitHub Link", "Personal Site", "Professional Profile", "Portfolio Website",
+        "Social Link", "Online Profile", "Professional Website", "Digital Portfolio",
+        "Work Samples", "LinkedIn Profile", "Online Resume", "Career Profile"
+    ],
+    "document": [
+        "Upload Resume", "Cover Letter / Additional Information", "Resume Upload",
+        "Supporting Document", "Application Document", "CV Upload", "Job Application File",
+        "Resume File", "Cover Letter", "Supporting Files", "Attachment",
+        "Required Document", "Application Materials", "Resume Attachment"
+    ],
+    "background_check": [
+        "Background check consent", "Consent to background check", "I agree to a background check",
+        "Background Screening", "Pre-employment Background Check", "Background Verification",
+        "Criminal Record Check", "Identity Verification", "Background Consent",
+        "Security Screening", "Background Check Authorization", "Screening Consent",
+        "Background History", "Employment Screening"
+    ],
+    "terms_consent": [
+        "I agree to the Terms & Conditions and Privacy Policy", "Accept Terms & Conditions",
+        "Agree to Terms of Service", "I agree to the Privacy Policy", "Terms Agreement",
+        "Accept Privacy Policy", "Consent to Terms", "Agree to Terms", "Accept User Agreement",
+        "Consent to Conditions", "User Consent", "Privacy Terms Agreement"
+    ],
+    "work_auth": [
+        "Are you authorized to work in the US?", "Are you authorized to work in Canada?",
+        "Are you authorized to work in the United Kingdom?", "Will you now or in the future require sponsorship?",
+        "Visa Sponsorship", "Work Authorization", "Employment Eligibility",
+        "Work Permit", "Visa Status", "Right to Work", "Legal Work Authorization",
+        "Sponsorship Required", "Eligible to Work", "Authorized to Work",
+        "Work Visa", "Permit to Work"
+    ]
+}
+
+# Add synonyms to dataset
+extra_rows = []
+for field_type, phrases in synonyms.items():
+    for phrase in phrases:
+        extra_rows.append({"label_text": phrase, "field_type": field_type})
+df = pd.concat([df, pd.DataFrame(extra_rows)], ignore_index=True)
+
+# Step 5: Balance each class (to 40 each)
+min_samples = 40
+balanced = []
+for field, group in df.groupby("field_type"):
+    if len(group) < min_samples:
+        repeat_times = -(-min_samples // len(group))  # ceiling divide
+        group = pd.concat([group] * repeat_times, ignore_index=True)[:min_samples]
+    else:
+        group = group.sample(min_samples, replace=True, random_state=42)
+    balanced.append(group)
+
+df_balanced = pd.concat(balanced, ignore_index=True)
+
+# Step 6: Save
+df_balanced.to_csv("dataset/form_labels_balanced.csv", index=False)
+print("=== Balanced dataset saved to dataset/form_labels_balanced.csv ===")
+print(df_balanced['field_type'].value_counts())

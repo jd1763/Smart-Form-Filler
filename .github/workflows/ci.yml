@@ -11,24 +11,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout code
-      - name: Checkout repository
+      # 1. Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # Set up Python
+      # 2. Setup Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Install dependencies
+      # 3. Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      # Run tests
+      # 4. Run tests
       - name: Run pytest
-        run: pytest --maxfail=1 --disable-warnings -q
+        run: pytest
 
+      # 5. Run lint checks
+      - name: Run flake8
+        run: flake8 .
+
+      # 6. Run type checks
+      - name: Run mypy
+        run: mypy .
+
+      # 7. Run formatting check (black in --check mode)
+      - name: Run black formatting check
+        run: black --check .

@@ -1,128 +1,160 @@
 label_text,field_type
+Address Line 1,address
+Street Address,address
+Street,address
+Address,address
+Address Line 2,address
+Apt / Suite / Unit,address
+Apartment,address
+City,address
+Town,address
+Municipality,address
+State,address
+Province,address
+Region,address
+Zip Code,address
+Postal Code,address
+Postcode,address
+Country,address
+Nation,address
+Mailing Address,address
+Home Address,address
+Residential Address,address
+Permanent Address,address
+Work Address,address
+Company HQ Address,address
 
-"First Name",first_name
-"First name", first_name
-"Full Name", full_name
-"Last name", last_name
-"Surname",last_name
+Background check consent,background_check
+Consent to background check,background_check
+I agree to a background check,background_check
+Background Screening,background_check
+Pre-employment Background Check,background_check
 
-"Email",email
-"E-mail",email
-"Email Address",email
-"Work Email",email
-"Personal Email",email
+Date of Birth,birth_date
+Birth Date,birth_date
+D.O.B.,birth_date
+Date of Birth (MM/DD/YYYY),birth_date
+Birthday,birth_date
+Birthdate,birth_date
 
-"Address Line 1",address_line1
-"Street Address",address_line1
-"Street",address_line1
-"Address",address_line1
+Company,company
+Employer Name,company
+Organization Name,company
+Business Name,company
+Workplace,company
 
-"Address Line 2",address_line2
-"Apt / Suite / Unit",address_line2
-"Apartment",address_line2
+Education Level,education
+Highest Degree,education
+Degree,education
+Educational Qualification,education
+Select Degree,education
+Qualification,education
+School,education
+University,education
+College,education
+Institute,education
+Graduation Year,education
+Year of Graduation,education
+Year Graduated,education
+Graduated In,education
+Year Completed,education
+Certifications,education
+Relevant Certifications,education
+Professional Certificates,education
+Diploma,education
+Training Program,education
 
-"City",city
-"Town",city
-"Municipality",city
+Upload Resume,document
+Cover Letter / Additional Information,document
+Resume Upload,document
+Supporting Document,document
+Application Document,document
 
-"State",state
-"Province",state
-"Region",state
+Email,email
+E-mail,email
+Email Address,email
+Work Email,email
+Personal Email,email
+Confirm Email,email
+Business Email,email
+School Email,email
+Alternate Email,email
 
-"Zip Code",zip
-"Postal Code",zip
-"Postcode",zip
+End Date,end_date
+End date of your latest role,end_date
+Employment End,end_date
+Date Left,end_date
+Contract End,end_date
 
-"Country",country
-"Nation",country
+Demographics,demographics
+What is your ethnicity?,demographics
+What is your gender?,demographics
+Do you have a disability?,demographics
+Do you identify as LGBTQ+?,demographics
+Are you a veteran?,demographics
+Race,demographics
+Ethnic Background,demographics
+Gender Identity,demographics
+Sex,demographics
+Military Status,demographics
 
-"Contact Number",phone
-"Phone Number",phone
-"Mobile Number",phone
-"Cell Number",phone
-"Telephone",phone
+Job Title,job_title
+Previous Job Title,job_title
+Your Job Title,job_title
+Position Title,job_title
+Role,job_title
 
-"Company",company
+First Name,name
+Last Name,name
+Full Name,name
+Surname,name
+Given Name,name
+Middle Name,name
+Applicant Name,name
 
-"Female", gender
-"Male", gender
-"Other", gender
+Phone Number,phone
+Mobile Number,phone
+Cell Number,phone
+Telephone,phone
+Contact Number,phone
+Work Phone,phone
+Home Phone,phone
+Primary Phone,phone
 
-"Date of Birth",dob
-"Birth Date",dob
-"D.O.B.",dob
-"Date of Birth (MM/DD/YYYY)",dob
+Referral Source,referral_source
+How did you learn about us?,referral_source
+Where did you hear about us?,referral_source
+How did you hear about this job?,referral_source
+Job Board Source,referral_source
+Friend or Colleague,referral_source
 
-"Job title at your previous role",job_title
-"Previous Job Title",job_title
-"Your Job Title",job_title
+Role Description,role_description
+Description of Responsibilities,role_description
+Duties,role_description
+Responsibilities,role_description
+Main Tasks,role_description
 
-"Name of your previous employer",employer
-"Previous Employer",employer
-"Company Name",employer
-"Organization",employer
+LinkedIn Profile,social
+Portfolio / GitHub / Personal Website,social
+LinkedIn URL,social
+GitHub Link,social
+Personal Site,social
 
-"When did you start at your latest role?",start_date
-"Start Date",start_date
-"Employment Start",start_date
+Start Date,start_date
+When did you start at your latest role?,start_date
+Employment Start,start_date
+Job Start,start_date
+Contract Start,start_date
 
-"End date of your latest role",end_date
-"End Date",end_date
-"Employment End",end_date
-"Date Left",end_date
+Terms Agreement,terms_consent
+I agree to the Terms & Conditions,terms_consent
+Accept Terms & Conditions,terms_consent
+Agree to Terms of Service,terms_consent
+I agree to the Privacy Policy,terms_consent
 
-"Role description",role_description
-"Description of Responsibilities",role_description
-"Duties",role_description
-
-"Highest Degree",degree
-"Degree",degree
-"Educational Qualification",degree
-"Select Degree",degree
-"Education Level",degree
-"Qualification",degree
-
-"School",school
-"University",school
-"College",school
-"Institute",school
-
-"Certifications",certification
-"Relevant Certifications",certification
-"Professional Certificates",certification
-
-"Graduation Year",graduation_year
-"Year of Graduation",graduation_year
-"Year Graduated",graduation_year
-"Graduated In",graduation_year
-"Year Completed",graduation_year
-
-"How did you learn about us?",referral_source
-"Where did you hear about us?",referral_source
-"Referral Source",referral_source
-"How did you hear about this job?",referral_source
-
-"Background check consent",background_check_consent
-"Consent to background check",background_check_consent
-"I agree to a background check",background_check_consent
-
-"I agree to the Terms & Conditions and Privacy Policy",terms_consent
-"Accept Terms & Conditions",terms_consent
-"Agree to Terms of Service",terms_consent
-"I agree to the Privacy Policy",terms_consent
-
-"Confirm Email",confirm_email
-"LinkedIn Profile URL",linkedin
-"Portfolio / GitHub / Personal Website",portfolio
-"Upload Resume",resume_upload
-"Cover Letter / Additional Information",cover_letter
-
-"What is your ethnicity?",ethnicity
-"Are you authorized to work in the US?",work_auth_us
-"Are you authorized to work in Canada?",work_auth_canada
-"Are you authorized to work in the United Kingdom?",work_auth_uk
-"Will you now or in the future require sponsorship for employment visa status?",visa_sponsorship
-"Do you have a disability?",disability
-"Do you identify as LGBTQ+?",lgbtq
-"What is your gender?",gender
-"Are you a veteran?",veteran
+Visa Sponsorship,work_auth
+Are you authorized to work in the US?,work_auth
+Are you authorized to work in Canada?,work_auth
+Are you authorized to work in the United Kingdom?,work_auth
+Work Authorization,work_auth
+Employment Eligibility,work_auth

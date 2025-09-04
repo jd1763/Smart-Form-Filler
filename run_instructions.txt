@@ -1,57 +1,25 @@
-# -----------------------------------------
-# Setup & Run Instructions for Matcher Project
-# -----------------------------------------
+# ----------------------------
+# Setup & Run Instructions 
+-> for normal users (just to run the project)
+# ----------------------------
 
-# 1) Navigate to the project root
+# 1) Go to the project root
 cd smart-form-filler
 
-# 2) Create a Python virtual environment (only once)
-python3 -m venv .venv
+# 2) Create a virtual environment with Homebrew Python 3.12
+# (this ensures you're not using macOS system Python 3.9/3.13)
+rm -rf .venv
+/usr/local/opt/python@3.12/bin/python3.12 -m venv .venv
 
-# 3) Activate the virtual environment
-# (Run this EVERY TIME before you use the project)
+# 3) Activate the virtual environment (every time you work)
 source .venv/bin/activate
 
-# 4) Install dependencies from requirements.txt
+# 4) Install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
 
-# 5) (Optional) Update pip if suggested
-pip install --upgrade pip
+# 5) Train the form filler model
+python models/train_form_model.py
 
-# 6) Run preprocessing script to clean jobs + resumes
-python ml/preprocess.py
-
-# -----------------------------------------
-# Expected Output
-# -----------------------------------------
-# Processed job1_sig.txt -> dataset/jobs_clean/job1_sig.txt
-# Processed resume1_entry_swe.txt -> dataset/resumes_clean/resume1_entry_swe.txt
-# ...
-# Preprocessing complete! Cleaned files saved in jobs_clean/ and resumes_clean/
-
-# -----------------------------------------
-# Notes
-# -----------------------------------------
-# - Raw files go in: dataset/jobs/ and dataset/resumes/
-# - Cleaned files are written to: dataset/jobs_clean/ and dataset/resumes_clean/
-# - If you add new jobs/resumes, re-run the script to regenerate cleaned versions
-# - Deactivate the venv when done with:  deactivate
-
-# -----------------------------------------
-# (Optional) Developer Setup
-# -----------------------------------------
-
-# Install dev dependencies for testing & style checks
-pip install -r requirements-dev.txt
-
-# Run unit tests
-pytest
-
-# Format code automatically
-black .
-
-# Lint code (check for issues)
-flake8 .
-
-# Type checking
-mypy .
+# 6) Test predictions
+python models/test_form_model.py

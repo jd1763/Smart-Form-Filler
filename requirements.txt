@@ -1,14 +1,4 @@
-# Core
-nltk==3.9.1
-scikit-learn==1.5.1
-
-# Deep learning (for embeddings in Week 4)
-torch>=2.0.0
-transformers>=4.44.0
-sentence-transformers>=3.0.1
-
-# Utilities
-tqdm==4.67.1
-joblib==1.5.2
-regex>=2025.7.34
-click==8.2.1
+pandas
+numpy
+scikit-learn
+joblib

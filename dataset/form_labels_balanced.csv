@@ -1,0 +1,721 @@
+label_text,field_type
+Country,address
+Address,address
+Postal Code,address
+Permanent Address,address
+City,address
+Residential Address,address
+Country,address
+Mailing Address,address
+Work Address,address
+State,address
+State,address
+Company HQ Address,address
+Zip Code,address
+Nation,address
+Company HQ Address,address
+Street,address
+Permanent Address,address
+Street Address,address
+Company HQ Address,address
+Work Address,address
+City,address
+Postcode,address
+Street Address,address
+Residential Address,address
+State,address
+Province,address
+Permanent Address,address
+Work Address,address
+Address Line 1,address
+Street Address,address
+Residential Address,address
+Street,address
+Postcode,address
+Postal Code,address
+Work Address,address
+Street,address
+Postal Code,address
+Apartment,address
+Residential Address,address
+Town,address
+Background check consent,background_check
+Consent to background check,background_check
+I agree to a background check,background_check
+Background Screening,background_check
+Pre-employment Background Check,background_check
+Background check consent,background_check
+Consent to background check,background_check
+I agree to a background check,background_check
+Background Screening,background_check
+Pre-employment Background Check,background_check
+Background Verification,background_check
+Criminal Record Check,background_check
+Identity Verification,background_check
+Background Consent,background_check
+Security Screening,background_check
+Background Check Authorization,background_check
+Screening Consent,background_check
+Background History,background_check
+Employment Screening,background_check
+Background check consent,background_check
+Consent to background check,background_check
+I agree to a background check,background_check
+Background Screening,background_check
+Pre-employment Background Check,background_check
+Background check consent,background_check
+Consent to background check,background_check
+I agree to a background check,background_check
+Background Screening,background_check
+Pre-employment Background Check,background_check
+Background Verification,background_check
+Criminal Record Check,background_check
+Identity Verification,background_check
+Background Consent,background_check
+Security Screening,background_check
+Background Check Authorization,background_check
+Screening Consent,background_check
+Background History,background_check
+Employment Screening,background_check
+Background check consent,background_check
+Consent to background check,background_check
+Date of Birth,birth_date
+Birth Date,birth_date
+D.O.B.,birth_date
+Date of Birth (MM/DD/YYYY),birth_date
+Birthday,birth_date
+Birthdate,birth_date
+Date of Birth,birth_date
+Birth Date,birth_date
+D.O.B.,birth_date
+Birthday,birth_date
+Birthdate,birth_date
+DOB (MM/DD/YYYY),birth_date
+Date of Birth (DD/MM/YYYY),birth_date
+Your Birth Date,birth_date
+Birth Information,birth_date
+Date Born,birth_date
+Birth Details,birth_date
+Birth Record,birth_date
+Date of Birth Field,birth_date
+Birth Day,birth_date
+Official DOB,birth_date
+Date of Birth,birth_date
+Birth Date,birth_date
+D.O.B.,birth_date
+Date of Birth (MM/DD/YYYY),birth_date
+Birthday,birth_date
+Birthdate,birth_date
+Date of Birth,birth_date
+Birth Date,birth_date
+D.O.B.,birth_date
+Birthday,birth_date
+Birthdate,birth_date
+DOB (MM/DD/YYYY),birth_date
+Date of Birth (DD/MM/YYYY),birth_date
+Your Birth Date,birth_date
+Birth Information,birth_date
+Date Born,birth_date
+Birth Details,birth_date
+Birth Record,birth_date
+Date of Birth Field,birth_date
+Company,company
+Employer Name,company
+Organization Name,company
+Business Name,company
+Workplace,company
+Company,company
+Employer Name,company
+Organization,company
+Business Name,company
+Workplace,company
+Current Employer,company
+Previous Employer,company
+Company Name,company
+Organization Name,company
+Business,company
+Hiring Company,company
+Corporation,company
+Firm,company
+Office,company
+Employer,company
+Company,company
+Employer Name,company
+Organization Name,company
+Business Name,company
+Workplace,company
+Company,company
+Employer Name,company
+Organization,company
+Business Name,company
+Workplace,company
+Current Employer,company
+Previous Employer,company
+Company Name,company
+Organization Name,company
+Business,company
+Hiring Company,company
+Corporation,company
+Firm,company
+Office,company
+Employer,company
+Demographics,demographics
+What is your ethnicity?,demographics
+What is your gender?,demographics
+Do you have a disability?,demographics
+Do you identify as LGBTQ+?,demographics
+Are you a veteran?,demographics
+Race,demographics
+Ethnic Background,demographics
+Gender Identity,demographics
+Sex,demographics
+Military Status,demographics
+Ethnicity,demographics
+What is your ethnicity?,demographics
+Race,demographics
+Racial Group,demographics
+Ethnic Group,demographics
+Ethnic Background,demographics
+Cultural Background,demographics
+Heritage,demographics
+Nationality,demographics
+Origin,demographics
+Demographic Info,demographics
+Demographic Category,demographics
+Minority Group,demographics
+Gender,demographics
+Sex,demographics
+Gender Identity,demographics
+Sexual Orientation,demographics
+LGBTQ+ Identity,demographics
+Disability Status,demographics
+Do you have a disability?,demographics
+Veteran Status,demographics
+Military Service,demographics
+Military Background,demographics
+Protected Veteran,demographics
+Community Group,demographics
+Demographics,demographics
+What is your ethnicity?,demographics
+What is your gender?,demographics
+Do you have a disability?,demographics
+Upload Resume,document
+Cover Letter / Additional Information,document
+Resume Upload,document
+Supporting Document,document
+Application Document,document
+Upload Resume,document
+Cover Letter / Additional Information,document
+Resume Upload,document
+Supporting Document,document
+Application Document,document
+CV Upload,document
+Job Application File,document
+Resume File,document
+Cover Letter,document
+Supporting Files,document
+Attachment,document
+Required Document,document
+Application Materials,document
+Resume Attachment,document
+Upload Resume,document
+Cover Letter / Additional Information,document
+Resume Upload,document
+Supporting Document,document
+Application Document,document
+Upload Resume,document
+Cover Letter / Additional Information,document
+Resume Upload,document
+Supporting Document,document
+Application Document,document
+CV Upload,document
+Job Application File,document
+Resume File,document
+Cover Letter,document
+Supporting Files,document
+Attachment,document
+Required Document,document
+Application Materials,document
+Resume Attachment,document
+Upload Resume,document
+Cover Letter / Additional Information,document
+Training Program,education
+College,education
+Year Completed,education
+University,education
+Highest Degree,education
+Training Program,education
+Diploma,education
+Educational Qualification,education
+Graduation Year,education
+Graduation Year,education
+Select Degree,education
+Certifications,education
+Field of Study,education
+Select Degree,education
+Degree,education
+Degree,education
+Highest Degree,education
+Select Degree,education
+Institute,education
+Diploma,education
+Highest Degree,education
+Highest Degree,education
+Year Graduated,education
+Year of Graduation,education
+Degree,education
+Education Level,education
+School,education
+University,education
+Certifications,education
+Year Completed,education
+Degree,education
+Professional Certificates,education
+School,education
+Highest Degree,education
+College,education
+Training Program,education
+Professional Certificates,education
+Educational Qualification,education
+Education Level,education
+Graduated In,education
+Email,email
+E-mail,email
+Email Address,email
+Work Email,email
+Personal Email,email
+Confirm Email,email
+Business Email,email
+School Email,email
+Alternate Email,email
+Email,email
+E-mail,email
+Email Address,email
+Work Email,email
+Personal Email,email
+Confirm Email,email
+Alternate Email,email
+Business Email,email
+School Email,email
+Primary Email,email
+Contact Email,email
+Corporate Email,email
+Professional Email,email
+Email ID,email
+Email Login,email
+Recovery Email,email
+Email,email
+E-mail,email
+Email Address,email
+Work Email,email
+Personal Email,email
+Confirm Email,email
+Business Email,email
+School Email,email
+Alternate Email,email
+Email,email
+E-mail,email
+Email Address,email
+Work Email,email
+Personal Email,email
+Confirm Email,email
+End Date,end_date
+End date of your latest role,end_date
+Employment End,end_date
+Date Left,end_date
+Contract End,end_date
+End Date,end_date
+End date of your latest role,end_date
+Employment End,end_date
+Date Left,end_date
+Contract End,end_date
+Job End,end_date
+Employment End Date,end_date
+Termination Date,end_date
+Date Finished,end_date
+End of Employment,end_date
+End of Contract,end_date
+Date of Exit,end_date
+Finish Date,end_date
+End Date,end_date
+End date of your latest role,end_date
+Employment End,end_date
+Date Left,end_date
+Contract End,end_date
+End Date,end_date
+End date of your latest role,end_date
+Employment End,end_date
+Date Left,end_date
+Contract End,end_date
+Job End,end_date
+Employment End Date,end_date
+Termination Date,end_date
+Date Finished,end_date
+End of Employment,end_date
+End of Contract,end_date
+Date of Exit,end_date
+Finish Date,end_date
+End Date,end_date
+End date of your latest role,end_date
+Employment End,end_date
+Date Left,end_date
+Job Title,job_title
+Previous Job Title,job_title
+Your Job Title,job_title
+Position Title,job_title
+Role,job_title
+Job Title,job_title
+Previous Job Title,job_title
+Your Job Title,job_title
+Position Title,job_title
+Role,job_title
+Job Position,job_title
+Employment Title,job_title
+Official Job Title,job_title
+Work Title,job_title
+Current Position,job_title
+Past Position,job_title
+Title at Company,job_title
+Professional Title,job_title
+Designation,job_title
+Career Title,job_title
+Job Title,job_title
+Previous Job Title,job_title
+Your Job Title,job_title
+Position Title,job_title
+Role,job_title
+Job Title,job_title
+Previous Job Title,job_title
+Your Job Title,job_title
+Position Title,job_title
+Role,job_title
+Job Position,job_title
+Employment Title,job_title
+Official Job Title,job_title
+Work Title,job_title
+Current Position,job_title
+Past Position,job_title
+Title at Company,job_title
+Professional Title,job_title
+Designation,job_title
+Career Title,job_title
+First Name,name
+Last Name,name
+Full Name,name
+Surname,name
+Given Name,name
+Middle Name,name
+Applicant Name,name
+First Name,name
+Last Name,name
+Full Name,name
+Given Name,name
+Middle Name,name
+Surname,name
+Applicant Name,name
+Preferred Name,name
+Legal Name,name
+Family Name,name
+Primary Name,name
+Official Name,name
+Your Name,name
+Contact Name,name
+Display Name,name
+First Name,name
+Last Name,name
+Full Name,name
+Surname,name
+Given Name,name
+Middle Name,name
+Applicant Name,name
+First Name,name
+Last Name,name
+Full Name,name
+Given Name,name
+Middle Name,name
+Surname,name
+Applicant Name,name
+Preferred Name,name
+Legal Name,name
+Family Name,name
+Primary Name,name
+Phone Number,phone
+Mobile Number,phone
+Cell Number,phone
+Telephone,phone
+Contact Number,phone
+Work Phone,phone
+Home Phone,phone
+Primary Phone,phone
+Phone Number,phone
+Mobile Number,phone
+Cell Number,phone
+Telephone,phone
+Contact Number,phone
+Work Phone,phone
+Home Phone,phone
+Primary Phone,phone
+Secondary Phone,phone
+Business Phone,phone
+Direct Line,phone
+Office Phone,phone
+Main Phone,phone
+Personal Phone,phone
+Landline,phone
+Phone Number,phone
+Mobile Number,phone
+Cell Number,phone
+Telephone,phone
+Contact Number,phone
+Work Phone,phone
+Home Phone,phone
+Primary Phone,phone
+Phone Number,phone
+Mobile Number,phone
+Cell Number,phone
+Telephone,phone
+Contact Number,phone
+Work Phone,phone
+Home Phone,phone
+Primary Phone,phone
+Secondary Phone,phone
+Referral Source,referral_source
+How did you learn about us?,referral_source
+Where did you hear about us?,referral_source
+How did you hear about this job?,referral_source
+Job Board Source,referral_source
+Friend or Colleague,referral_source
+Referral Source,referral_source
+How did you learn about us?,referral_source
+Where did you hear about us?,referral_source
+How did you hear about this job?,referral_source
+Job Board Source,referral_source
+Friend Referral,referral_source
+Colleague Referral,referral_source
+Career Fair,referral_source
+Recruiter,referral_source
+Advertisement,referral_source
+Online Ad,referral_source
+Social Media Ad,referral_source
+Employee Referral,referral_source
+Internal Referral,referral_source
+Website Referral,referral_source
+Referral Source,referral_source
+How did you learn about us?,referral_source
+Where did you hear about us?,referral_source
+How did you hear about this job?,referral_source
+Job Board Source,referral_source
+Friend or Colleague,referral_source
+Referral Source,referral_source
+How did you learn about us?,referral_source
+Where did you hear about us?,referral_source
+How did you hear about this job?,referral_source
+Job Board Source,referral_source
+Friend Referral,referral_source
+Colleague Referral,referral_source
+Career Fair,referral_source
+Recruiter,referral_source
+Advertisement,referral_source
+Online Ad,referral_source
+Social Media Ad,referral_source
+Employee Referral,referral_source
+Role Description,role_description
+Description of Responsibilities,role_description
+Duties,role_description
+Responsibilities,role_description
+Main Tasks,role_description
+Role description,role_description
+Description of Responsibilities,role_description
+Duties,role_description
+Responsibilities,role_description
+Main Tasks,role_description
+Key Responsibilities,role_description
+Job Duties,role_description
+Work Responsibilities,role_description
+Job Functions,role_description
+Position Duties,role_description
+Task Description,role_description
+Employment Duties,role_description
+Daily Tasks,role_description
+Main Role,role_description
+Primary Duties,role_description
+Role Description,role_description
+Description of Responsibilities,role_description
+Duties,role_description
+Responsibilities,role_description
+Main Tasks,role_description
+Role description,role_description
+Description of Responsibilities,role_description
+Duties,role_description
+Responsibilities,role_description
+Main Tasks,role_description
+Key Responsibilities,role_description
+Job Duties,role_description
+Work Responsibilities,role_description
+Job Functions,role_description
+Position Duties,role_description
+Task Description,role_description
+Employment Duties,role_description
+Daily Tasks,role_description
+Main Role,role_description
+Primary Duties,role_description
+LinkedIn Profile,social
+Portfolio / GitHub / Personal Website,social
+LinkedIn URL,social
+GitHub Link,social
+Personal Site,social
+LinkedIn Profile URL,social
+Portfolio / GitHub / Personal Website,social
+LinkedIn URL,social
+GitHub Link,social
+Personal Site,social
+Professional Profile,social
+Portfolio Website,social
+Social Link,social
+Online Profile,social
+Professional Website,social
+Digital Portfolio,social
+Work Samples,social
+LinkedIn Profile,social
+Online Resume,social
+Career Profile,social
+LinkedIn Profile,social
+Portfolio / GitHub / Personal Website,social
+LinkedIn URL,social
+GitHub Link,social
+Personal Site,social
+LinkedIn Profile URL,social
+Portfolio / GitHub / Personal Website,social
+LinkedIn URL,social
+GitHub Link,social
+Personal Site,social
+Professional Profile,social
+Portfolio Website,social
+Social Link,social
+Online Profile,social
+Professional Website,social
+Digital Portfolio,social
+Work Samples,social
+LinkedIn Profile,social
+Online Resume,social
+Career Profile,social
+Start Date,start_date
+When did you start at your latest role?,start_date
+Employment Start,start_date
+Job Start,start_date
+Contract Start,start_date
+Start Date,start_date
+When did you start at your latest role?,start_date
+Employment Start,start_date
+Job Start,start_date
+Contract Start,start_date
+Employment Start Date,start_date
+Work Start,start_date
+Date Hired,start_date
+Hire Date,start_date
+Start of Employment,start_date
+Start of Work,start_date
+Begin Date,start_date
+Joining Date,start_date
+Commencement Date,start_date
+Start Date,start_date
+When did you start at your latest role?,start_date
+Employment Start,start_date
+Job Start,start_date
+Contract Start,start_date
+Start Date,start_date
+When did you start at your latest role?,start_date
+Employment Start,start_date
+Job Start,start_date
+Contract Start,start_date
+Employment Start Date,start_date
+Work Start,start_date
+Date Hired,start_date
+Hire Date,start_date
+Start of Employment,start_date
+Start of Work,start_date
+Begin Date,start_date
+Joining Date,start_date
+Commencement Date,start_date
+Start Date,start_date
+When did you start at your latest role?,start_date
+Terms Agreement,terms_consent
+I agree to the Terms & Conditions,terms_consent
+Accept Terms & Conditions,terms_consent
+Agree to Terms of Service,terms_consent
+I agree to the Privacy Policy,terms_consent
+I agree to the Terms & Conditions and Privacy Policy,terms_consent
+Accept Terms & Conditions,terms_consent
+Agree to Terms of Service,terms_consent
+I agree to the Privacy Policy,terms_consent
+Terms Agreement,terms_consent
+Accept Privacy Policy,terms_consent
+Consent to Terms,terms_consent
+Agree to Terms,terms_consent
+Accept User Agreement,terms_consent
+Consent to Conditions,terms_consent
+User Consent,terms_consent
+Privacy Terms Agreement,terms_consent
+Terms Agreement,terms_consent
+I agree to the Terms & Conditions,terms_consent
+Accept Terms & Conditions,terms_consent
+Agree to Terms of Service,terms_consent
+I agree to the Privacy Policy,terms_consent
+I agree to the Terms & Conditions and Privacy Policy,terms_consent
+Accept Terms & Conditions,terms_consent
+Agree to Terms of Service,terms_consent
+I agree to the Privacy Policy,terms_consent
+Terms Agreement,terms_consent
+Accept Privacy Policy,terms_consent
+Consent to Terms,terms_consent
+Agree to Terms,terms_consent
+Accept User Agreement,terms_consent
+Consent to Conditions,terms_consent
+User Consent,terms_consent
+Privacy Terms Agreement,terms_consent
+Terms Agreement,terms_consent
+I agree to the Terms & Conditions,terms_consent
+Accept Terms & Conditions,terms_consent
+Agree to Terms of Service,terms_consent
+I agree to the Privacy Policy,terms_consent
+I agree to the Terms & Conditions and Privacy Policy,terms_consent
+Visa Sponsorship,work_auth
+Are you authorized to work in the US?,work_auth
+Are you authorized to work in Canada?,work_auth
+Are you authorized to work in the United Kingdom?,work_auth
+Work Authorization,work_auth
+Employment Eligibility,work_auth
+Are you authorized to work in the US?,work_auth
+Are you authorized to work in Canada?,work_auth
+Are you authorized to work in the United Kingdom?,work_auth
+Will you now or in the future require sponsorship?,work_auth
+Visa Sponsorship,work_auth
+Work Authorization,work_auth
+Employment Eligibility,work_auth
+Work Permit,work_auth
+Visa Status,work_auth
+Right to Work,work_auth
+Legal Work Authorization,work_auth
+Sponsorship Required,work_auth
+Eligible to Work,work_auth
+Authorized to Work,work_auth
+Work Visa,work_auth
+Permit to Work,work_auth
+Visa Sponsorship,work_auth
+Are you authorized to work in the US?,work_auth
+Are you authorized to work in Canada?,work_auth
+Are you authorized to work in the United Kingdom?,work_auth
+Work Authorization,work_auth
+Employment Eligibility,work_auth
+Are you authorized to work in the US?,work_auth
+Are you authorized to work in Canada?,work_auth
+Are you authorized to work in the United Kingdom?,work_auth
+Will you now or in the future require sponsorship?,work_auth
+Visa Sponsorship,work_auth
+Work Authorization,work_auth
+Employment Eligibility,work_auth
+Work Permit,work_auth
+Visa Status,work_auth
+Right to Work,work_auth
+Legal Work Authorization,work_auth
+Sponsorship Required,work_auth

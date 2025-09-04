@@ -1,0 +1,22 @@
+# ----------------------------
+# Developer Setup Instructions
+-> for contributors/dev mode (tests, linting, formatting, type checks)
+# ----------------------------
+
+# 1) Activate the virtual environment
+source .venv/bin/activate
+
+# 2) Install dev dependencies
+pip install -r requirements-dev.txt
+
+# 3) Run unit tests
+pytest
+
+# 4) Format code
+black .
+
+# 5) Lint code (style checks)
+flake8 .
+
+# 6) Type checking
+mypy .
