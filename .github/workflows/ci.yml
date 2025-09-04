@@ -26,6 +26,7 @@ jobs:
 
       # === Run tests ===
       - name: Run tests
+        export PYTHONPATH=$PYTHONPATH:.
         run: pytest -v
 
       # === Check formatting (Black + isort) ===
