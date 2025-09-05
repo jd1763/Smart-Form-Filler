@@ -34,23 +34,11 @@ jobs:
           export PYTHONPATH=$PYTHONPATH:.
           pytest -v
 
-      # === Autoformat with Black + isort ===
-      - name: Autoformat with Black
-        run: black .
-      - name: Autoformat imports with isort
-        run: isort .
-
-      # === Commit formatting changes into a PR ===
-      - name: Create Pull Request for formatting fixes
-        uses: peter-evans/create-pull-request@v6
-        with:
-          commit-message: "style: auto-format with black & isort"
-          branch: auto-format-fixes
-          title: "🔧 Auto-format code with Black & isort"
-          body: |
-            This PR contains automatic formatting fixes applied by Black and isort.
-          labels: formatting
-          token: ${{ secrets.GITHUB_TOKEN }}
+      # === Formatting checks (do not auto-fix in CI) ===
+      - name: Check formatting with Black
+        run: black --check .
+      - name: Check import order with isort
+        run: isort --check-only .
 
       # === Lint check ===
       - name: Run flake8
