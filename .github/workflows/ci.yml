@@ -12,6 +12,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -23,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install flake8 black isort pytest
-        
+
       - name: Download NLTK data
         run: |
           python -m nltk.downloader punkt punkt_tab averaged_perceptron_tagger averaged_perceptron_tagger_eng stopwords wordnet omw-1.4
@@ -34,11 +36,22 @@ jobs:
           export PYTHONPATH=$PYTHONPATH:.
           pytest -v
 
-      # === Check formatting (Black + isort) ===
-      - name: Check formatting with Black
-        run: black --check .
-      - name: Check import order with isort
-        run: isort --check-only .
+      # === Autoformat with Black + isort ===
+      - name: Autoformat with Black
+        run: black .
+      - name: Autoformat imports with isort
+        run: isort .
+
+      # === Commit formatting changes (if any) ===
+      - name: Commit formatting changes
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          if [[ `git status --porcelain` ]]; then
+            git add .
+            git commit -m "style: auto-format with black & isort"
+            git push
+          fi
 
       # === Lint check ===
       - name: Run flake8
