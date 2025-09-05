@@ -53,8 +53,8 @@ A Chrome Extension that:
 - [x] Save as `form_model.pkl`.
 
 **Matcher side**
-- [ ] Use TF-IDF similarity (cosine similarity) between resumes and job descriptions.
-- [ ] Print match scores for resume-job pairs.
+- [x] Use TF-IDF similarity (cosine similarity) between resumes and job descriptions.
+- [x] Print match scores for resume-job pairs.
 
 **Deliverables**
 - `ml/form_model.pkl`

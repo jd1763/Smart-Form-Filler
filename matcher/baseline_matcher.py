@@ -7,39 +7,53 @@ from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# Ensure resources are available (safe in CI too)
+# Ensure NLTK resources are available
 nltk.download("punkt", quiet=True)
 nltk.download("punkt_tab", quiet=True)
-nltk.download("stopwords", quiet=True)
+nltk.download("averaged_perceptron_tagger", quiet=True)      # old name
+nltk.download("averaged_perceptron_tagger_eng", quiet=True)  # new name (>=3.9)
 nltk.download("wordnet", quiet=True)
 nltk.download("omw-1.4", quiet=True)
+nltk.download("stopwords", quiet=True)
 
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
 
+def get_wordnet_pos(tag):
+    """Map POS tag to first character lemmatize() accepts."""
+    from nltk.corpus.reader.wordnet import NOUN, VERB, ADJ, ADV
+
+    if tag.startswith("J"):
+        return ADJ
+    elif tag.startswith("V"):
+        return VERB
+    elif tag.startswith("N"):
+        return NOUN
+    elif tag.startswith("R"):
+        return ADV
+    else:
+        return NOUN
+
 def normalize_text(text: str) -> str:
-    """Lowercase, remove punctuation, remove stopwords, and lemmatize words."""
-    # Lowercase and tokenize
+    """Lowercase, tokenize, remove stopwords, and lemmatize with POS."""
     tokens = nltk.word_tokenize(text.lower())
-
-    # Remove punctuation and stopwords, then lemmatize
-    cleaned = [
-        lemmatizer.lemmatize(word)
-        for word in tokens
-        if re.match(r"[a-z]+$", word) and word not in stop_words
+    tagged = nltk.pos_tag(tokens)  # get part of speech
+    lemmatized = [
+        lemmatizer.lemmatize(word, get_wordnet_pos(tag))
+        for word, tag in tagged
+        if word.isalpha() and word not in stop_words
     ]
-
-    return " ".join(cleaned)
+    return " ".join(lemmatized)
 
 # --- Function to load all .txt files from a folder ---
-def load_texts_from_folder(folder_path):
+def load_texts_from_folder(folder_path: str):
+    """Load all .txt files from a folder into a dict."""
     texts = {}
-    for filepath in glob.glob(os.path.join(folder_path, "*.txt")):
-        name = os.path.basename(filepath).replace(".txt", "")  # file name only, no extension
-        with open(filepath, "r", encoding="utf-8") as f:
-            texts[name] = f.read()  # read the whole text file into memory
-    return texts  # return dictionary file name -> file content
-
+    for fname in os.listdir(folder_path):
+        if fname.endswith(".txt"):
+            with open(os.path.join(folder_path, fname), "r", encoding="utf-8") as f:
+                texts[os.path.splitext(fname)[0]] = f.read()
+    return texts
 
 # --- Main ---
 if __name__ == "__main__":

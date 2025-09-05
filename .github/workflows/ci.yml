@@ -26,8 +26,7 @@ jobs:
         
       - name: Download NLTK data
         run: |
-          python -m nltk.downloader punkt punkt_tab stopwords wordnet omw-1.4
-
+          python -m nltk.downloader punkt punkt_tab averaged_perceptron_tagger averaged_perceptron_tagger_eng stopwords wordnet omw-1.4
 
       # === Run tests ===
       - name: Run tests
