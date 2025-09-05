@@ -1,7 +1,4 @@
-import glob
 import os
-import re
-
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
@@ -89,8 +86,8 @@ if __name__ == "__main__":
     # Split TF-IDF matrix back into resumes and jobs
     #   - First N rows are resumes
     #   - Remaining rows are jobs
-    resume_vectors = tfidf_matrix[: len(resumes)]
-    job_vectors = tfidf_matrix[len(resumes) :]
+    resume_vectors = tfidf_matrix[:len(resumes)]
+    job_vectors = tfidf_matrix[len(resumes):]
 
     # Compute cosine similarity
     #   - Cosine similarity measures angle between two vectors
