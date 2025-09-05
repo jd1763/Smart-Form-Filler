@@ -1,6 +1,7 @@
-import os
 import glob
+import os
 import re
+
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
@@ -10,7 +11,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Ensure NLTK resources are available
 nltk.download("punkt", quiet=True)
 nltk.download("punkt_tab", quiet=True)
-nltk.download("averaged_perceptron_tagger", quiet=True)      # old name
+nltk.download("averaged_perceptron_tagger", quiet=True)  # old name
 nltk.download("averaged_perceptron_tagger_eng", quiet=True)  # new name (>=3.9)
 nltk.download("wordnet", quiet=True)
 nltk.download("omw-1.4", quiet=True)
@@ -19,9 +20,10 @@ nltk.download("stopwords", quiet=True)
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
 
+
 def get_wordnet_pos(tag):
     """Map POS tag to first character lemmatize() accepts."""
-    from nltk.corpus.reader.wordnet import NOUN, VERB, ADJ, ADV
+    from nltk.corpus.reader.wordnet import ADJ, ADV, NOUN, VERB
 
     if tag.startswith("J"):
         return ADJ
@@ -34,6 +36,7 @@ def get_wordnet_pos(tag):
     else:
         return NOUN
 
+
 def normalize_text(text: str) -> str:
     """Lowercase, tokenize, remove stopwords, and lemmatize with POS."""
     tokens = nltk.word_tokenize(text.lower())
@@ -45,6 +48,7 @@ def normalize_text(text: str) -> str:
     ]
     return " ".join(lemmatized)
 
+
 # --- Function to load all .txt files from a folder ---
 def load_texts_from_folder(folder_path: str):
     """Load all .txt files from a folder into a dict."""
@@ -55,6 +59,7 @@ def load_texts_from_folder(folder_path: str):
                 texts[os.path.splitext(fname)[0]] = f.read()
     return texts
 
+
 # --- Main ---
 if __name__ == "__main__":
     # Load resumes and job descriptions into dictionaries
@@ -64,8 +69,9 @@ if __name__ == "__main__":
 
     # Combine all documents (resumes + jobs) into a single list normalized/cleaned
     # We need to pass *all* texts into TF-IDF so it can learn vocab across both sets.
-    all_docs = [normalize_text(txt) for txt in resumes.values()] + \
-        [normalize_text(txt) for txt in jobs.values()]
+    all_docs = [normalize_text(txt) for txt in resumes.values()] + [
+        normalize_text(txt) for txt in jobs.values()
+    ]
 
     # Keep labels (filenames) to reference later
     labels = list(resumes.keys()) + list(jobs.keys())
@@ -83,8 +89,8 @@ if __name__ == "__main__":
     # Split TF-IDF matrix back into resumes and jobs
     #   - First N rows are resumes
     #   - Remaining rows are jobs
-    resume_vectors = tfidf_matrix[:len(resumes)]
-    job_vectors = tfidf_matrix[len(resumes):]
+    resume_vectors = tfidf_matrix[: len(resumes)]
+    job_vectors = tfidf_matrix[len(resumes) :]
 
     # Compute cosine similarity
     #   - Cosine similarity measures angle between two vectors
@@ -96,10 +102,7 @@ if __name__ == "__main__":
     print("\n=== Top Matches Per Resume ===\n")
     for i, resume_name in enumerate(resumes.keys()):
         # Collect all job scores for this resume
-        job_scores = [
-            (job_name, similarity_matrix[i][j])
-            for j, job_name in enumerate(jobs.keys())
-        ]
+        job_scores = [(job_name, similarity_matrix[i][j]) for j, job_name in enumerate(jobs.keys())]
         # Sort jobs by similarity (highest first)
         job_scores.sort(key=lambda x: x[1], reverse=True)
 

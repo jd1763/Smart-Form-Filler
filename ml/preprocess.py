@@ -1,5 +1,6 @@
 import os
 import re
+
 import nltk
 from nltk.corpus import stopwords
 
@@ -49,7 +50,7 @@ def process_folder(input_folder: str, output_folder: str):
     # Loop over all files in the input folder
     for filename in os.listdir(input_folder):
         if filename.endswith(".txt"):  # only process text files
-            in_path = os.path.join(input_folder, filename)   # input file path
+            in_path = os.path.join(input_folder, filename)  # input file path
             out_path = os.path.join(output_folder, filename)  # output file path
 
             # Read raw file contents

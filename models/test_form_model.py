@@ -54,9 +54,15 @@ print("\n=== Model loaded successfully! ===\n")
 
 # Test some labels (ML only for now)
 sample_labels = [
-    "First Name", "Last Name", "Email Address",
-    "Zip Code", "Street Address", "Phone Number",
-    "City", "Ethnicity", "Date of Birth"
+    "First Name",
+    "Last Name",
+    "Email Address",
+    "Zip Code",
+    "Street Address",
+    "Phone Number",
+    "City",
+    "Ethnicity",
+    "Date of Birth",
 ]
 
 probabilities = model.predict_proba(sample_labels)

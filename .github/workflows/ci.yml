@@ -12,8 +12,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -42,16 +40,17 @@ jobs:
       - name: Autoformat imports with isort
         run: isort .
 
-      # === Commit formatting changes (if any) ===
-      - name: Commit formatting changes
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          if [[ `git status --porcelain` ]]; then
-            git add .
-            git commit -m "style: auto-format with black & isort"
-            git push
-          fi
+      # === Commit formatting changes into a PR ===
+      - name: Create Pull Request for formatting fixes
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "style: auto-format with black & isort"
+          branch: auto-format-fixes
+          title: "🔧 Auto-format code with Black & isort"
+          body: |
+            This PR contains automatic formatting fixes applied by Black and isort.
+          labels: formatting
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # === Lint check ===
       - name: Run flake8

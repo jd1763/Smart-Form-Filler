@@ -1,10 +1,10 @@
+import joblib
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
-import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 
 # 1. Load dataset
 # Form_labels.csv has two columns:
@@ -46,10 +46,12 @@ X_train, X_test, y_train, y_test = train_test_split(
 #   - Strong baseline for text classification.
 #   - Handles overlapping features better than Naive Bayes.
 #   - Works well once each class has enough examples.
-model = Pipeline([
-    ("tfidf", TfidfVectorizer(ngram_range=(1, 3))),
-    ("clf", LogisticRegression(max_iter=2000)),
-])
+model = Pipeline(
+    [
+        ("tfidf", TfidfVectorizer(ngram_range=(1, 3))),
+        ("clf", LogisticRegression(max_iter=2000)),
+    ]
+)
 
 # 4. Train model
 model.fit(X_train, y_train)
