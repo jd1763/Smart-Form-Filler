@@ -39,8 +39,8 @@ def test_similarity_matrix_runs():
     vectorizer = bm.TfidfVectorizer(stop_words="english")
     tfidf_matrix = vectorizer.fit_transform(all_docs)
 
-    resume_vectors = tfidf_matrix[: len(resumes)]
-    job_vectors = tfidf_matrix[len(resumes) :]
+    resume_vectors = tfidf_matrix[:len(resumes)]
+    job_vectors = tfidf_matrix[len(resumes):]
 
     sim_matrix = bm.cosine_similarity(resume_vectors, job_vectors)
 

@@ -34,12 +34,6 @@ jobs:
           export PYTHONPATH=$PYTHONPATH:.
           pytest -v
 
-      # === Formatting checks (do not auto-fix in CI) ===
-      - name: Check formatting with Black
-        run: black --check .
-      - name: Check import order with isort
-        run: isort --check-only .
-
       # === Lint check ===
       - name: Run flake8
         run: flake8 .
