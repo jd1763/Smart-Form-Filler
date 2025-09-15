@@ -1,5 +1,7 @@
 import pytest
+
 from backend.api import app
+
 
 # === Test client fixture ===
 # This creates a fake version of the Flask app that pytest can send requests to.
@@ -22,9 +24,9 @@ def test_predict_single(client):
 
     # Check the JSON structure
     data = response.get_json()
-    assert "label" in data         # original input echoed back
-    assert "prediction" in data    # model's predicted class
-    assert "confidence" in data    # confidence score
+    assert "label" in data  # original input echoed back
+    assert "prediction" in data  # model's predicted class
+    assert "confidence" in data  # confidence score
     assert isinstance(data["confidence"], float)  # confidence is a number
 
 
@@ -39,8 +41,8 @@ def test_predict_batch(client):
 
     # Check the JSON structure
     data = response.get_json()
-    assert isinstance(data, list)   # should return a list of predictions
-    assert len(data) == 2           # should match number of input labels
+    assert isinstance(data, list)  # should return a list of predictions
+    assert len(data) == 2  # should match number of input labels
 
     # Each item in the list should include label, prediction, confidence
     for item in data:

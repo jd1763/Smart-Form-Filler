@@ -1,5 +1,7 @@
 import pytest
+
 from backend.matcher_api import app
+
 
 # === Test client fixture ===
 # Creates a fake Flask client so we can call API endpoints
@@ -16,7 +18,7 @@ def test_match_endpoint(client):
     # Input: fake resume and job description
     payload = {
         "resume": "Experienced in Python and SQL",
-        "job_description": "Looking for Python, SQL, AWS, and Docker"
+        "job_description": "Looking for Python, SQL, AWS, and Docker",
     }
 
     # Send POST request to /match
@@ -27,8 +29,8 @@ def test_match_endpoint(client):
 
     # Parse JSON response
     data = response.get_json()
-    assert "similarity_score" in data   # numeric similarity value
-    assert "missing_keywords" in data   # list of (keyword, score) pairs
+    assert "similarity_score" in data  # numeric similarity value
+    assert "missing_keywords" in data  # list of (keyword, score) pairs
 
     # Pull out just the keyword names from missing keywords
     missing_words = [kw[0] for kw in data["missing_keywords"]]

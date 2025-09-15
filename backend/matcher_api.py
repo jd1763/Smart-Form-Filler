@@ -20,11 +20,13 @@ Endpoints:
 
 import os
 import sys
-from flask import Flask, request, jsonify
+
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-from matcher.baseline_matcher import normalize_text as preprocess_text
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
+from matcher.baseline_matcher import normalize_text as preprocess_text
 
 # Add the project root to Python path (so we can import matcher/ properly)
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -37,9 +39,17 @@ CORS(app)  # allow Chrome extension or frontend apps to call this API
 # These are "fluff" words that often appear in job postings but
 # aren’t useful as skills (we don’t want them to count as missing keywords).
 CUSTOM_STOPWORDS = {
-    "requirements", "responsibilities", "qualifications",
-    "preferred", "skills", "experience", "knowledge",
-    "looking", "look", "must", "ability"
+    "requirements",
+    "responsibilities",
+    "qualifications",
+    "preferred",
+    "skills",
+    "experience",
+    "knowledge",
+    "looking",
+    "look",
+    "must",
+    "ability",
 }
 
 
@@ -86,6 +96,7 @@ def get_similarity_and_missing(resume_text: str, job_desc: str):
 
 # === API Endpoints ===
 
+
 @app.route("/match", methods=["POST"])
 def match():
     """
@@ -110,10 +121,9 @@ def match():
         data["resume"], data["job_description"]
     )
 
-    return jsonify({
-        "similarity_score": round(float(similarity), 3),
-        "missing_keywords": missing_keywords
-    })
+    return jsonify(
+        {"similarity_score": round(float(similarity), 3), "missing_keywords": missing_keywords}
+    )
 
 
 @app.route("/health", methods=["GET"])

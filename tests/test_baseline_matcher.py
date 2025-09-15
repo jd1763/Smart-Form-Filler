@@ -44,8 +44,8 @@ def test_load_texts_from_folder():
         texts = bm.load_texts_from_folder(tmpdir)
 
         # Validate results
-        assert "sample" in texts                # key = filename (without .txt)
-        assert texts["sample"] == "hello world" # value = file contents
+        assert "sample" in texts  # key = filename (without .txt)
+        assert texts["sample"] == "hello world"  # value = file contents
 
 
 def test_similarity_matrix_runs():
@@ -66,12 +66,12 @@ def test_similarity_matrix_runs():
     tfidf_matrix = vectorizer.fit_transform(all_docs)
 
     # Split into resume vectors and job vectors
-    resume_vectors = tfidf_matrix[:len(resumes)]
+    resume_vectors = tfidf_matrix[: len(resumes)]
     job_vectors = tfidf_matrix[len(resumes):]
 
     # Compute similarity
     sim_matrix = bm.cosine_similarity(resume_vectors, job_vectors)
 
     # Sanity checks
-    assert sim_matrix.shape == (1, 1)          # one resume × one job
-    assert 0.0 <= sim_matrix[0][0] <= 1.0      # score shou_
+    assert sim_matrix.shape == (1, 1)  # one resume × one job
+    assert 0.0 <= sim_matrix[0][0] <= 1.0  # score shou_

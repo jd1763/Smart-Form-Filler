@@ -9,19 +9,22 @@ about what kind of form field a label is (ex: email, name, phone).
 The extension sends a label -> this API sends back prediction + confidence.
 """
 
-from flask import Flask, request, jsonify   # Flask basics for building APIs
-from flask_cors import CORS                 # lets my Chrome extension call this API without CORS errors
-import joblib                               # used to load my saved ML model
-import os                                   # helps build file paths
+import os  # helps build file paths
+
+import joblib  # used to load my saved ML model
+
+# Flask basics for building APIs
+from flask import Flask, jsonify, request
+from flask_cors import CORS  # lets my Chrome extension call this API without CORS errors
 
 # === Path to the model file ===
 # I keep my trained scikit-learn model in /models/form_model.pkl
 # This builds a path that works no matter where the file is run from.
 MODEL_PATH = os.path.join(
-    os.path.dirname(__file__),   # start from backend/ folder
-    "..",                        # go up to project root
-    "models",                    # into models/ folder
-    "form_model.pkl"             # the actual pickle file
+    os.path.dirname(__file__),  # start from backend/ folder
+    "..",  # go up to project root
+    "models",  # into models/ folder
+    "form_model.pkl",  # the actual pickle file
 )
 
 # === Set up Flask app ===
@@ -35,6 +38,7 @@ try:
 except Exception as e:
     raise RuntimeError(f"=== Could not load model from {MODEL_PATH}: {e} ===")
 
+
 # === Health check endpoint ===
 @app.route("/health", methods=["GET"])
 def health():
@@ -44,6 +48,7 @@ def health():
     I should see: { "ok": true }
     """
     return jsonify({"ok": True})
+
 
 # === Single prediction endpoint ===
 @app.route("/predict", methods=["POST"])
@@ -82,11 +87,14 @@ def predict():
     else:
         confidence = 1.0  # fallback if model doesn’t support probabilities
 
-    return jsonify({
-        "label": text,
-        "prediction": prediction,
-        "confidence": round(confidence, 3)  # round for readability
-    })
+    return jsonify(
+        {
+            "label": text,
+            "prediction": prediction,
+            "confidence": round(confidence, 3),  # round for readability
+        }
+    )
+
 
 # === Batch prediction endpoint ===
 @app.route("/predict_batch", methods=["POST"])
@@ -127,17 +135,13 @@ def predict_batch():
         else:
             conf = 1.0
 
-        results.append({
-            "label": text,
-            "prediction": str(pred),
-            "confidence": round(conf, 3)
-        })
+        results.append({"label": text, "prediction": str(pred), "confidence": round(conf, 3)})
 
     return jsonify(results)
+
 
 # === Run the server ===
 if __name__ == "__main__":
     # Starts the Flask server at http://127.0.0.1:5000/
     # host=127.0.0.1 means it only runs locally (safe for dev)
     app.run(host="127.0.0.1", port=5000)
-    
