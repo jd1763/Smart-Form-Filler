@@ -64,13 +64,13 @@ A Chrome Extension that:
 
 ### Week 3 — Extension Integration
 **Form Filler side**
-- [ ] Load `form_model.pkl` into the extension via a Flask API.
-- [ ] Replace keyword matching with ML predictions.
-- [ ] Add confidence scoring with highlighting.
+- [x] Load `form_model.pkl` into the extension via a Flask API.
+- [x] Replace keyword matching with ML predictions.
+- [x] Add confidence scoring with highlighting.
 
 **Matcher side**
-- [ ] Build `matcher_api.py` (Flask).
-- [ ] Add `/match` endpoint returning similarity scores + missing keywords.
+- [x] Build `matcher_api.py` (Flask).
+- [x] Add `/match` endpoint returning similarity scores + missing keywords.
 
 ---
 
