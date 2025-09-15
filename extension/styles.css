@@ -1,0 +1,4 @@
+.ml-low-confidence {
+  outline: 2px dashed orange !important;
+  background-color: #fff8e1 !important;
+}
