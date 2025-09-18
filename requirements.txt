@@ -1,6 +1,18 @@
+# Core ML + NLP
 scikit-learn
 nltk
+pandas
+sentence-transformers
+spacy
+numpy<2  # lock to 1.26.x for compatibility with PyTorch & spaCy
+
+# Web API
+flask
+flask-cors
+
+# Testing + linting
 pytest
 flake8
-pandas
+
+# Backend dependencies
 -r backend/requirements.txt
