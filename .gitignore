@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.pickle
+*.db
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter / notebooks
+.ipynb_checkpoints
+
+# OS junk
+.DS_Store
+
+# ML / cache
+transformers_cache/
+cache/
+*.model
+*.bin
