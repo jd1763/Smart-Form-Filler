@@ -7,6 +7,7 @@ instead of going through the Flask API.
 """
 
 import pytest
+
 from ml.matcher_embeddings import MatcherEmbeddings
 
 

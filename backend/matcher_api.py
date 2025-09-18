@@ -21,18 +21,19 @@ Endpoints:
 
 import os
 import sys
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-
-# === Path setup ===
-# Add the project root to Python path so we can import ml/ and backend/ modules
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # === Import matchers ===
 # - BaselineMatcher: TF-IDF + cosine similarity
 # - MatcherEmbeddings: Sentence-BERT embeddings + semantic similarity
 from ml.matcher_baseline import BaselineMatcher
 from ml.matcher_embeddings import MatcherEmbeddings
+
+# === Path setup ===
+# Add the project root to Python path so we can import ml/ and backend/ modules
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # === Set up Flask app ===
 app = Flask(__name__)
@@ -78,9 +79,7 @@ def match():
 
     # === Embeddings Matcher ===
     if method == "embedding" and embedding_matcher:
-        result = embedding_matcher.match_resume_job(
-            data["resume"], data["job_description"]
-        )
+        result = embedding_matcher.match_resume_job(data["resume"], data["job_description"])
         return jsonify(
             {
                 "similarity_score": round(float(result["match_score"]), 3),

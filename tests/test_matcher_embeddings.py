@@ -11,7 +11,9 @@ These tests confirm that the /match endpoint:
 """
 
 import json
+
 import pytest
+
 from backend import matcher_api
 
 
@@ -48,8 +50,18 @@ def test_match_tfidf_missing_django(client):
     assert "django" in [m.lower() for m in missing_tokens]
 
 
+def normalize_missing_keywords(missing_keywords):
+    """Convert missing keywords into list of lowercase strings (works for tuple or str)."""
+    normalized = []
+    for kw in missing_keywords:
+        if isinstance(kw, (list, tuple)):
+            normalized.append(str(kw[0]).lower())
+        else:
+            normalized.append(str(kw).lower())
+    return normalized
+
+
 def test_match_embedding_missing_django(client):
-    """Embeddings should mark 'django' missing if not in resume."""
     resp = client.post(
         "/match",
         json={
@@ -59,11 +71,11 @@ def test_match_embedding_missing_django(client):
         },
     )
     data = json.loads(resp.data)
-    assert "django" in [kw.lower() for kw in data["missing_keywords"]]
+    missing = normalize_missing_keywords(data["missing_keywords"])
+    assert "django" in missing
 
 
 def test_match_embedding_has_django(client):
-    """If resume already contains 'django', it should NOT be missing."""
     resp = client.post(
         "/match",
         json={
@@ -73,4 +85,5 @@ def test_match_embedding_has_django(client):
         },
     )
     data = json.loads(resp.data)
-    assert "django" not in [kw.lower() for kw in data["missing_keywords"]]
+    missing = normalize_missing_keywords(data["missing_keywords"])
+    assert "django" not in missing

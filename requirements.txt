@@ -6,6 +6,9 @@ sentence-transformers
 spacy
 numpy<2  # lock to 1.26.x for compatibility with PyTorch & spaCy
 
+# spaCy English model
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
 # Web API
 flask
 flask-cors

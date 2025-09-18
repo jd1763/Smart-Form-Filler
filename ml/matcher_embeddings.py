@@ -10,10 +10,12 @@ It returns:
 - missing skills (keywords in the job description not found in the resume)
 """
 
-from sentence_transformers import SentenceTransformer, util
 import spacy
+from sentence_transformers import SentenceTransformer, util
+
 
 class MatcherEmbeddings:
+
     def __init__(self, model_name="sentence-transformers/all-MiniLM-L6-v2"):
         """
         Initialize the embedding matcher.
@@ -21,8 +23,8 @@ class MatcherEmbeddings:
         - Loads spaCy small English model for keyword extraction.
         """
         print(f"=== Loading embedding model: {model_name} ===")
-        self.model = SentenceTransformer(model_name)   # Embedding model
-        self.nlp = spacy.load("en_core_web_sm")        # spaCy pipeline for text processing
+        self.model = SentenceTransformer(model_name)  # Embedding model
+        self.nlp = spacy.load("en_core_web_sm")  # spaCy pipeline for text processing
 
     def embed(self, text: str):
         """
@@ -37,8 +39,8 @@ class MatcherEmbeddings:
         Returns a percentage (0–100).
         """
         emb1, emb2 = self.embed(text1), self.embed(text2)
-        score = util.cos_sim(emb1, emb2).item()       # Cosine similarity between vectors
-        return round(score * 100, 2)                  # Convert to percentage for readability
+        score = util.cos_sim(emb1, emb2).item()  # Cosine similarity between vectors
+        return round(score * 100, 2)  # Convert to percentage for readability
 
     def extract_keywords(self, text: str):
         """
@@ -54,7 +56,7 @@ class MatcherEmbeddings:
             for token in doc
             if token.pos_ in ["NOUN", "PROPN"] and not token.is_stop
         )
-        
+
     def compare_keywords(self, resume_text: str, jd_text: str):
         """
         Compare resume vs job description keywords.
@@ -82,7 +84,7 @@ if __name__ == "__main__":
     matcher = MatcherEmbeddings()
     resume = "Experienced Python developer with Flask, REST APIs, and SQL."
     jd = "Looking for a backend engineer with Python, Django, and SQL experience."
-    
+
     result = matcher.match_resume_job(resume, jd)
-    print("Match Score:", result["match_score"])       # e.g., 78.45
-    print("Missing Skills:", result["missing_skills"]) # e.g., ["django"]
+    print("Match Score:", result["match_score"])  # e.g., 78.45
+    print("Missing Skills:", result["missing_skills"])  # e.g., ["django"]

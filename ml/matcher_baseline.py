@@ -93,7 +93,6 @@ if __name__ == "__main__":
     matcher = BaselineMatcher()
     resume = "Python developer with Flask and SQL"
     jd = "Looking for Python developer with Django and SQL"
-    
     sim, missing = matcher.get_similarity_and_missing(resume, jd)
-    print("Similarity Score:", round(sim, 3))          # e.g., 0.42
-    print("Missing Keywords:", missing)                # e.g., [("django", 0.51)]
+    print("Similarity Score:", round(sim, 3))  # e.g., 0.42
+    print("Missing Keywords:", missing)  # e.g., [("django", 0.51)]
