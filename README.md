@@ -76,9 +76,9 @@ A Chrome Extension that:
 
 ### Week 4 — Embeddings Upgrade
 **Matcher side**
-- [ ] Switch from TF-IDF to Sentence-BERT embeddings.
-- [ ] Use cosine similarity for better semantic matching.
-- [ ] Add keyword extraction for skill gap analysis.
+- [x] Switch from TF-IDF to Sentence-BERT embeddings.
+- [x] Use cosine similarity for better semantic matching.
+- [x] Add keyword extraction for skill gap analysis.
 
 ---
 
@@ -122,11 +122,46 @@ A Chrome Extension that:
     pip install -r requirements-dev.txt   # optional dev tool
 
 ## Usage
+Run the Matcher API
+    python -m backend.matcher_api
+    # The API runs on http://127.0.0.1:5001
+
+Health check
+    curl http://127.0.0.1:5001/health
+    # Should be -> { "status": "ok" }
+    
+Compare resume and job description (TF-IDF baseline)
+    curl -X POST http://127.0.0.1:5001/match \
+        -H "Content-Type: application/json" \
+        -d '{"resume":"Python, Flask, SQL","job_description":"Looking for Python developer with Django and SQL","method":"tfidf"}'
+
+Example output:
+    {
+        "similarity_score": 0.62,
+        "missing_keywords": [["django", 0.41], ["developer", 0.23]],
+        "method": "tfidf"
+    }
+
+Compare resume and job description (Sentence-BERT embeddings)
+    curl -X POST http://127.0.0.1:5001/match \
+        -H "Content-Type: application/json" \
+        -d '{"resume":"Python, Flask, SQL","job_description":"Looking for Python developer with Django and SQL","method":"embedding"}'
+
+Example output:
+    {
+        "similarity_score": 84.32,
+        "missing_keywords": ["django"],
+        "method": "embedding"
+    }
+
+Note: TF-IDF returns weighted keyword tuples (word, importance).
+Embedding-based matcher returns a semantic similarity score (%) and a simpler list of missing skills.
+
 Run preprocessing to clean raw text:
     python ml/preprocess.py
 
 Run tests:
-    pytest
+    pytest -v
 
 ## Continuous Integration
 
