@@ -83,8 +83,40 @@ A Chrome Extension that:
 ---
 
 ### Week 5 — UI Improvements
-- [ ] Extension popup shows filled fields + confidence bars.
-- [ ] Extension sidebar shows match score, missing skills, and best-fit resume.
+**Form Filler (popup)**
+- [x] Shows **filled fields** with **confidence bars** and compact summaries.
+- [x] Restored & wired **Fill Form** / **Try Again** actions.
+- [x] Per-page state (collapse/expand) **persists** in `chrome.storage.local`.
+- [x] Robust content-script injection & best-frame selection (no more “receiving end” errors).
+
+**Matcher (popup)**
+- [x] **Auto-detects** the job description from the active tab (injects `content.js` if needed).
+- [x] **Hides** the Job Match card on non-JD pages (minimum length + minimum skill-keyword gate).
+- [x] Computes a **realistic blended score**:
+  - Runs **both** methods (TF-IDF + Embedding) and averages model similarity.
+  - Extracts JD skills via a whitelist; distinguishes **Required** vs **Preferred**.
+  - Uses **weighted coverage** (Required » Other » Preferred).
+  - Applies **non-linear penalties** + **caps** (required gaps hurt more; preferred gaps hurt less).
+  - Never shows “perfect” when anything is missing.
+- [x] Displays **Matched** and **Missing** skills as chips (cleaned via whitelist).
+- [x] Footer shows **Using:** `<resume name>` **· added** `<date, time>` (no method leakage).
+- [x] Seeds resume from bundled file: `data/resumes/resume11_jorgeluis_done.txt` (with `lastUpdated`).
+
+**Platform/Infra**
+- [x] `manifest.json`: added `web_accessible_resources` for the bundled resume.
+- [x] Background: cleaned message routing; ensured the toolbar click opens the **popup** (not a side panel).
+- [x] Content messaging standardized (`action: "EXT_GET_JOB_DESC"`) and auto-injected script.
+
+**Testing**
+- [x] Added **Easy JD Test** HTML to validate extraction and scoring.
+- [x] Verified matcher endpoints:
+  - `api.py` → `http://127.0.0.1:5000/predict`
+  - `matcher_api.py` → `http://127.0.0.1:5001/match`
+
+**Deliverable**
+- [x] **Interactive Chrome Extension UI** with both:
+  - Form-filler feedback (filled fields + confidence).
+  - Matcher feedback (score with realistic weighting, matched/missing skill chips; footer with resume metadata).
 
 ---
 

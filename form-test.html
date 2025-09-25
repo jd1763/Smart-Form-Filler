@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Ultimate Job Application – Stress Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --b:#1f2937; --g:#6b7280; --bd:#e5e7eb; --bg:#f9fafb; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: var(--bg); color: var(--b); }
+    h1 { margin: 0 0 8px; }
+    p.lead { margin: 0 0 24px; color: var(--g); }
+    fieldset { border:1px solid var(--bd); border-radius:10px; padding:16px; margin:16px 0; background:#fff; }
+    legend { padding: 0 8px; font-weight:700; }
+    .row { display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; }
+    .col-12 { grid-column: span 12; } .col-6 { grid-column: span 6; } .col-4 { grid-column: span 4; } .col-3 { grid-column: span 3; }
+    label { display:block; font-size:13px; color:#374151; margin:8px 0 4px; }
+    input, select, textarea { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--bd); border-radius:8px; background:#fff; }
+    textarea { min-height:90px; }
+    .inline { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .inline > label { margin:0; }
+    .muted { color: var(--g); font-size:12px; }
+    .hint { font-size:12px; color:#6b7280; margin-top:4px; }
+    .hr { border:0; border-top:1px dashed var(--bd); margin:14px 0; }
+  </style>
+</head>
+<body>
+  <h1>Career Application</h1>
+  <p class="lead">A realistic form that intentionally uses lots of label synonyms to stress-test your Smart Form Filler.</p>
+
+  <!-- ================= PERSONAL INFO ================= -->
+  <fieldset>
+    <legend>Personal Information</legend>
+    <div class="row">
+      <div class="col-6">
+        <label for="first_name_input">First Name</label>
+        <input id="first_name_input" name="firstname" placeholder="First Name" />
+      </div>
+      <div class="col-6">
+        <label for="last_name_input">Surname</label>
+        <input id="last_name_input" name="lastname" placeholder="Last Name" />
+      </div>
+
+      <div class="col-6">
+        <label for="email_input">Email Address</label>
+        <input id="email_input" name="email" placeholder="Email" />
+      </div>
+      <div class="col-6">
+        <label for="phone_input">Mobile Number</label>
+        <input id="phone_input" name="phone" placeholder="Phone Number" />
+      </div>
+
+      <div class="col-6">
+        <label for="dob_input">Date of Birth (MM/DD/YYYY)</label>
+        <input id="dob_input" type="date" name="dob" placeholder="DOB (MM/DD/YYYY)" />
+        <div class="hint">Your Birth Date</div>
+      </div>
+      <div class="col-6">
+        <label>Gender</label>
+        <div class="inline">
+          <label class="inline"><input type="radio" name="gender" value="Male" /> Male</label>
+          <label class="inline"><input type="radio" name="gender" value="Female" /> Female</label>
+          <label class="inline"><input type="radio" name="gender" value="Other" /> Prefer not to say</label>
+        </div>
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- ================= ADDRESSES (lots of synonyms) ================= -->
+  <fieldset>
+    <legend>Address (Primary / Permanent / Mailing)</legend>
+    <div class="row">
+      <div class="col-12">
+        <label for="addr_line1">Street Address</label>
+        <input id="addr_line1" name="address_line_1" placeholder="Address Line 1" />
+      </div>
+      <div class="col-4">
+        <label for="addr_city">City / Town</label>
+        <input id="addr_city" name="city" placeholder="City" />
+      </div>
+      <div class="col-4">
+        <label for="addr_state">State / Province / Region</label>
+        <select id="addr_state" name="state">
+          <option value=""></option>
+          <option>New Jersey</option>
+          <option>NJ</option>
+          <option value="New York">NY</option>
+          <option value="CA">California</option>
+          <option value="TX">Texas</option>
+          <option value="District of Columbia">DC</option>
+        </select>
+      </div>
+      <div class="col-4">
+        <label for="addr_zip">Zip / Postal Code / Postcode</label>
+        <input id="addr_zip" name="postal_code" placeholder="Postal Code" />
+      </div>
+
+      <div class="col-6">
+        <label for="country_sel">Country / Nation</label>
+        <select id="country_sel" name="country">
+          <option value=""></option>
+          <option>United States</option>
+          <option>USA</option>
+          <option>Canada</option>
+          <option>United Kingdom</option>
+          <option>Mexico</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label for="county_input">County</label>
+        <input id="county_input" name="county" placeholder="County" />
+      </div>
+    </div>
+
+    <hr class="hr" />
+
+    <div class="row">
+      <div class="col-6">
+        <label for="perm_addr">Permanent Address</label>
+        <input id="perm_addr" name="permanent_address" placeholder="Residential Address" />
+      </div>
+      <div class="col-6">
+        <label for="mail_addr">Mailing Address</label>
+        <input id="mail_addr" name="mailing_address" placeholder="Work Address" />
+      </div>
+    </div>
+    <div class="hint">Many synonyms above intentionally map to street/city/state/zip.</div>
+  </fieldset>
+
+  <!-- ================= SOCIAL / LINKS ================= -->
+  <fieldset>
+    <legend>Profiles & Links</legend>
+    <div class="row">
+      <div class="col-6">
+        <label for="linkedin_url">LinkedIn Profile URL</label>
+        <input id="linkedin_url" name="linkedin" placeholder="https://www.linkedin.com/in/..." />
+      </div>
+      <div class="col-6">
+        <label for="github_url">Portfolio / GitHub / Personal Website</label>
+        <input id="github_url" name="github" placeholder="https://github.com/username" />
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- ================= EDUCATION ================= -->
+  <fieldset>
+    <legend>Education</legend>
+    <div class="row">
+      <div class="col-6">
+        <label for="highest_degree">Highest Degree</label>
+        <select id="highest_degree" name="education">
+          <option value=""></option>
+          <option>High School</option>
+          <option>Associate</option>
+          <option>Bachelor's</option>
+          <option>Master's</option>
+          <option>PhD</option>
+          <option>Diploma</option>
+          <option>Certifications</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label for="university_name">University / College / Institute</label>
+        <input id="university_name" name="school" placeholder="University" />
+      </div>
+      <div class="col-6">
+        <label for="field_of_study">Field of Study</label>
+        <input id="field_of_study" name="fieldofstudy" placeholder="Computer Science" />
+      </div>
+      <div class="col-6">
+        <label for="grad_year">Year of Graduation</label>
+        <input id="grad_year" name="graduation_year" placeholder="2024" />
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- ================= EMPLOYMENT (two blocks) ================= -->
+  <fieldset>
+    <legend>Current / Most Recent Employment</legend>
+    <div class="row">
+      <div class="col-6">
+        <label for="company_current">Company Name</label>
+        <input id="company_current" name="company" placeholder="Employer Name" />
+      </div>
+      <div class="col-6">
+        <label for="title_current">Your Job Title</label>
+        <input id="title_current" name="job_title" placeholder="Software Engineer" />
+      </div>
+      <div class="col-6">
+        <label for="start_current">Start Date</label>
+        <input id="start_current" type="month" name="start_date" placeholder="Start of Employment" />
+      </div>
+      <div class="col-6">
+        <label for="end_current">End Date</label>
+        <input id="end_current" type="month" name="end_date" placeholder="End of Employment" />
+      </div>
+      <div class="col-12">
+        <label for="role_current">Role Description / Key Responsibilities / Duties</label>
+        <textarea id="role_current" name="role_description" placeholder="Describe your responsibilities..."></textarea>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Previous Employment</legend>
+    <div class="row">
+      <div class="col-6">
+        <label for="company_prev">Organization</label>
+        <input id="company_prev" name="previous_employer_company" placeholder="Previous Employer" />
+      </div>
+      <div class="col-6">
+        <label for="title_prev">Position Title</label>
+        <input id="title_prev" name="previous_job_title" placeholder="Official Job Title" />
+      </div>
+      <div class="col-6">
+        <label for="start_prev">Employment Start</label>
+        <input id="start_prev" type="month" name="previous_start_date" placeholder="Begin Date" />
+      </div>
+      <div class="col-6">
+        <label for="end_prev">Employment End Date</label>
+        <input id="end_prev" type="month" name="previous_end_date" placeholder="Date Finished" />
+      </div>
+      <div class="col-12">
+        <label for="role_prev">Job Duties / Work Responsibilities</label>
+        <textarea id="role_prev" name="previous_role_description" placeholder="Main Tasks..."></textarea>
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- ================= WORK AUTH / BACKGROUND / DEMOGRAPHICS ================= -->
+  <fieldset>
+    <legend>Eligibility & Compliance</legend>
+    <div class="row">
+      <div class="col-12">
+        <label>Are you authorized to work in the US?</label>
+        <div class="inline">
+          <label class="inline"><input type="radio" name="work_auth" value="Yes" /> Yes</label>
+          <label class="inline"><input type="radio" name="work_auth" value="No" /> No</label>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <label>Will you now or in the future require sponsorship?</label>
+        <div class="inline">
+          <label class="inline"><input type="radio" name="sponsorship" value="No" /> No</label>
+          <label class="inline"><input type="radio" name="sponsorship" value="Yes" /> Yes</label>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <label class="inline">
+          <input type="checkbox" name="background_check" />
+          I agree to a background check (Background check consent / Pre-employment Background Check / Screening Consent)
+        </label>
+      </div>
+
+      <div class="col-4">
+        <label for="ethnicity_sel">What is your ethnicity?</label>
+        <select id="ethnicity_sel" name="demographics_ethnicity">
+          <option value=""></option>
+          <option>Prefer not to say</option>
+          <option>Hispanic or Latino</option>
+          <option>Not Hispanic or Latino</option>
+        </select>
+      </div>
+      <div class="col-4">
+        <label for="gender_sel">Gender Identity</label>
+        <select id="gender_sel" name="demographics_gender">
+          <option value=""></option>
+          <option>Prefer not to say</option>
+          <option>Female</option>
+          <option>Male</option>
+          <option>Non-binary</option>
+        </select>
+      </div>
+      <div class="col-4">
+        <label for="veteran_sel">Veteran Status</label>
+        <select id="veteran_sel" name="demographics_veteran">
+          <option value=""></option>
+          <option>Prefer not to say</option>
+          <option>Veteran</option>
+          <option>Not a Veteran</option>
+        </select>
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- ================= REFERRAL / TERMS ================= -->
+  <fieldset>
+    <legend>Referral & Agreements</legend>
+    <div class="row">
+      <div class="col-6">
+        <label for="referral_src">How did you hear about this job? (Referral Source)</label>
+        <select id="referral_src" name="referral_source">
+          <option value=""></option>
+          <option>Company Website</option>
+          <option>Friend or Colleague</option>
+          <option>Job Board</option>
+          <option>Recruiter</option>
+          <option>Career Fair</option>
+          <option>Advertisement</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label class="inline">
+          <input type="checkbox" name="terms_consent" />
+          I agree to the Terms &amp; Conditions and Privacy Policy (Consent to Terms)
+        </label>
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- ================= DOCUMENTS ================= -->
+  <fieldset>
+    <legend>Documents</legend>
+    <div class="row">
+      <div class="col-6">
+        <label for="resume_upload">Upload Resume (Resume File / CV Upload)</label>
+        <input id="resume_upload" name="resume" type="file" />
+      </div>
+      <div class="col-6">
+        <label for="cover_upload">Cover Letter / Additional Information</label>
+        <input id="cover_upload" name="cover_letter" type="file" />
+      </div>
+    </div>
+    <div class="muted">Note: Your extension won’t auto-populate file inputs (browser security), but labels are here for ML testing.</div>
+  </fieldset>
+
+  <!-- ================= COMPANY HQ ADDRESS (more synonyms) ================= -->
+  <fieldset>
+    <legend>Optional – Company HQ Address (Synonym Bomb)</legend>
+    <div class="row">
+      <div class="col-12">
+        <label for="hq_street">Company HQ Address / Street Address</label>
+        <input id="hq_street" name="company_hq_address" placeholder="Company HQ Address" />
+      </div>
+      <div class="col-4">
+        <label for="hq_city">City</label>
+        <input id="hq_city" name="company_hq_city" placeholder="City" />
+      </div>
+      <div class="col-4">
+        <label for="hq_state">State / Province</label>
+        <select id="hq_state" name="company_hq_state">
+          <option value=""></option>
+          <option>CA</option>
+          <option>California</option>
+          <option value="New York">NY</option>
+          <option>TX</option>
+          <option>Texas</option>
+        </select>
+      </div>
+      <div class="col-4">
+        <label for="hq_postcode">Postcode / Zip Code</label>
+        <input id="hq_postcode" name="company_hq_postcode" placeholder="Zip Code" />
+      </div>
+    </div>
+  </fieldset>
+
+  <p class="muted">End of form — you can submit or just use this page to test your form filler’s detection, prediction, and event firing.</p>
+</body>
+</html>

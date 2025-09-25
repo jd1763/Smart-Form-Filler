@@ -1,320 +1,441 @@
-// === CONFIG ===
-const CONFIDENCE_THRESHOLD = 0.50; // If model confidence < 50%, highlight field
-const LOW_CONF_CLASS = "ml-low-confidence"; // CSS class for low-confidence fields
-
-// === STATE MAP (US) ===
-// Two helper maps for dealing with states in forms.
-// 1. STATE_TO_ABBR: "new jersey" -> "NJ"
-// 2. ABBR_TO_STATE: "NJ" -> "New Jersey"
-const STATE_TO_ABBR = {
-  "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA","colorado":"CO","connecticut":"CT","delaware":"DE","district of columbia":"DC",
-  "florida":"FL","georgia":"GA","hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN","iowa":"IA","kansas":"KS","kentucky":"KY","louisiana":"LA",
-  "maine":"ME","maryland":"MD","massachusetts":"MA","michigan":"MI","minnesota":"MN","mississippi":"MS","missouri":"MO","montana":"MT","nebraska":"NE",
-  "nevada":"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND","ohio":"OH","oklahoma":"OK",
-  "oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT",
-  "virginia":"VA","washington":"WA","west virginia":"WV","wisconsin":"WI","wyoming":"WY"
-};
-const ABBR_TO_STATE = Object.fromEntries(
-  Object.entries(STATE_TO_ABBR).map(([k,v]) => [v, k.replace(/\b\w/g, c => c.toUpperCase())])
-);
-
-// === HELPER FUNCTIONS ===
-
-// Normalize a string (trim, ensure string type)
-function normalize(s){ return (s ?? "").toString().trim(); }
-function lower(s){ return normalize(s).toLowerCase(); }
-
-// Parse an address blob like "123 Main St, New York, NY 10001"
-// -> returns { street, city, state, zip }
-function parseAddressBlob(addr){
-  const res = { street:"", city:"", state:"", zip:"" };
-  const a = normalize(addr);
-  if(!a) return res;
-
-  const parts = a.split(",").map(p => p.trim());
-  if(parts[0]) res.street = parts[0];
-  if(parts[1]) res.city = parts[1];
-
-  // Try to capture "State Zip"
-  const stateZipMatch = a.match(/,\s*([A-Za-z]{2}|[A-Za-z ]+)\s*(\d{5})(-\d{4})?\b/);
-  if(stateZipMatch){
-    const rawState = lower(stateZipMatch[1]);
-    res.state = STATE_TO_ABBR[rawState] || stateZipMatch[1].toUpperCase();
-    res.zip = stateZipMatch[2];
-  } else {
-    // Otherwise, see if there’s a standalone state or zip
-    const st = lower(parts[2] || "");
-    if(st){
-      res.state = STATE_TO_ABBR[st] || st.toUpperCase();
-    }
-    const zipM = a.match(/\b(\d{5})(-\d{4})?\b/);
-    if(zipM) res.zip = zipM[1];
+(function () {
+  const CONTENT_VERSION = "5.4.0";
+  if (window.__SFF_CONTENT_VERSION__ === CONTENT_VERSION) {
+    console.log("[content] already loaded (v" + CONTENT_VERSION + ") — skipping");
+    return;
   }
-  return res;
-}
+  window.__SFF_CONTENT_VERSION__ = CONTENT_VERSION;
 
-// Standardize state values (e.g. "new jersey" -> "NJ")
-function normalizeStateValue(val){
-  const v = lower(val);
-  if(!v) return "";
-  return STATE_TO_ABBR[v] || v.toUpperCase();
-}
+  console.log("[content] content.js injected v" + CONTENT_VERSION);
 
-// Compare two strings ignoring punctuation/case (helps matching values in selects)
-function sameNormalized(a,b){
-  const na = lower(a).replace(/[^a-z0-9]/g,"");
-  const nb = lower(b).replace(/[^a-z0-9]/g,"");
-  return na===nb || na.includes(nb) || nb.includes(na);
-}
-
-// Build a “context string” around an input (label, placeholder, aria-label, etc.)
-// This helps refine ML predictions (like deciding if "name" is first/last name).
-function getContextString(inputEl, labelText){
-  const bits = [
-    labelText,
-    inputEl.getAttribute("placeholder"),
-    inputEl.getAttribute("aria-label"),
-    inputEl.getAttribute("name"),
-    inputEl.id
-  ].filter(Boolean);
-  return lower(bits.join(" "));
-}
-
-// Map ML class -> userData keys
-function keysFor(pred){
-  const map = {
-    name: ["fullName","firstName lastName"],
-    first_name: ["firstName"],
-    last_name: ["lastName"],
-    email: ["email"],
-    phone: ["phoneNumber","phone"],
-    street: ["street","address"],
-    address: ["street","address"],
-    city: ["city"],
-    state: ["state"],
-    zip: ["zip","zicode"],
-    gender: ["gender"],
-    dob: ["dob","dateOfBirth"],
-    county: ["county"],
-    linkedin: ["linkedin"],
-    github: ["github"],
-    title: ["jobTitle","job title"],
-    checkbox: ["checkbox"],
-    radio: ["radio"]
+  // ---------- Catalog shown in popup ----------
+  const ALL_FIELDS = {
+    fullName: "Full Name",
+    firstName: "First Name",
+    lastName: "Last Name",
+    gender: "Gender",
+    dob: "Date of Birth",
+    phoneNumber: "Phone Number",
+    email: "Email",
+    street: "Street",
+    city: "City",
+    state: "State",
+    zip: "Zip",
+    county: "County",
+    linkedin: "LinkedIn",
+    github: "GitHub",
+    jobTitle: "Job Title",
+    checkbox: "Checkbox",
+    radio: "Radio",
+    background_check: "Background Check Consent",
+    company: "Company",
+    demographics: "Demographics",
+    document: "Resume/Document Upload",
+    education: "Education",
+    work_auth: "Work Authorization",
+    referral_source: "Referral Source",
+    role_description: "Role Description",
+    social: "Social Profile",
+    start_date: "Start Date",
+    end_date: "End Date",
+    terms_consent: "Terms Consent"
   };
-  return map[pred] || [pred];
-}
 
-// Refine vague predictions using context
-// e.g. "name" + label "First Name" -> first_name
-function refinePrediction(pred, inputEl, labelText){
-  const ctx = getContextString(inputEl, labelText);
+  // ---------- ML → userData map ----------
+  const MODEL_TO_USERDATA = {
+    name: "fullName",
+    first_name: "firstName",
+    last_name: "lastName",
+    email: "email",
+    phone: "phoneNumber",
+    phoneNumber: "phoneNumber",
+    street: "street",
+    address: "street",
+    city: "city",
+    state: "state",
+    zip: "zip",
+    postal: "zip",
+    company: "company",
+    job_title: "jobTitle",
+    linkedin: "linkedin",
+    github: "github",
+    dob: "dob",
+    birth_date: "dob",
+    gender: "gender",
+    fullName: "fullName",
+    firstName: "firstName",
+    lastName: "lastName"
+  };
 
-  if(pred==="name"){
-    if(ctx.includes("first")) return "first_name";
-    if(ctx.includes("last")) return "last_name";
-    if(ctx.includes("middle")) return "middle_name"; 
-    return "name";
+  // ---------- helpers ----------
+  const lower = (s) => (s ?? "").toString().toLowerCase().trim();
+  const norm  = (s) => lower(s).replace(/[^a-z0-9]/g, "");
+
+  const STATE_TO_ABBR = {
+    "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA","colorado":"CO","connecticut":"CT","delaware":"DE","district of columbia":"DC",
+    "florida":"FL","georgia":"GA","hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN","iowa":"IA","kansas":"KS","kentucky":"KY","louisiana":"LA",
+    "maine":"ME","maryland":"MD","massachusetts":"MA","michigan":"MI","minnesota":"MN","mississippi":"MS","missouri":"MO","montana":"MT","nebraska":"NE",
+    "nevada":"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND","ohio":"OH","oklahoma":"OK",
+    "oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT",
+    "virginia":"VA","washington":"WA","west virginia":"WV","wisconsin":"WI","wyoming":"WY"
+  };
+  const ABBR_TO_STATE = Object.fromEntries(Object.entries(STATE_TO_ABBR).map(([k,v]) => [v, k.replace(/\b\w/g, c => c.toUpperCase())]));
+  const toAbbr = (v) => STATE_TO_ABBR[lower(v)] || (v || "").toString().toUpperCase();
+  const sameNormalized = (a,b) => { const A = norm(a), B = norm(b); return A===B || A.includes(B) || B.includes(A); };
+
+  // ===== Week 5 Matcher: JD extraction + filler summary =====
+  const JD_SELECTORS = [
+    "#jobDescriptionText",
+    ".jobs-unified-description__content",
+    ".jobs-description__content",
+    "section.jobs-description__content",
+    ".posting-contents",
+    ".section.page-full-width .content .description",
+    "[data-test='jobDescription']",
+    ".job-description, article, main, [role='main']"
+  ];
+
+function extractJD() {
+  for (const sel of JD_SELECTORS) {
+    const el = document.querySelector(sel);
+    const text = (el?.innerText || el?.textContent || "").trim();
+    if (text && text.length > 200) return text;
   }
-
-  if(pred==="address" || pred==="street"){
-    if(ctx.includes("state") || ctx.includes("province")) return "state";
-    if(ctx.includes("city") || ctx.includes("town")) return "city";
-    if(ctx.includes("zip") || ctx.includes("postal")) return "zip";
-    if(ctx.includes("street") || ctx.includes("addr") || ctx.includes("line")) return "street";
-    return pred;
+  // fallback: largest text block
+  const blocks = Array.from(document.querySelectorAll("main, article, section, div"));
+  let best = "";
+  for (const b of blocks) {
+    const t = (b.innerText || "").trim();
+    if (t.split(/\s+/).length > best.split(/\s+/).length) best = t;
   }
-
-  if(pred==="zip" && (ctx.includes("postal") || ctx.includes("postcode"))) return "zip";
-
-  return pred;
+  return best.slice(0, 200000);
 }
 
-// Visually mark low-confidence fields so user knows to double-check
-function highlightLowConfidence(el, confidence){
-  el.classList.add(LOW_CONF_CLASS);
-  el.title = `Low confidence: ${(confidence * 100).toFixed(1)}% — please double-check`;
-}
-
-// === Chrome messaging helpers ===
-async function getUserData(){
-  return new Promise((resolve)=>{
-    chrome.runtime.sendMessage({ action:"getUserData" }, (resp)=>resolve(resp?.userData || {}));
+async function getFillerRunSummary() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["fillerRun"], (res) => resolve(res.fillerRun || null));
   });
 }
 
-async function getPredictions(labels){
-  return new Promise((resolve)=>{
-    chrome.runtime.sendMessage({ action:"predictLabels", labels }, (resp)=>resolve(resp?.results || []));
-  });
-}
+function setSelectValue(selectEl, rawVal){
+  if (!selectEl) return false;
+  const val = (rawVal ?? "").toString().trim();
+  if (!val) return false;
 
-// Try to match <label> to its input field
-function findInputForLabel(labelEl){
-  const forId = labelEl.getAttribute("for");
-  if(forId){
-    const direct = document.getElementById(forId);
-    if(direct) return direct;
-  }
-  const within = labelEl.querySelector("input, select, textarea");
-  if(within) return within;
-  let sib = labelEl.nextElementSibling;
-  for(let i=0;i<3 && sib;i++,sib=sib.nextElementSibling){
-    const found = sib.querySelector?.("input, select, textarea") || (sib.matches?.("input,select,textarea") ? sib : null);
-    if(found) return found;
-  }
-  return null;
-}
+  // Build variants we’ll try to match: exact, normalized, abbr/full state names
+  const abbr = toAbbr(val);                         // e.g. "New Jersey" -> "NJ"
+  const full = ABBR_TO_STATE[abbr] || val;          // e.g. "NJ" -> "New Jersey"
+  const variants = [
+    val,
+    val.toUpperCase(),
+    val.toLowerCase(),
+    abbr,
+    full,
+  ].filter(Boolean);
 
-// Robustly set <select> value (works for state dropdowns, etc.)
-function setSelectValue(selectEl, val){
-  const targetAbbr = normalizeStateValue(val);
-  const targetFull = ABBR_TO_STATE[targetAbbr] || val;
+  // Helper: set selected and fire events
+  const commit = (idx) => {
+    if (idx < 0) return false;
+    selectEl.selectedIndex = idx;
+    // mark the option too (some sites watch this)
+    const opt = selectEl.options[idx];
+    if (opt) opt.selected = true;
+    selectEl.dispatchEvent(new Event("input", { bubbles: true }));
+    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  };
 
-  // Try exact value/text
-  for(const opt of Array.from(selectEl.options)){
-    if(sameNormalized(opt.value, val) || sameNormalized(opt.textContent, val)) {
-      selectEl.value = opt.value;
-      return true;
+  // Normalize text for loose comparisons
+  const nz = (s) => (s ?? "").toString().trim();
+  const norm = (s) => nz(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // Pass 1: try exact value OR exact label (case-insensitive, trimmed)
+  for (let i = 0; i < selectEl.options.length; i++) {
+    const o = selectEl.options[i];
+    const ov = nz(o.value), ot = nz(o.textContent);
+    if (variants.some(v => nz(v).toLowerCase() === ov.toLowerCase() ||
+                           nz(v).toLowerCase() === ot.toLowerCase())) {
+      return commit(i);
     }
   }
-  // Try state variants
-  for(const opt of Array.from(selectEl.options)){
-    const ov = normalize(opt.value);
-    const ot = normalize(opt.textContent);
-    if(sameNormalized(ov, targetAbbr) || sameNormalized(ot, targetAbbr) ||
-       sameNormalized(ov, targetFull) || sameNormalized(ot, targetFull)){
-      selectEl.value = opt.value;
-      return true;
+
+  // Pass 2: try normalized “loose” match (handles underscores, spacing, punctuation)
+  for (let i = 0; i < selectEl.options.length; i++) {
+    const o = selectEl.options[i];
+    const ovn = norm(o.value), otn = norm(o.textContent);
+    if (variants.some(v => {
+      const vn = norm(v);
+      return vn === ovn || vn === otn || ovn.includes(vn) || otn.includes(vn);
+    })) {
+      return commit(i);
     }
   }
+
+  // Pass 3: if options look like state codes/names, try abbr/full explicitly
+  const tryList = [abbr, full].filter(Boolean);
+  for (let i = 0; i < selectEl.options.length; i++) {
+    const o = selectEl.options[i];
+    if (tryList.some(v => norm(v) === norm(o.value) || norm(v) === norm(o.textContent))) {
+      return commit(i);
+    }
+  }
+
   return false;
 }
 
-// === MAIN LOGIC ===
-async function scanAndFill(){
-  const userData = await getUserData();
-  const parsedFromBlob = parseAddressBlob(userData.address);
-
-  // Step 1: Collect all label-input pairs (preferred), or just inputs if no labels
-  const labelEls = Array.from(document.querySelectorAll("label")).filter(l => (l.innerText || "").trim().length > 0);
-  let pairs = [];
-
-  if(labelEls.length > 0){
-    pairs = labelEls.map(l => ({
-      labelEl: l,
-      inputEl: findInputForLabel(l),
-      labelText: (l.innerText || "").trim()
-    })).filter(p => p.inputEl);
-  } else {
-    const inputs = Array.from(document.querySelectorAll("input, select, textarea"));
-    pairs = inputs.map(inp => {
-      const text = inp.getAttribute("placeholder") || inp.getAttribute("aria-label") || inp.getAttribute("name") || inp.id || "";
-      return { labelEl: null, inputEl: inp, labelText: text.trim() };
+  // ---------- background messaging ----------
+  async function getUserData() {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: "getUserData" }, (resp) => {
+        if (!resp || resp.success === false) {
+          console.error("[content] getUserData failed:", resp && resp.error);
+          return resolve({});
+        }
+        resolve(resp.userData || {});
+      });
     });
   }
 
-  if(pairs.length === 0) return false;
+  async function getPredictions(labels) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: "predictLabels", labels }, (resp) => {
+        if (!resp || resp.success === false) {
+          console.warn("[content] predictLabels unavailable, using heuristics.");
+          return resolve([]);
+        }
+        const arr = Array.isArray(resp.results) ? resp.results : [];
+        resolve(arr);
+      });
+    });
+  }
 
-  // Step 2: Ask API for predictions
-  const results = await getPredictions(pairs.map(p => p.labelText));
+  // ---------- generic DOM scan ----------
+  function collectPairs() {
+    const inputs = Array.from(document.querySelectorAll("input, select, textarea"))
+      .filter((el) => {
+        const type = (el.type || "").toLowerCase();
+        if (type === "hidden" || type === "password") return false;
+        return true;
+      });
 
-  let filledAny = false;
+    const pairs = inputs.map((inp) => {
+      const labelText =
+        inp.getAttribute("placeholder") ||
+        inp.getAttribute("aria-label") ||
+        inp.getAttribute("name") ||
+        inp.id ||
+        "";
+      return { inputEl: inp, labelText: (labelText || "").trim() || "(unlabeled)" };
+    });
 
-  // Step 3: Try filling each field
-  results.forEach((res, i) => {
-    let { prediction, confidence } = res || {};
-    const { inputEl, labelText } = pairs[i];
-    if(!inputEl) return;
+    return pairs;
+  }
 
-    prediction = refinePrediction(prediction, inputEl, labelText);
-    const candidateKeys = keysFor(prediction);
+  function context(inputEl, labelText){
+    return [
+      labelText,
+      inputEl.getAttribute("placeholder"),
+      inputEl.getAttribute("aria-label"),
+      inputEl.getAttribute("name"),
+      inputEl.id
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+  function heuristicKey(inputEl, labelText){
+    const c = context(inputEl, labelText);
+    if (/first/.test(c)) return "firstName";
+    if (/last|surname|family/.test(c)) return "lastName";
+    if (/full.?name|applicant name|your name|name\b/.test(c)) return "fullName";
+    if (/e-?mail|email address|contact email|work email|personal email/.test(c)) return "email";
+    if (/phone|mobile|cell|telephone|contact number/.test(c)) return "phoneNumber";
+    if (/\baddress line|street|addr(ess)?\b|line ?1\b/.test(c)) return "street";
+    if (/\bcity|town\b/.test(c)) return "city";
+    if (/\bstate|province|region\b/.test(c)) return "state";
+    if (/\bzip|postal|postcode\b/.test(c)) return "zip";
+    if (/linkedin/.test(c)) return "linkedin";
+    if (/github|portfolio|site|website|url/.test(c)) return "github";
+    if (/company|employer|organization|business|workplace/.test(c)) return "company";
+    if (/job title|position|role|designation|title at|current position/.test(c)) return "jobTitle";
+    if (/gender|sex\b/.test(c)) return "gender";
+    if (/birth|dob|date of birth|birthday/.test(c)) return "dob";
+    return null;
+  }
 
-    // Figure out what value to use from userData
-    let val = undefined;
-    if(prediction === "name"){
-      val = userData.fullName || [userData.firstName, userData.lastName].filter(Boolean).join(" ").trim();
-    } else if(prediction === "first_name"){
-      val = userData.firstName;
-    } else if(prediction === "last_name"){
-      val = userData.lastName;
-    } else if(prediction === "street"){
-      val = userData.street || parsedFromBlob.street;
-    } else if(prediction === "city"){
-      val = userData.city || parsedFromBlob.city;
-    } else if(prediction === "state"){
-      val = userData.state ? normalizeStateValue(userData.state) : normalizeStateValue(parsedFromBlob.state);
-    } else if(prediction === "zip"){
-      val = userData.zip || userData.zicode || parsedFromBlob.zip;
-    } else {
-      // General lookup
-      for(const k of candidateKeys){
-        if(k.includes(" ")){ // e.g. "firstName lastName"
-          const v = [userData.firstName, userData.lastName].filter(Boolean).join(" ").trim();
-          if(v) { val = v; break; }
-        } else if(userData[k]){
-          val = userData[k];
-          break;
+  // ---------- SELF-TEST: deterministic mapping without ML ----------
+  function detectKeyByAttrs(inputEl) {
+    const attrs = [
+      inputEl.getAttribute("name"),
+      inputEl.id,
+      inputEl.getAttribute("placeholder"),
+      inputEl.getAttribute("aria-label")
+    ].filter(Boolean).map(x => x.toLowerCase());
+
+    const has = (...needles) => attrs.some(a => needles.some(n => a.includes(n)));
+
+    if (has("first")) return "firstName";
+    if (has("last")) return "lastName";
+    if (has("email")) return "email";
+    if (has("phone", "tel")) return "phoneNumber";
+    if (has("street", "address")) return "street";
+    if (has("city", "town")) return "city";
+    if (has("state", "province", "region")) return "state";
+    if (has("zip", "postal", "postcode")) return "zip";
+    return null;
+  }
+
+  function deterministicFill(userData, dryRun = true) {
+    const inputs = Array.from(document.querySelectorAll("input, select, textarea"))
+      .filter((el) => !["hidden","password"].includes((el.type||"").toLowerCase()));
+
+    const filled = [];
+    for (const el of inputs) {
+      const key = detectKeyByAttrs(el);
+      if (!key) continue;
+      const val = userData?.[key];
+      if (val == null || val === "") continue;
+
+      if (!dryRun) {
+        const tag = el.tagName.toLowerCase();
+        const type = (el.type||"").toLowerCase();
+        let did = false;
+        if (tag === "select") {
+          did = setSelectValue(el, val);
+          // as a last resort, fall back to direct value (some custom selects mirror a hidden input)
+          if (!did) { el.value = val; did = true; }
+        }
+        else if (type === "checkbox" || type === "radio") {
+          if (val === true || String(val).toLowerCase() === "true") { el.checked = true; did = true; }
+        } else { el.value = val; did = true; }
+        if (did) {
+          el.dispatchEvent(new Event("input", { bubbles:true }));
+          el.dispatchEvent(new Event("change", { bubbles:true }));
         }
       }
+
+      filled.push({ key, label: key, value: val, confidence: 0.99 });
+    }
+    return { inputs: inputs.length, filled };
+  }
+
+  // ---------- generic ML + heuristic filler ----------
+  async function genericScanAndFill() {
+    const userData = await getUserData();
+    const pairs = collectPairs();
+    const inputsCount = pairs.length;
+
+    if (inputsCount === 0) {
+      const notFilledAll = Object.entries(ALL_FIELDS).map(([k, label]) => ({ key: k, label }));
+      return { ok: true, filled: [], notFilled: notFilledAll, inputs: 0 };
     }
 
-    if(!val) return;
+    const labels = pairs.map((p) => p.labelText);
+    let results = await getPredictions(labels);
 
-    // Step 4: Actually fill the field
-    const tag = inputEl.tagName.toLowerCase();
-    const type = (inputEl.type || "").toLowerCase();
-    let filled = false;
-
-    if(tag === "select"){
-      filled = setSelectValue(inputEl, val);
-    } else if(type === "checkbox" || type === "radio"){
-      if(val === true || String(val).toLowerCase() === "true"){
-        inputEl.checked = true;
-        filled = true;
-      }
-    } else {
-      inputEl.value = val;
-      filled = true;
+    const mlEmpty = !Array.isArray(results) || results.length === 0;
+    if (mlEmpty) results = labels.map(() => ({ prediction: null, confidence: 0 }));
+    if (results.length !== pairs.length) {
+      const normArr = [];
+      for (let i = 0; i < pairs.length; i++) normArr[i] = results[i] || { prediction: null, confidence: 0 };
+      results = normArr;
     }
 
-    // Fire input/change events so page scripts detect the change
-    if(filled){
-      inputEl.dispatchEvent(new Event("input", { bubbles:true }));
-      inputEl.dispatchEvent(new Event("change", { bubbles:true }));
+    const filled = [];
+    const seenKeys = new Set();
 
-      // Highlight low-confidence predictions
-      if(typeof confidence === "number" && confidence < CONFIDENCE_THRESHOLD){
-        highlightLowConfidence(inputEl, confidence);
+    results.forEach((res, i) => {
+      const { inputEl, labelText } = pairs[i];
+      let { prediction, confidence } = res || {};
+      let mappedKey = MODEL_TO_USERDATA[prediction] || prediction;
+
+      if (!mappedKey) {
+        const guess = heuristicKey(inputEl, labelText);
+        if (guess) { mappedKey = guess; confidence = confidence || 0.55; }
       }
-      filledAny = true;
+      if (!mappedKey) return;
+
+      const val = (userData || {})[mappedKey];
+      if (val == null || val === "") return;
+
+      try {
+        const tag = inputEl.tagName.toLowerCase();
+        const type = (inputEl.type || "").toLowerCase();
+        let did = false;
+
+        if (tag === "select")          did = setSelectValue(inputEl, val);
+        else if (type === "checkbox" || type === "radio") {
+          if (val === true || String(val).toLowerCase() === "true") { inputEl.checked = true; did = true; }
+        } else { inputEl.value = val; did = true; }
+
+        if (did) {
+          inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+          inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+          filled.push({
+            key: mappedKey,
+            label: ALL_FIELDS[mappedKey] || labelText,
+            value: val,
+            confidence: typeof confidence === "number" ? +(confidence.toFixed(2)) : 0
+          });
+          seenKeys.add(mappedKey);
+        }
+      } catch (e) {
+        console.error("[content] Error filling field:", { labelText, mappedKey, error: e });
+      }
+    });
+
+    const notFilled = Object.entries(ALL_FIELDS)
+      .filter(([k]) => !seenKeys.has(k))
+      .map(([k, label]) => ({ key: k, label }));
+
+    return { ok: true, filled, notFilled, inputs: inputsCount };
+  }
+
+  async function scanAndFill() {
+    try {
+      return await genericScanAndFill();
+    } catch (e) {
+      console.error("[content] scanAndFill fatal:", e);
+      const notFilledAll = Object.entries(ALL_FIELDS).map(([k, label]) => ({ key: k, label }));
+      return { ok: false, error: String(e), filled: [], notFilled: notFilledAll, inputs: 0 };
+    }
+  }
+
+  // ---------- listener ----------
+  chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
+    try {
+      if (req.action === "ping") {
+        sendResponse({ ok: true, v: CONTENT_VERSION }); return;
+      }
+      if (req.action === "probe") {
+        const count = document.querySelectorAll("input, select, textarea").length;
+        sendResponse({ ok: true, inputs: count, v: CONTENT_VERSION }); return;
+      }
+      if (req.action === "getAllFieldCatalog") {
+        const catalog = Object.entries(ALL_FIELDS).map(([key, label]) => ({ key, label }));
+        sendResponse({ ok: true, catalog, v: CONTENT_VERSION }); return;
+      }
+      if (req.action === "content.selftest") {
+        const dry = req?.dryRun !== false; // default true
+        getUserData().then((ud) => {
+          const result = deterministicFill(ud, dry);
+          sendResponse({ ok: true, ...result, dryRun: dry });
+        });
+        return true;
+      }
+      if (req.action === "fillFormSmart") {
+        scanAndFill().then(sendResponse);
+        return true;
+      }
+      if (req.action === "EXT_GET_JOB_DESC") {
+        const jd = extractJD();
+        sendResponse({ ok: true, jd });
+        return;
+      }
+      if (req.action === "EXT_GET_FILLER_SUMMARY") {
+        getFillerRunSummary().then((summary) => sendResponse({ ok: true, summary }));
+        return true;
+      }
+    } catch (e) {
+      console.error("[content] listener error:", e);
+      sendResponse({ ok: false, error: String(e) });
     }
   });
-
-  return filledAny;
-}
-
-// --- Extension messaging: respond to popup.js ---
-function hasFormishFields(){
-  const labels = document.querySelectorAll("label");
-  const inputs = document.querySelectorAll("input, select, textarea");
-  return (labels.length > 0) || (inputs.length > 0);
-}
-
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if(request.action === "ping"){
-    sendResponse({ ok:true });
-    return;
-  }
-  if(request.action === "canFillProbe"){
-    sendResponse({ hasForm: hasFormishFields() });
-    return;
-  }
-  if(request.action === "fillFormSmart"){
-    scanAndFill().then(filled => {
-      if(filled) sendResponse({ ok:true });
-      else sendResponse({ noForm:true });
-    });
-    return true; // keep channel open for async response
-  }
-});
+})();

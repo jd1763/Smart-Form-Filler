@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Software Engineer I — Data Platform (Test Posting)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --fg:#0f172a; --muted:#64748b; --bd:#e2e8f0; --chip:#eef2ff; --chipText:#3730a3; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:var(--fg); margin:0; background:#fff; }
+    header { border-bottom:1px solid var(--bd); padding:16px 24px; }
+    header h1 { font-size:20px; margin:0 0 6px 0; }
+    header .meta { color:var(--muted); font-size:14px; }
+    main { display:grid; grid-template-columns: 2fr 1fr; gap:24px; padding:24px; }
+    .card { border:1px solid var(--bd); border-radius:12px; padding:16px; background:#fff; }
+    h2 { font-size:16px; margin:0 0 10px 0; }
+    p, li { line-height:1.55; }
+    ul { padding-left: 18px; }
+    .badge { display:inline-block; background:var(--chip); color:var(--chipText); border-radius:999px; padding:4px 10px; font-size:12px; margin-right:6px; }
+    .apply-btn { background:#111; color:#fff; border:0; border-radius:10px; padding:10px 14px; cursor:pointer; }
+    .muted { color:var(--muted); }
+    /* form */
+    form label { display:block; font-weight:600; margin:12px 0 6px; }
+    form input[type="text"],
+    form input[type="email"],
+    form input[type="tel"],
+    form input[type="url"],
+    form input[type="file"],
+    form select,
+    form textarea {
+      width:100%; border:1px solid var(--bd); border-radius:10px; padding:10px; font-size:14px;
+    }
+    form .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .help { font-size:12px; color:var(--muted); }
+    .checkboxes { display:flex; flex-wrap:wrap; gap:8px; }
+    .checkboxes label { font-weight:500; display:flex; align-items:center; gap:6px; border:1px solid var(--bd); padding:6px 10px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Software Engineer I — Data Platform</h1>
+    <div class="meta">Full-time · New York, NY (Hybrid) · Early-career</div>
+  </header>
+
+  <main>
+    <!-- LEFT: Job Description -->
+    <article class="card">
+      <!-- Use an Indeed-like ID so your extractor picks it up -->
+      <div id="jobDescriptionText">
+        <p><strong>About the team</strong><br>
+        We build the data platform that powers analytics, ML, and product experimentation across the company. Our stack includes Python, Java, SQL, Airflow, Kafka, Spark, and Snowflake running in AWS.</p>
+
+        <p><strong>What you’ll do</strong></p>
+        <ul>
+          <li>Build and maintain data ingestion pipelines (Kafka → S3 → Spark) with strong SLAs.</li>
+          <li>Develop internal services in <strong>Python</strong> or <strong>Java</strong> with high code quality and tests.</li>
+          <li>Author efficient <strong>SQL</strong> for analytics/metrics and optimize Snowflake queries.</li>
+          <li>Partner with product and DS to ship features behind A/B experiments.</li>
+          <li>Contribute to CI/CD and infrastructure as code on <strong>AWS</strong> (Docker, Terraform).</li>
+        </ul>
+
+        <p><strong>Basic qualifications</strong></p>
+        <ul>
+          <li>BS in CS (or equivalent) completed or in final year.</li>
+          <li>Experience with at least one: <strong>Python</strong> or <strong>Java</strong>.</li>
+          <li>Comfortable with <strong>SQL</strong> and data modeling.</li>
+          <li>Familiar with Linux, Git, and unit testing.</li>
+        </ul>
+
+        <p><strong>Preferred qualifications</strong></p>
+        <ul>
+          <li>Hands-on with <strong>Kafka</strong>, <strong>Spark</strong>, or <strong>Airflow</strong>.</li>
+          <li>Cloud experience with <strong>AWS</strong> (S3, IAM, ECS/EKS).</li>
+          <li>Nice-to-have: <strong>React</strong>, <strong>TypeScript</strong>, <strong>GraphQL</strong> for internal tools.</li>
+        </ul>
+
+        <p><strong>Benefits</strong></p>
+        <ul>
+          <li>Health, dental, 401(k) with match, generous PTO, learning stipend.</li>
+        </ul>
+
+        <p class="muted">Posted 1 day ago · Applicants: 24</p>
+
+        <div>
+          <span class="badge">Python</span>
+          <span class="badge">Java</span>
+          <span class="badge">SQL</span>
+          <span class="badge">AWS</span>
+          <span class="badge">Kafka</span>
+          <span class="badge">Spark</span>
+          <span class="badge">Airflow</span>
+          <span class="badge">Docker</span>
+          <span class="badge">Terraform</span>
+          <span class="badge">React</span>
+          <span class="badge">TypeScript</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- RIGHT: Apply form (good for testing the filler) -->
+    <aside class="card">
+      <h2>Apply for this role</h2>
+      <p class="muted">Paste your resume into the extension’s Options to test the matcher. Use this form to test the filler.</p>
+      <form id="applyForm">
+        <div class="row">
+          <div>
+            <label for="firstName">First Name</label>
+            <input id="firstName" name="firstName" type="text" placeholder="Ada">
+          </div>
+          <div>
+            <label for="lastName">Last Name</label>
+            <input id="lastName" name="lastName" type="text" placeholder="Lovelace">
+          </div>
+        </div>
+
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" placeholder="ada@example.com">
+
+        <label for="phone">Phone</label>
+        <input id="phone" name="phone" type="tel" placeholder="+1 (555) 123-4567">
+
+        <label for="linkedin">LinkedIn URL</label>
+        <input id="linkedin" name="linkedin" type="url" placeholder="https://www.linkedin.com/in/yourname">
+
+        <label for="github">GitHub URL</label>
+        <input id="github" name="github" type="url" placeholder="https://github.com/yourname">
+
+        <div class="row">
+          <div>
+            <label for="address">Address</label>
+            <input id="address" name="address" type="text" placeholder="123 Main St">
+          </div>
+          <div>
+            <label for="city">City</label>
+            <input id="city" name="city" type="text" placeholder="New York">
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="state">State</label>
+            <select id="state" name="state">
+              <option value="">Select…</option>
+              <option>NY</option><option>NJ</option><option>CA</option><option>TX</option><option>FL</option>
+            </select>
+          </div>
+          <div>
+            <label for="zip">ZIP</label>
+            <input id="zip" name="zip" type="text" placeholder="10001">
+          </div>
+        </div>
+
+        <label for="yoe">Years of Professional Experience</label>
+        <select id="yoe" name="yoe">
+          <option value="">Select…</option>
+          <option>0</option><option>1</option><option>2</option><option>3+</option>
+        </select>
+
+        <label>Key Skills</label>
+        <div class="checkboxes">
+          <label><input type="checkbox" name="skills" value="Python">Python</label>
+          <label><input type="checkbox" name="skills" value="Java">Java</label>
+          <label><input type="checkbox" name="skills" value="SQL">SQL</label>
+          <label><input type="checkbox" name="skills" value="AWS">AWS</label>
+          <label><input type="checkbox" name="skills" value="Kafka">Kafka</label>
+          <label><input type="checkbox" name="skills" value="Spark">Spark</label>
+          <label><input type="checkbox" name="skills" value="Airflow">Airflow</label>
+          <label><input type="checkbox" name="skills" value="Docker">Docker</label>
+          <label><input type="checkbox" name="skills" value="Terraform">Terraform</label>
+          <label><input type="checkbox" name="skills" value="React">React</label>
+          <label><input type="checkbox" name="skills" value="TypeScript">TypeScript</label>
+        </div>
+
+        <label for="education">Highest Education</label>
+        <select id="education" name="education">
+          <option value="">Select…</option>
+          <option>BS Computer Science</option>
+          <option>MS Computer Science</option>
+          <option>Other</option>
+        </select>
+
+        <label for="resume">Resume (PDF)</label>
+        <input id="resume" name="resume" type="file" accept=".pdf,.doc,.docx,.txt">
+
+        <label for="cover">Cover Letter</label>
+        <textarea id="cover" name="cover" rows="5" placeholder="Optional"></textarea>
+
+        <p class="help">Use your extension: run the **Form Filler** to populate this form, then open the **Side Panel** to see match score & missing skills extracted from the job description on the left.</p>
+
+        <button type="button" class="apply-btn">Submit (no-op)</button>
+      </form>
+    </aside>
+  </main>
+</body>
+</html>

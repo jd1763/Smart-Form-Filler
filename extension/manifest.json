@@ -1,29 +1,51 @@
 {
   "manifest_version": 3,
-  "name": "Job Form AutoFill",
-  "version": "1.0",
-  "description": "Scans and fills out job application forms",
-  "permissions": ["scripting", "tabs", "activeTab", "storage"],
+  "name": "Smart Form Filler",
+  "version": "1.0.0",
+  "description": "Fill forms and show filled fields with confidence. Includes self-test tools.",
   "icons": {
     "16": "icon.png",
     "48": "icon.png",
     "128": "icon.png"
   },
-  "action": {
-    "default_popup": "popup.html",
-    "default_icon": "icon.png"
+  
+  "action": { 
+    "default_popup": "popup.html", 
+    "default_icon": "icon.png",
+    "default_title": "Smart Form Filler" 
   },
-  "background": {
-    "service_worker": "background.js"
+
+  "background": { 
+    "service_worker": "background.js" 
   },
-  "host_permissions": ["<all_urls>"],
+
+  "permissions": [
+    "scripting",
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
+
+  "host_permissions": [
+    "*://*/*",
+    "file://*/*"
+  ],
+
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["*://*/*", "file://*/*"],
       "js": ["content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle",
-      "all_frames": true
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["data/resumes/*.txt"],
+      "matches": ["<all_urls>"]
     }
   ]
 }
