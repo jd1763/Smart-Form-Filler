@@ -1,15 +1,15 @@
 /***********************
- * POPUP — MATCHER + FILLER (all-in-one)
+ * POPUP — MATCHER + FILLER (Week-5 kept) + Week-6 multi-resume + UI polish
  ***********************/
 const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[popup]", ...a);
 const err = (...a) => console.error("[popup]", ...a);
 
-/* ===================== MATCHER ===================== */
-const MATCH_API_BASE = "http://127.0.0.1:5001";
+/* ===================== MATCHER CONFIG ===================== */
+const MATCH_API_BASE = "http://127.0.0.1:5000"; // api.py host/port
 const MATCH_ROUTE = "/match";
 
-// Tight skill whitelist to keep “missing skills” clean
+// Tight whitelist so “missing skills” stays clean
 const SKILL_WORDS = new Set([
   "python","java","c++","c","r","sql","mysql","postgres","mongodb","redis",
   "aws","gcp","azure","docker","kubernetes","k8s","terraform","linux",
@@ -19,53 +19,237 @@ const SKILL_WORDS = new Set([
   "android","gradle","junit","eclipse","intellij","vscode","jsp","html","css"
 ]);
 
-// UI handles
-const elsM = {
-  arc: null, scoreNum: null, matched: null, missing: null, hint: null, status: null
-};
-function gaugeColor(pct){ if(pct>=80) return "#16a34a"; if(pct>=60) return "#22c55e"; if(pct>=40) return "#65a30d"; return "#ef4444"; }
-function setArc(percent){
-  const p = Math.max(0, Math.min(100, Math.round(percent)));
-  elsM.arc.setAttribute("stroke-dasharray", `${p},100`);
-  elsM.arc.setAttribute("stroke", gaugeColor(p));
-  elsM.scoreNum.textContent = `${p}%`;
+/* ===================== UI HANDLES (Matcher) ===================== */
+const elsM = { arc:null, scoreNum:null, hint:null, status:null };
+
+function gaugeColor(pct){
+  // red → orange → yellow → yellowish green → green
+  if (pct >= 85) return "#16a34a"; // green
+  if (pct >= 70) return "#84cc16"; // yellowish green
+  if (pct >= 55) return "#eab308"; // yellow
+  if (pct >= 40) return "#f97316"; // orange
+  return "#ef4444";                // red
 }
-function chip(txt, bad=false){ const s=document.createElement("span"); s.className=`chip ${bad?"bad":""}`; s.textContent=txt; return s; }
+
+function setArc(percent){
+  const p = Math.max(0, Math.min(100, Math.round(percent||0)));
+  if (elsM.arc) {
+    elsM.arc.setAttribute("stroke-dasharray", `${p},100`);
+    elsM.arc.setAttribute("stroke", gaugeColor(p));
+  }
+  if (elsM.scoreNum) elsM.scoreNum.textContent = `${p}%`;
+}
+
+/* ===================== CHIP RENDERING (side-by-side + fallback) ===================== */
+function chip(txt, bad=false){
+  const s=document.createElement("span");
+  s.className=`chip ${bad?"bad":""}`;
+  s.textContent=txt;
+  return s;
+}
+function clear(el){ if(el) el.innerHTML=""; }
+function renderChipList(container, arr, bad=false){
+  if (!container) return;
+  clear(container);
+  (arr.length ? arr : ["None"]).forEach(s => container.appendChild(chip(s, bad)));
+}
+function renderBucketsIntoUI(buckets){
+  // New side-by-side containers
+  const elMatchedReq  = document.getElementById("matchedReq");
+  const elMatchedPref = document.getElementById("matchedPref");
+  const elMissingReq  = document.getElementById("missingReq");
+  const elMissingPref = document.getElementById("missingPref");
+  const haveNewBoxes = elMatchedReq && elMatchedPref && elMissingReq && elMissingPref;
+
+  if (haveNewBoxes) {
+    renderChipList(elMatchedReq,  buckets.matchedReq,  false);
+    renderChipList(elMatchedPref, buckets.matchedPref, false);
+    renderChipList(elMissingReq,  buckets.missReq,     true);
+    renderChipList(elMissingPref, buckets.missPref,    true);
+    return;
+  }
+
+  // ---- Fallback to old single-column containers (Week-5 HTML) ----
+  const elsMatched = document.getElementById("matchedSkills");
+  const elsMissing = document.getElementById("missingSkills");
+
+  if (elsMatched) {
+    clear(elsMatched);
+    const hReq = document.createElement("div"); hReq.className="subhead"; hReq.textContent="Required";
+    const boxReq = document.createElement("div"); boxReq.className="chips";
+    buckets.matchedReq.forEach(s=>boxReq.appendChild(chip(s)));
+    const hPref = document.createElement("div"); hPref.className="subhead"; hPref.textContent="Preferred";
+    const boxPref = document.createElement("div"); boxPref.className="chips";
+    buckets.matchedPref.forEach(s=>boxPref.appendChild(chip(s)));
+    elsMatched.append(hReq, boxReq, hPref, boxPref);
+  }
+
+  if (elsMissing) {
+    clear(elsMissing);
+    const hReq = document.createElement("div"); hReq.className="subhead"; hReq.textContent="Required";
+    const boxReq = document.createElement("div"); boxReq.className="chips";
+    (buckets.missReq.length? buckets.missReq:["None"]).forEach(s=>boxReq.appendChild(chip(s,true)));
+    const hPref = document.createElement("div"); hPref.className="subhead"; hPref.textContent="Preferred";
+    const boxPref = document.createElement("div"); boxPref.className="chips";
+    (buckets.missPref.length? buckets.missPref:["None"]).forEach(s=>boxPref.appendChild(chip(s,true)));
+    elsMissing.append(hReq, boxReq, hPref, boxPref);
+  }
+}
+
+/* ===================== TEXT / SKILLS HELPERS ===================== */
 function tokenize(text){
   return (text||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g)||[];
 }
-function jdSkillKeys(text){
-  const out=[]; const toks=new Set(tokenize(text));
-  SKILL_WORDS.forEach(k => { if(toks.has(k)) out.push(k); });
-  return out;
+function extractImportance(jdText) {
+  const jd = (jdText || "").toLowerCase();
+  const reqMatch  = jd.match(/(?:required|must[-\s]?have|requirements?)[:\-—]\s*([\s\S]{0,500})/i);
+  const prefMatch = jd.match(/(?:preferred|nice[-\s]?to[-\s]?have)[:\-—]\s*([\s\S]{0,500})/i);
+  const tokens = (s) => (s || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [];
+  const toSkillSet = (arr) => {
+    const set = new Set();
+    arr.forEach(t => { if (SKILL_WORDS.has(t)) set.add(t); });
+    return set;
+  };
+  return {
+    requiredKeys: toSkillSet(tokens(reqMatch?.[1] || "")),
+    preferredKeys: toSkillSet(tokens(prefMatch?.[1] || "")),
+  };
 }
-function normalizeResponse(res){
-  const scorePct = Math.round((res?.similarity_score||0)*100);
-  const missing = Array.isArray(res?.missing_keywords)
-    ? res.missing_keywords.map(p => Array.isArray(p)? String(p[0]) : String(p))
-    : [];
-  // keep only real skills
-  const cleanMissing = missing.filter(m => SKILL_WORDS.has(m.toLowerCase()));
-  return { score: scorePct, missing_skills: cleanMissing };
-}
-// Try both methods and return both normalized results
-async function callBoth(job_text, resume_text){
-  const payload = (method)=> fetch(MATCH_API_BASE + MATCH_ROUTE, {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ resume: resume_text, job_description: job_text, method })
-  }).then(r=> { if(!r.ok) throw new Error(String(r.status)); return r.json(); });
 
+/* ===================== RESPONSE NORMALIZATION & BUCKETS ===================== */
+function normalizeMatchResponse(res, jdText){
+  // score 0..1 or 0..100 → 0..100
+  let s = Number(res?.similarity_score ?? res?.score ?? 0);
+  const scorePct = Math.max(0, Math.min(100, Math.round(s > 1 ? s : (s*100))));
+
+  // flatten missing: ["aws", ...] or [["aws",0.31], ...]
+  const rawMissing = Array.isArray(res?.missing_keywords ?? res?.missing_skills) ? (res.missing_keywords ?? res.missing_skills) : [];
+  const flat = rawMissing.map(m => Array.isArray(m) ? String(m[0]) : String(m))
+                         .map(x => x.toLowerCase().trim());
+
+  // keep only real JD skills (whitelist ∩ actually in JD)
+  const jdTokens = new Set((jdText||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []);
+  const missingClean = [...new Set(flat.filter(x => SKILL_WORDS.has(x) && jdTokens.has(x)))];
+
+  return { scorePct, missingClean };
+}
+
+function computeBucketsFromJDAndMissing(jdText, missingClean){
+  const toks   = (jdText||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [];
+  const jdKeys = toks.filter(w => SKILL_WORDS.has(w));
+  const jdSet  = new Set(jdKeys);
+  const missSet = new Set((missingClean||[]).map(x=>String(x).toLowerCase()));
+
+  // Headings
+  let { requiredKeys, preferredKeys } = extractImportance(jdText||"");
+
+  // ---- Fallbacks (handle unlabeled JDs) ----
+  if ((!requiredKeys || requiredKeys.size === 0) && (!preferredKeys || preferredKeys.size === 0)) {
+    requiredKeys  = new Set(jdSet);
+    preferredKeys = new Set();
+  } else if (requiredKeys.size === 0 && preferredKeys.size > 0) {
+    requiredKeys = new Set([...jdSet].filter(k => !preferredKeys.has(k)));
+  } else {
+    requiredKeys  = new Set([...requiredKeys].filter(k => jdSet.has(k)));
+    preferredKeys = new Set([...preferredKeys].filter(k => jdSet.has(k) && !requiredKeys.has(k)));
+  }
+
+  // Matched / Missing per bucket
+  const matchedReq  = [...requiredKeys].filter(k => !missSet.has(k));
+  const matchedPref = [...preferredKeys].filter(k => !missSet.has(k));
+  const missReq     = [...requiredKeys].filter(k =>  missSet.has(k));
+  const missPref    = [...preferredKeys].filter(k =>  missSet.has(k));
+
+  return { matchedReq, matchedPref, missReq, missPref };
+}
+
+/* ===================== DISPLAY SCORE (required-first; “Other” removed) ===================== */
+function computeDisplayScore({ apiBasePct, jdText, missing }) {
+  // Perfect if nothing is missing at all
+  if ((missing||[]).length === 0) return 100;
+
+  // Tokenize JD & build sets
+  const toks   = Array.from(new Set((jdText || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []));
+  const jdKeys = toks.filter(w => SKILL_WORDS.has(w));
+  const jdSet  = new Set(jdKeys);
+  const missSet = new Set((missing||[]).map(m => String(Array.isArray(m)? m[0]: m).toLowerCase()));
+
+  // Headings + robust fallbacks
+  let { requiredKeys, preferredKeys } = extractImportance(jdText);
+  if ((!requiredKeys || requiredKeys.size === 0) && (!preferredKeys || preferredKeys.size === 0)) {
+    requiredKeys = new Set(jdSet);
+    preferredKeys = new Set();
+  } else if (requiredKeys.size === 0 && preferredKeys.size > 0) {
+    requiredKeys = new Set([...jdSet].filter(k => !preferredKeys.has(k)));
+  } else {
+    requiredKeys = new Set([...requiredKeys].filter(k => jdSet.has(k)));
+    preferredKeys = new Set([...preferredKeys].filter(k => jdSet.has(k) && !requiredKeys.has(k)));
+  }
+
+  // Matched / Missing
+  const matchedReq  = [...requiredKeys].filter(k => !missSet.has(k));
+  const matchedPref = [...preferredKeys].filter(k => !missSet.has(k));
+  const missReq     = [...requiredKeys].filter(k =>  missSet.has(k));
+  const missPref    = [...preferredKeys].filter(k =>  missSet.has(k));
+
+  // === Coverage / Boost (NO "Other")
+  // Preferred matches get a slight ≥ boost than Required (per your request)
+  const bReq  = 1.00;
+  const bPref = 1.08;
+
+  const boostNum   = (bReq*matchedReq.length) + (bPref*matchedPref.length);
+  const boostDenom = (bReq*requiredKeys.size) + (bPref*preferredKeys.size);
+  let coverageBoost = boostDenom ? (boostNum / boostDenom) : 0; // 0..1
+  coverageBoost = Math.min(1, Math.max(0, Math.pow(coverageBoost, 0.92)));
+
+  // Blend with API similarity (slightly forgiving)
+  const W_API=0.42, W_COV=0.58;
+  const base = W_API * (apiBasePct||0) + W_COV * (coverageBoost*100);
+
+  // === Penalties: preferred lighter than required
+  const sevReq   = requiredKeys.size  ? (missReq.length  / requiredKeys.size)  : 0;
+  const sevPref  = preferredKeys.size ? (missPref.length / preferredKeys.size) : 0;
+  const penReq   = Math.pow(sevReq,  1.12) * 24;
+  const penPref  = Math.pow(sevPref, 1.02) *  6;
+  let score = Math.round(base - (penReq + penPref));
+
+  // === Floors (avoid zeros on partial matches)
+  const coverageFloor   = Math.round((coverageBoost * 100) * 0.68);
+  const prefSignalFloor = matchedPref.length > 0 ? 16 : 0; // bump if any preferred matched
+  score = Math.max(score, coverageFloor, prefSignalFloor);
+
+  // === Caps when Required missing
+  if (missReq.length >= 2)      score = Math.min(score, 74);
+  else if (missReq.length >= 1) score = Math.min(score, 84);
+
+  // Guardrail when coverage is tiny
+  if (coverageBoost < 0.06) score = Math.min(score, Math.round(coverageBoost * 100) + 6);
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+/* ===================== API CALLS ===================== */
+async function callMethod(method, job_text, resume_text) {
+  const r = await fetch(MATCH_API_BASE + MATCH_ROUTE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resume: resume_text, job_description: job_text, method })
+  });
+  if (!r.ok) throw new Error(`match ${method} ${r.status}`);
+  return r.json();
+}
+async function callBoth(job_text, resume_text){
   const [t, e] = await Promise.allSettled([
-    payload("tfidf"), payload("embedding")
+    callMethod("tfidf", job_text, resume_text),
+    callMethod("embedding", job_text, resume_text)
   ]);
-  const resT = t.status==="fulfilled" ? normalizeResponse(t.value) : null;
-  const resE = e.status==="fulfilled" ? normalizeResponse(e.value) : null;
+  const resT = t.status==="fulfilled" ? t.value : null;
+  const resE = e.status==="fulfilled" ? e.value : null;
   if (!resT && !resE) throw new Error("Both matcher methods failed");
   return { tfidf: resT, embedding: resE };
 }
 
-/* ===================== CONTENT/JD HELPERS ===================== */
+/* ===================== CONTENT HELPERS ===================== */
 async function getActiveTab(){
   return new Promise(res=>{
     chrome.tabs.query({active:true,currentWindow:true},tabs=>res(tabs?.[0]||null));
@@ -135,12 +319,16 @@ async function ensureSeededResume(){
     }
   }catch(e){ err("resume seed:", e); }
 }
-async function loadPrimaryResume(){
+async function loadAllResumes(){
   const resumes = (await chrome.storage.local.get("resumes")).resumes || [];
-  return resumes.find(r => (r.text||"").trim()) || resumes[0] || null;
+  return resumes.filter(r => (r.text||"").trim());
 }
-
-/* ===================== AUTO MATCH ON OPEN ===================== */
+async function getLastResumeId(){
+  return (await chrome.storage.local.get("lastResumeId")).lastResumeId || null;
+}
+async function setLastResumeId(id){
+  try{ await chrome.storage.local.set({ lastResumeId:id }); }catch{}
+}
 function fmtDateTime(ts) {
   try {
     return new Date(ts).toLocaleString(undefined, {
@@ -151,182 +339,199 @@ function fmtDateTime(ts) {
     return "unknown date";
   }
 }
-// Pull "Required" and "Preferred" blocks and intersect with SKILL_WORDS
-function extractImportance(jdText) {
-  const jd = (jdText || "").toLowerCase();
 
-  // crude but robust block grabs
-  const reqMatch = jd.match(/(?:required|must[-\s]?have|requirements?)[:\-—]\s*([\s\S]{0,400})/i);
-  const prefMatch = jd.match(/(?:preferred|nice[-\s]?to[-\s]?have)[:\-—]\s*([\s\S]{0,400})/i);
-
-  const tokens = (s) => (s || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [];
-  const toSkillSet = (arr) => {
-    const set = new Set();
-    arr.forEach(t => { if (SKILL_WORDS.has(t)) set.add(t); });
-    return set;
-  };
-
-  const reqTokens = tokens(reqMatch?.[1] || "");
-  const prefTokens = tokens(prefMatch?.[1] || "");
-  return {
-    requiredKeys: toSkillSet(reqTokens),     // Set<string>
-    preferredKeys: toSkillSet(prefTokens)    // Set<string>
-  };
+/* ============= INLINE RESUME PICKER IN FILLER CARD (always visible) ============= */
+function ensureInlineResumePicker(resumes){
+  const controls = document.getElementById("controls");
+  if (!controls) return;
+  let host = document.getElementById("resumeInlineHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "resumeInlineHost";
+    host.style.display = "flex";
+    host.style.flexDirection = "column";
+    host.style.gap = "6px";
+    host.style.width = "100%";
+    host.style.margin = "4px 0 2px 0";
+    const title = document.createElement("div");
+    title.textContent = "Resume";
+    title.style.fontSize = "12px";
+    title.style.color = "#6b7280";
+    const sel = document.createElement("select");
+    sel.id = "resumeInline";
+    sel.style.width = "100%";
+    sel.style.padding = "6px";
+    sel.style.border = "1px solid #e5e7eb";
+    sel.style.borderRadius = "6px";
+    const hint = document.createElement("div");
+    hint.id = "resumeInlineHint";
+    hint.className = "muted";
+    hint.textContent = "Defaults to your last choice.";
+    controls.parentNode.insertBefore(host, controls);
+    host.appendChild(title);
+    host.appendChild(sel);
+    host.appendChild(hint);
+  }
+  const sel = document.getElementById("resumeInline");
+  if (!sel) return;
+  sel.innerHTML = "";
+  resumes.forEach(r=>{
+    const o = document.createElement("option");
+    o.value = r.id || r.name;
+    o.textContent = r.name || r.id || "(untitled)";
+    sel.appendChild(o);
+  });
+  (async () => {
+    const lastId = await getLastResumeId();
+    if (lastId && [...sel.options].some(o => o.value === lastId)) {
+      sel.value = lastId;
+    } else {
+      sel.value = sel.options[0]?.value || "";
+      await setLastResumeId(sel.value);
+    }
+  })();
+  sel.onchange = () => { setLastResumeId(sel.value); };
 }
+
+/* ===================== MATCHER: AUTO RUN ON OPEN (Week-6 multi-resume) ===================== */
 async function autoMatch(){
   // Hook UI
   elsM.arc = document.getElementById("arc");
   elsM.scoreNum = document.getElementById("scoreNum");
-  elsM.matched = document.getElementById("matchedSkills");
-  elsM.missing = document.getElementById("missingSkills");
   elsM.hint = document.getElementById("matchHint");
   elsM.status = document.getElementById("matchStatus");
-
   const matchCard = document.getElementById("matchCard");
-  const hideMatch = () => { matchCard.style.display = "none"; };
-  const showMatch = () => { matchCard.style.display = ""; };
+  const hideMatch = () => { if(matchCard) matchCard.style.display = "none"; };
+  const showMatch = () => { if(matchCard) matchCard.style.display = ""; };
 
   // Default state
   setArc(0);
-  elsM.matched.innerHTML = "";
-  elsM.missing.innerHTML = "";
-  elsM.hint.textContent = "detecting…";
-  elsM.status.textContent = "";
+  if (elsM.hint) elsM.hint.textContent = "detecting…";
+  if (elsM.status) elsM.status.textContent = "";
 
-  // Ensure resume exists (seed if needed)
+  // Ensure resumes + inline picker (always visible)
   await ensureSeededResume();
-  const resume = await loadPrimaryResume();
-  if(!resume || !(resume.text||"").trim()){
-    hideMatch();
-    return;
-  }
+  const resumes = await loadAllResumes();
+  if (!resumes.length){ hideMatch(); ensureInlineResumePicker([]); return; }
+  ensureInlineResumePicker(resumes);
 
   // Read JD
   const { jd, note } = await getJobDescription();
-  // Basic JD sanity: needs some length and at least 2 skill keywords detected
   const jdTokens = Array.from(new Set((jd || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []));
   const jdKeys = jdTokens.filter(w => SKILL_WORDS.has(w));
   const hasRealJD = (jd && jd.trim().length >= 180) && (jdKeys.length >= 2);
 
   if (!hasRealJD) {
-    // No real posting detected → hide the card entirely
-    const matchCard = document.getElementById("matchCard");
-    matchCard.style.display = "none";
-    return;
-  }
-
-  if (!jd || !jd.trim()) {
-    // No JD: don’t show the match box at all (as you suggested)
     hideMatch();
+    // also hide resume suggestor
+    const suggestor = document.getElementById("resumeSuggestorCard");
+    if (suggestor) suggestor.style.display = "none";
     return;
   }
+  
+
   showMatch();
-  elsM.hint.textContent = note || "detected from page";
+  if (elsM.hint) elsM.hint.textContent = note || "detected from page";
 
   try {
-    // --- Run both methods (we already validated JD earlier) ---
-    const both = await callBoth(jd, resume.text);
-    const sT = both.tfidf?.score ?? null;
-    const sE = both.embedding?.score ?? null;
+    // For each resume → run both methods → normalize → compute display score → choose best
+    let best = null;
+    for (const r of resumes) {
+      const both = await callBoth(jd, r.text);
+      const nT = both.tfidf ? normalizeMatchResponse(both.tfidf, jd) : null;
+      const nE = both.embedding ? normalizeMatchResponse(both.embedding, jd) : null;
 
-    // Use a modestly conservative model base: average, but bias away from spikes
-    const have = [sT, sE].filter(v => typeof v === "number");
-    const apiBase = have.length ? Math.round(have.reduce((a,b)=>a+b,0)/have.length) : 0; // 0..100
+      const have = [nT?.scorePct, nE?.scorePct].filter(v => typeof v === "number");
+      const apiBase = have.length ? Math.round(have.reduce((a,b)=>a+b,0)/have.length) : 0; // 0..100
+      const missingUnion = Array.from(new Set([...(nT?.missingClean||[]), ...(nE?.missingClean||[])]));
 
-    // JD tokens & skill keys (you likely already computed jdKeys earlier; safe to re-derive)
-    const toks   = Array.from(new Set((jd || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []));
-    const jdKeys = toks.filter(w => SKILL_WORDS.has(w));
+      const dispScore = computeDisplayScore({
+        apiBasePct: apiBase,
+        jdText: jd,
+        missing: missingUnion
+      });
 
-    // Importance buckets
-    const { requiredKeys, preferredKeys } = extractImportance(jd);
-    const reqSet  = new Set([...requiredKeys].filter(k => jdKeys.includes(k)));
-    const prefSet = new Set([...preferredKeys].filter(k => !reqSet.has(k) && jdKeys.includes(k)));
-    const othSet  = new Set(jdKeys.filter(k => !reqSet.has(k) && !prefSet.has(k)));
-
-    // Missing union (across methods)
-    const missing = Array.from(new Set([
-      ...(both.tfidf?.missing_skills || []),
-      ...(both.embedding?.missing_skills || [])
-    ]));
-    const missSet = new Set(missing);
-
-    // Matched per bucket
-    const matchedReq  = [...reqSet].filter(k => !missSet.has(k));
-    const matchedPref = [...prefSet].filter(k => !missSet.has(k));
-    const matchedOth  = [...othSet].filter(k => !missSet.has(k));
-
-    // ---- Weighted coverage (required >> other > preferred) ----
-    const wReq = 3.0, wOth = 1.5, wPref = 0.5; // tune here
-    const num   = (wReq * matchedReq.length) + (wOth * matchedOth.length) + (wPref * matchedPref.length);
-    const denom = (wReq * reqSet.size)      + (wOth * othSet.size)      + (wPref * prefSet.size);
-    const coverageW = denom ? (num / denom) : 0; // 0..1 weighted coverage
-
-    // Severity per bucket
-    const missReq  = [...reqSet].filter(k => missSet.has(k));
-    const missPref = [...prefSet].filter(k => missSet.has(k));
-    const sevReq   = reqSet.size  ? (missReq.length  / reqSet.size)  : 0; // 0..1
-    const sevPref  = prefSet.size ? (missPref.length / prefSet.size) : 0; // 0..1
-
-    // ---- Blend model + weighted coverage ----
-    const W_API = 0.45;  // model similarity contribution
-    const W_COV = 0.55;  // visible, weighted coverage contribution
-    let score = Math.round(W_API * apiBase + W_COV * (coverageW * 100));
-
-    // ---- Penalties (required hurts more; preferred gentle) ----
-    const penReq  = Math.round(Math.pow(sevReq,  1.20) * 28); // up to ~28 off
-    const penPref = Math.round(Math.pow(sevPref, 1.05) *  10); // up to  ~10 off
-    score = Math.max(0, score - penReq - penPref);
-
-    // ---- Caps (soft when only preferred missing; stronger if required missing) ----
-    const preferredMissingCount = missPref.length;
-
-    // 1) Required missing = strict caps
-    if (missReq.length >= 2) {
-      score = Math.min(score, 65);
-    } else if (missReq.length >= 1) {
-      score = Math.min(score, 75);
-    } else {
-      // 2) No required missing → cap based on preferred gaps
-      if (preferredMissingCount >= 3) {
-        score = Math.min(score, 80);   // lots of preferred missing → can't look like an A
-      } else if (preferredMissingCount === 2) {
-        score = Math.min(score, 85);
-      } else if (preferredMissingCount === 1) {
-        score = Math.min(score, 88);
+      if (!best || dispScore > best.score) {
+        best = { resume: r, score: dispScore, missing: missingUnion, apiBase };
       }
     }
 
-    // 3) If anything is missing at all, never look “perfect”
-    if (missing.length > 0) {
-      score = Math.min(score, 92);
+    if (!best) { hideMatch(); return; }
+
+    // Render best score & buckets
+    setArc(best.score);
+    renderBucketsIntoUI(computeBucketsFromJDAndMissing(jd, best.missing || []));
+
+    if (elsM.status) {
+      elsM.status.textContent = `Using: ${best.resume.name || best.resume.id} · added ${fmtDateTime(best.resume.lastUpdated||Date.now())}`;
     }
 
-    // 4) If weighted coverage is weak, keep a sanity ceiling
-    if (coverageW < 0.50) {
-      score = Math.min(score, Math.round(coverageW * 100) + 12);
+    // Resume Suggestor card dropdown
+    const dd = document.getElementById("resumeSelect");
+    const chosenEl   = document.getElementById("chosenResume");
+    const chosenSc   = document.getElementById("chosenScore");
+    const selectedEl = document.getElementById("selectedResume");
+    const selectedSc = document.getElementById("selectedScore");
+    const resumeStatusEl = document.getElementById("resumeStatus");
+
+    if (dd) {
+      dd.innerHTML = "";
+      resumes.forEach(r => {
+        const o = document.createElement("option");
+        o.value = r.id || r.name;
+        o.textContent = r.name || r.id || "(untitled)";
+        dd.appendChild(o);
+      });
+
+      dd.value = best.resume.id || best.resume.name || dd.options[0]?.value || "";
+      const _bestPct = Math.max(0, Math.min(100, Number(best.score) || 0));
+
+      if (chosenEl)   chosenEl.textContent   = best.resume.name || best.resume.id || "(untitled)";
+      if (chosenSc)   chosenSc.textContent   = `Match: ${_bestPct}%`;
+      if (selectedEl) selectedEl.textContent = best.resume.name || best.resume.id || "(untitled)";
+      if (selectedSc) selectedSc.textContent = `Match: ${_bestPct}%`;
+      if (resumeStatusEl) resumeStatusEl.textContent = "Suggested resume selected. Change to compare.";
+
+      dd.addEventListener("change", async () => {
+        const sel = resumes.find(r => (r.id||r.name) === dd.value);
+        if (!sel) return;
+        try {
+          if (resumeStatusEl) resumeStatusEl.textContent = "Scoring selected resume…";
+
+          const both = await callBoth(jd, sel.text);
+          const nT = both.tfidf     ? normalizeMatchResponse(both.tfidf, jd)     : null;
+          const nE = both.embedding ? normalizeMatchResponse(both.embedding, jd) : null;
+
+          const have = [nT?.scorePct, nE?.scorePct].filter(v => typeof v === "number");
+          const apiBase = have.length ? Math.round(have.reduce((a,b)=>a+b,0)/have.length) : 0;
+          const missingUnion = Array.from(new Set([...(nT?.missingClean||[]), ...(nE?.missingClean||[])]));
+
+          const dispScore = computeDisplayScore({ apiBasePct: apiBase, jdText: jd, missing: missingUnion });
+          setArc(dispScore);
+
+          // Re-render side-by-side buckets for the selection
+          renderBucketsIntoUI(computeBucketsFromJDAndMissing(jd, missingUnion));
+
+          if (elsM.status) elsM.status.textContent = `Using: ${sel.name || sel.id} · added ${fmtDateTime(sel.lastUpdated||Date.now())}`;
+          if (selectedEl)  selectedEl.textContent  = sel.name || sel.id || "(untitled)";
+          const _selPct = Math.max(0, Math.min(100, Number(dispScore) || 0));
+          if (selectedSc)  selectedSc.textContent  = `Match: ${_selPct}%`;
+          if (resumeStatusEl) resumeStatusEl.textContent = "Done.";
+        } catch (e) {
+          console.error("[popup] resumeSelect error:", e);
+          if (resumeStatusEl) resumeStatusEl.textContent = "Error scoring selection.";
+        }
+      });
     }
-
-    // ---- Render gauge & chips ----
-    setArc(score);
-    elsM.matched.innerHTML = "";
-    const matchedAll = [...new Set([...matchedReq, ...matchedOth, ...matchedPref])];
-    (matchedAll.length ? matchedAll : ["None"]).forEach(s => elsM.matched.appendChild(chip(s)));
-
-    elsM.missing.innerHTML = "";
-    (missing.length ? missing : ["None"]).forEach(s => elsM.missing.appendChild(chip(s, true)));
-
-    // Footer — name + date+time (no method)
-    elsM.status.textContent = `Using: ${resume.name} · added ${fmtDateTime(resume.lastUpdated)}`;
   } catch (e) {
     console.error("[popup] matcher error:", e);
-    // If API is down, hide the match box so the filler UI remains clean
-    hideMatch();
+    if (elsM.hint) elsM.hint.textContent = "Matcher unavailable";
+    if (elsM.status) elsM.status.textContent = "Could not reach /match. Check API port and host_permissions.";
+    setArc(0);
   }
 }
 
-/* ===================== FILLER ===================== */
-const btn = document.getElementById("fillForm");
-const tryBtn = document.getElementById("tryAgain");
+/* ===================== FILLER (Week-5 kept) ===================== */
 const statusEl = document.getElementById("status");
 const filledBox = document.getElementById("filledFields");
 const notFilledBox = document.getElementById("notFilledFields");
@@ -363,9 +568,12 @@ async function saveLast(url,lastObj){ const {lastKey}=stateKeysFor(url); await c
 async function saveToggles(url,tog){ const {toggKey}=stateKeysFor(url); await chrome.storage.local.set({ [toggKey]: tog }); }
 
 // UI utilities
-const setStatus = (msg)=> (statusEl.textContent=msg);
+const setStatus = (msg)=> (statusEl && (statusEl.textContent=msg));
 function installToggle(headerEl, contentEl, initiallyOpen, onChange){
-  const set=(open)=>{ contentEl.style.display=open?"block":"none"; const title=headerEl.textContent.replace(/^[▶▼]\s*/,""); headerEl.textContent=(open?"▼ ":"▶ ")+title; onChange?.(open); };
+  const set=(open)=>{ contentEl.style.display=open?"block":"none";
+    const title=headerEl.textContent.replace(/^[▶▼]\s*/,"");
+    headerEl.textContent=(open?"▼ ":"▶ ")+title; onChange?.(open);
+  };
   let open=initiallyOpen; set(open);
   headerEl.addEventListener("click",()=>{ open=!open; set(open); });
 }
@@ -408,6 +616,12 @@ async function preloadAndRestore(){
   const tab = await getActiveTab();
   if(!tab){ setStatus("❌ No active tab."); return; }
   const url = tab.url||"";
+
+  // Inline resume picker (always show)
+  await ensureSeededResume();
+  const resumes = await loadAllResumes();
+  ensureInlineResumePicker(resumes);
+
   // toggles + last results
   let filledOpen=false, notFilledOpen=false;
   const { last, toggles } = await loadState(url);
@@ -448,7 +662,6 @@ function renderResultsAndRemember(url, resp, statusText){
   renderFieldList(notFilledBox, nonFilled, { title:"Non-Filled" });
   setStatus(statusText);
 
-  // brief summary for side uses
   try{
     const low = (Array.isArray(filled)? filled.filter(f=> typeof f.confidence==="number" && f.confidence<0.5).length : 0);
     const summary = { timestamp:Date.now(), filledCount:filled.length||0, totalDetected:(resp?.inputs??0), lowConfidence:low };
@@ -482,21 +695,25 @@ async function runFill(){
   renderResultsAndRemember(url, resp, statusText);
 
   const filled = Array.isArray(resp.filled)? resp.filled : [];
-  document.getElementById("fillForm").style.display = filled.length ? "none" : "inline-block";
-  document.getElementById("tryAgain").style.display = filled.length ? "inline-block" : "none";
+  const fillBtn = document.getElementById("fillForm");
+  const tryBtn = document.getElementById("tryAgain");
+  if (fillBtn && tryBtn) {
+    fillBtn.style.display = filled.length ? "none" : "inline-block";
+    tryBtn.style.display = filled.length ? "inline-block" : "none";
+  }
 }
 
 /* ===================== INIT ===================== */
 document.addEventListener("DOMContentLoaded", async () => {
   try { await preloadAndRestore(); } catch(e){ err(e); }
-  autoMatch(); // run matcher immediately (no button)
+  autoMatch(); // run matcher immediately
 });
 
 // Buttons
-document.getElementById("fillForm").addEventListener("click", runFill);
-document.getElementById("tryAgain").addEventListener("click", runFill);
+document.getElementById("fillForm")?.addEventListener("click", runFill);
+document.getElementById("tryAgain")?.addEventListener("click", runFill);
 
-// Optional: open the side panel if you still keep it
+// Optional: open side panel if you still keep it
 document.getElementById("openMatcher")?.addEventListener("click", () => {
   (async () => {
     try {

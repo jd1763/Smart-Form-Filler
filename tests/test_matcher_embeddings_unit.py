@@ -17,6 +17,12 @@ def matcher():
     return MatcherEmbeddings()
 
 
+def test_embeddings_smoke():
+    m = MatcherEmbeddings()
+    out = m.match_resume_job("resume text", "job text")
+    assert "match_score" in out
+
+
 def test_similarity_score_is_percentage(matcher):
     """Embedding similarity should return a percentage (0–100)."""
     resume = "Python developer with Flask and SQL"

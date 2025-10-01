@@ -1,0 +1,25 @@
+Priya Narayanan
+Email: priya.n@example.com | GitHub: github.com/priyan | LinkedIn: linkedin.com/in/priyanarayanan
+
+Summary
+Data-oriented engineer specializing in Python ETL and SQL analytics. Comfortable with Git and packaging pipelines into Docker images for reproducible runs. Beginning to integrate small Java utilities.
+
+Skills
+Python (pandas) • SQL (Postgres/BigQuery) • Git • AWS (S3, Glue) • Docker • Airflow (basics) • Bash • (Learning) Java
+
+Experience
+Data/ETL Engineer | InsightOps | 2024–Present
+- Built Python ETL jobs to clean and load sales data into Postgres; scheduled with Airflow; added data quality checks.
+- Authored SQL models for dashboards; partnered with analysts to define KPIs.
+- Packaged ETL in Docker for consistent dev/prod parity; ran batch tasks on AWS ECS.
+- Collaborated via Git; wrote code review checklists and added pre-commit hooks.
+
+Data Engineering Intern | Healthlytics | 2023
+- Implemented CSV → Warehouse loaders (Python + SQL), with validation schemas and rollback on failure.
+- Created documentation on pipeline structure, runbooks, and troubleshooting guides.
+
+Projects
+Data Freshness Monitor (Python, SQL): Alerting on late upstream datasets; saved 4+ hours/week in manual checks.
+
+Education
+B.S. Computer Science, University of Illinois, 2024

@@ -9,13 +9,28 @@ about what kind of form field a label is (ex: email, name, phone).
 The extension sends a label -> this API sends back prediction + confidence.
 """
 
-import os  # helps build file paths
+import os
+import sys  # helps build file paths
 
 import joblib  # used to load my saved ML model
 
 # Flask basics for building APIs
 from flask import Flask, jsonify, request
 from flask_cors import CORS  # lets my Chrome extension call this API without CORS errors
+
+# === Import matchers ===
+# - BaselineMatcher: TF-IDF + cosine similarity
+# - MatcherEmbeddings: Sentence-BERT embeddings + semantic similarity
+from ml.matcher_baseline import BaselineMatcher
+from ml.matcher_embeddings import MatcherEmbeddings
+
+from .matcher.resume_selector import load_resumes, select_best_resume
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+RESUMES_FILE = os.path.join(DATA_DIR, "resumes.json")
+
+# Add the project root to Python path so we can import ml/ and backend/ modules
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # === Path to the model file ===
 # I keep my trained scikit-learn model in /models/form_model.pkl
@@ -38,6 +53,80 @@ try:
 except Exception as e:
     raise RuntimeError(f"=== Could not load model from {MODEL_PATH}: {e} ===")
 
+# === Instantiate matchers ===
+tfidf_matcher = BaselineMatcher()  # baseline TF-IDF matcher
+try:
+    embedding_matcher = MatcherEmbeddings()  # try to load embedding model
+except Exception as e:
+    # If embeddings fail to load (e.g. no GPU, missing package), fall back to TF-IDF only
+    embedding_matcher = None
+    print(f"[WARNING] Could not load embeddings matcher: {e}")
+
+
+@app.route("/select_resume", methods=["POST", "OPTIONS"])
+def select_resume_api():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    jd = (request.json or {}).get("job_description", "")
+    resumes = load_resumes(RESUMES_FILE)
+    best, ranking = select_best_resume(jd, resumes)
+    return jsonify({"best": best, "ranking": ranking})
+
+
+@app.route("/match", methods=["POST", "OPTIONS"])
+def match():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    """
+    Compare resume against job description.
+
+    Input JSON:
+        {
+          "resume": "...",
+          "job_description": "...",
+          "method": "tfidf" | "embedding"   (optional, default = tfidf)
+        }
+
+    Output JSON:
+        {
+          "similarity_score": 0.61,                     # similarity score
+          "missing_keywords": [["aws", 0.48], ...],     # skills from JD missing in resume
+          "method": "tfidf"                             # which matcher was used
+        }
+    """
+    data = request.get_json()
+
+    # Validate input
+    if not data or "resume" not in data or "job_description" not in data:
+        return jsonify({"error": "resume and job_description are required"}), 400
+
+    # Choose method (tfidf or embedding)
+    method = data.get("method", "tfidf").lower()
+
+    # === Embeddings Matcher ===
+    if method == "embedding" and embedding_matcher:
+        result = embedding_matcher.match_resume_job(data["resume"], data["job_description"])
+        return jsonify(
+            {
+                "similarity_score": round(float(result["match_score"]), 3),
+                "missing_keywords": result["missing_skills"],
+                "method": "embedding",
+            }
+        )
+
+    # === TF-IDF Baseline Matcher (default) ===
+    similarity, missing_keywords = tfidf_matcher.get_similarity_and_missing(
+        data["resume"], data["job_description"]
+    )
+
+    return jsonify(
+        {
+            "similarity_score": round(float(similarity), 3),
+            "missing_keywords": missing_keywords,
+            "method": "tfidf",
+        }
+    )
+
 
 # === Health check endpoint ===
 @app.route("/health", methods=["GET"])
@@ -51,8 +140,10 @@ def health():
 
 
 # === Single prediction endpoint ===
-@app.route("/predict", methods=["POST"])
+@app.route("/predict", methods=["POST", "OPTIONS"])
 def predict():
+    if request.method == "OPTIONS":
+        return ("", 204)
     """
     Input (from extension):
         { "label": "Email Address" }
@@ -97,8 +188,10 @@ def predict():
 
 
 # === Batch prediction endpoint ===
-@app.route("/predict_batch", methods=["POST"])
+@app.route("/predict_batch", methods=["POST", "OPTIONS"])
 def predict_batch():
+    if request.method == "OPTIONS":
+        return ("", 204)
     """
     Input:
         { "labels": ["First Name", "Phone Number"] }

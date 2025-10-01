@@ -1,10 +1,12 @@
-// === background.js ===
 
 // --- DEBUG / SELF-TEST SWITCHES ---
-const TEST_MODE = true;       // enables bg.selftest route
-const FAKE_MODEL = false;      // return deterministic predictions instead of calling Flask
+const TEST_MODE  = true;   // enables bg.selftest route
+const FAKE_MODEL = false;  // deterministic predictions instead of calling Flask
 
-// Map simple labels -> predictions for FAKE_MODEL
+// --- Unified local API base (both endpoints live in one Flask app) ---
+const API_BASE = "http://127.0.0.1:5000";
+
+// --- Heuristics for fake predictions (dev only) ---
 const FAKE_MAP = {
   "first": "first_name", "first name": "first_name", "firstname": "first_name", "fname": "first_name",
   "last": "last_name", "last name": "last_name", "lastname": "last_name", "lname": "last_name",
@@ -22,50 +24,93 @@ const toFakePred = (s) => {
   return null;
 };
 
-// One-time seed from bundled text file if no resumes exist
-async function seedResumeFromFile() {
+// --- Generic POST helper to the local API ---
+async function callApi(path, payload) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+  return res.json();
+}
+
+// --- Field-type batch predictor (for filler) ---
+async function callPredictAPI(labels) {
+  if (FAKE_MODEL) {
+    return labels.map((lab) => {
+      const p = toFakePred(lab);
+      return { label: lab, prediction: p, confidence: p ? 0.95 : 0.0 };
+    });
+  }
+  const res = await fetch(`${API_BASE}/predict_batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ labels })
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+/* ===================== Seeding resumes (non-destructive) ===================== */
+async function seedResumes() {
   try {
     const { resumes } = await chrome.storage.local.get("resumes");
-    if (Array.isArray(resumes) && resumes.length) return; // already seeded
+    if (Array.isArray(resumes) && resumes.length) return; // already have something
 
-    const url = chrome.runtime.getURL("data/resumes/resume11_jorgeluis_done.txt");
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`fetch ${url} -> ${resp.status}`);
-    const text = (await resp.text()).trim();
+    // Prefer Week-6 multi-resume seed if bundled
+    const multi = [
+      "data/resumes/jr_backend_strong.txt",
+      "data/resumes/backend_java_good.txt",
+      "data/resumes/data_etl_python.txt",
+      "data/resumes/frontend_react.txt",
+      "data/resumes/platform_aws_kafka.txt"
+    ];
+    const loaded = [];
+    for (const path of multi) {
+      try {
+        const url = chrome.runtime.getURL(path);
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        const text = (await resp.text()).trim();
+        if (!text) continue;
+        const name = path.split("/").pop().replace(".txt", "").replace(/_/g, " ");
+        loaded.push({ id: crypto.randomUUID(), name, text, lastUpdated: Date.now() });
+      } catch { /* ignore single file fail */ }
+    }
+    if (loaded.length) {
+      await chrome.storage.local.set({ resumes: loaded });
+      console.log("[bg] Seeded", loaded.length, "resumes into storage (Week-6)");
+      return;
+    }
 
-    const seed = [{
-      id: crypto.randomUUID(),
-      name: "Jorgeluis — Base Resume",
-      text,
-      lastUpdated: Date.now()
-    }];
-
-    await chrome.storage.local.set({ resumes: seed });
-    console.log("[bg] Seeded default resume from data/resumes/resume11_jorgeluis_done.txt");
+    // Fall back to Week-5 single base resume
+    try {
+      const url = chrome.runtime.getURL("data/resumes/resume11_jorgeluis_done.txt");
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const text = (await resp.text()).trim();
+        if (text) {
+          const seed = [{
+            id: crypto.randomUUID(),
+            name: "Jorgeluis — Base Resume",
+            text,
+            lastUpdated: Date.now()
+          }];
+          await chrome.storage.local.set({ resumes: seed });
+          console.log("[bg] Seeded default resume from data/resumes/resume11_jorgeluis_done.txt");
+        }
+      }
+    } catch (e) {
+      console.warn("[bg] No resume files bundled; seed skipped.");
+    }
   } catch (e) {
-    console.error("[bg] Failed to seed resume from file:", e);
+    console.error("[bg] Resume seed failed:", e);
   }
 }
 
-// Call on install & on startup (harmless if already seeded)
-chrome.runtime.onInstalled.addListener(() => { seedResumeFromFile(); });
-chrome.runtime.onStartup.addListener(() => { seedResumeFromFile(); });
-
-
-// Ensure action click opens the POPUP, not the side panel
-chrome.runtime.onInstalled.addListener(() => {
-  if (chrome.sidePanel?.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
-  }
-});
-chrome.runtime.onStartup.addListener(() => {
-  if (chrome.sidePanel?.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
-  }
-});
-
-// === Load userData.json into extension storage when installed ===
-chrome.runtime.onInstalled.addListener(async () => {
+/* ===================== User data seeding (Week-5) ===================== */
+async function seedUserDataIfPresent() {
   async function tryLoad(path) {
     try {
       const res = await fetch(chrome.runtime.getURL(path));
@@ -80,72 +125,124 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
   const ok = (await tryLoad("data/userData.json")) || (await tryLoad("userData.json"));
   if (!ok) console.warn("=== No userData.json found (data/ or root). You can set it later. ===");
-});
-
-// === Helper: call Flask API for batch predictions (or fake) ===
-async function callPredictAPI(labels) {
-  if (FAKE_MODEL) {
-    return labels.map((lab) => {
-      const p = toFakePred(lab);
-      return { label: lab, prediction: p, confidence: p ? 0.95 : 0.0 };
-    });
-  }
-
-  const url = "http://127.0.0.1:5000/predict_batch";
-  const body = JSON.stringify({ labels });
-
-  console.log("[bg] calling Flask /predict_batch for", labels.length, "labels");
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body
-  });
-
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
 }
 
-// === Message router ===
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  (async () => {
-    try {
-      if (request.action === "getUserData") {
-        const { userData } = await chrome.storage.local.get("userData");
-        sendResponse({ success: true, userData: userData || {} });
+/* ===================== Lifecycle hooks ===================== */
+chrome.runtime.onInstalled.addListener(async () => {
+  await seedResumes();
+  await seedUserDataIfPresent();
 
-      } else if (request.action === "predictLabels") {
-        const { labels } = request;
-        const data = await callPredictAPI(labels);
-        sendResponse({ success: true, results: data });
-
-      } else if (TEST_MODE && request.action === "bg.selftest") {
-        const { userData } = await chrome.storage.local.get("userData");
-        const labels = ["First Name", "Last Name", "Email", "Phone", "State", "Zip"];
-        const preds = await callPredictAPI(labels);
-        sendResponse({
-          success: true,
-          userDataLoaded: !!userData,
-          predictionsSample: preds
-        });
-
-      } else {
-        sendResponse({ success: false, error: "Unknown action" });
-      }
-    } catch (err) {
-      console.error("[bg] background error:", err);
-      sendResponse({ success: false, error: String(err) });
-    }
-  })();
-  return true; // keep channel open for async sendResponse
+  // Ensure action click opens the popup, not the side panel
+  if (chrome.sidePanel?.setPanelBehavior) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+  }
 });
 
+chrome.runtime.onStartup.addListener(async () => {
+  await seedResumes();
+
+  if (chrome.sidePanel?.setPanelBehavior) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+  }
+});
+
+// Enable side panel on page load (optional; safe if you keep sidepanel.html around)
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
   if (!chrome.sidePanel?.setOptions) return;
   if (info.status === "complete" && tab?.url && /^https?:|^file:/.test(tab.url)) {
-    try {
-      await chrome.sidePanel.setOptions({ tabId, path: "sidepanel.html", enabled: true });
-    } catch {}
+    try { await chrome.sidePanel.setOptions({ tabId, path: "sidepanel.html", enabled: true }); } catch {}
   }
 });
 
+/* ===================== Router ===================== */
+/**
+ * Supports both Week-5 "action" messages and Week-6 "type" messages.
+ * - Week-5 (filler): getUserData, predictLabels, bg.selftest
+ * - Week-6 (matcher): MATCH_SCORE, MATCH_DETAIL, SELECT_RESUME
+ */
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  (async () => {
+    // ===== Week-6 messages (type-based) =====
+    if (msg?.type === "SELECT_RESUME") {
+      // Optional: if your Flask app exposes a helper that returns best resume name/id
+      // given a JD across what's in storage, you could forward here.
+      // If not implemented on server, you can ignore this route.
+      try {
+        const out = await callApi("/select_resume", { job_description: msg.jobDescription });
+        // Expect shape: { id?, name?, reason? } — forward as-is
+        sendResponse(out);
+      } catch (e) {
+        sendResponse({ error: String(e) });
+      }
+      return;
+    }
 
+    if (msg?.type === "MATCH_DETAIL") {
+      try {
+        const method = msg.methodOverride || "tfidf";
+        const out = await callApi("/match", {
+          job_description: msg.jobDescription,
+          resume: msg.resumeText,
+          method
+        });
+        sendResponse(out);
+      } catch (e) {
+        sendResponse({ error: String(e) });
+      }
+      return;
+    }    
+
+    if (msg?.type === "MATCH_SCORE") {
+      try {
+        const out = await callApi("/match", {
+          job_description: msg.jobDescription,
+          resume: msg.resumeText,
+          method: "tfidf" // keep lightweight for interactive dropdown compare
+        });
+        const score = Math.round(Math.max(0, Math.min(1, Number(out?.similarity_score || 0))) * 100);
+        sendResponse({ score });
+      } catch (e) {
+        sendResponse({ error: String(e) });
+      }
+      return;
+    }
+
+    // ===== Week-5 messages (action-based) =====
+    if (msg?.action === "getUserData") {
+      const { userData } = await chrome.storage.local.get("userData");
+      sendResponse({ success: true, userData: userData || {} });
+      return;
+    }
+
+    if (msg?.action === "predictLabels") {
+      try {
+        const labels = Array.isArray(msg.labels) ? msg.labels : [];
+        const data = await callPredictAPI(labels);
+        sendResponse({ success: true, results: data });
+      } catch (e) {
+        sendResponse({ success: false, error: String(e) });
+      }
+      return;
+    }
+
+    if (TEST_MODE && msg?.action === "bg.selftest") {
+      const { userData } = await chrome.storage.local.get("userData");
+      const labels = ["First Name", "Last Name", "Email", "Phone", "State", "Zip"];
+      const preds = await callPredictAPI(labels);
+      sendResponse({
+        success: true,
+        userDataLoaded: !!userData,
+        predictionsSample: preds
+      });
+      return;
+    }
+
+    // If we got here, it didn't match any known route
+    if (typeof msg?.action !== "undefined") {
+      sendResponse({ success: false, error: "Unknown action" });
+    } else {
+      sendResponse({ error: "Unknown message" });
+    }
+  })().catch(e => sendResponse({ error: String(e) }));
+  return true; // keep async channel open
+});

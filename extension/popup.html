@@ -5,42 +5,53 @@
   <title>Smart Form Filler</title>
   <link rel="stylesheet" href="styles.css" />
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 12px; width: 360px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 12px; width: 360px; color:#111; }
     h1 { font-size: 16px; margin: 0 0 8px; }
 
-    /* Matcher card */
+    /* Cards & layout */
     .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; background: #fff; margin-bottom: 10px; }
-    .row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .row { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
     .muted { color:#6b7280; font-size:12px; }
-    .chips { display:flex; flex-wrap:wrap; gap:6px; }
-    .chip { background:#eef2ff; color:#3730a3; border-radius:999px; padding:6px 10px; font-size:12px; }
-    .chip.bad { background:#fee2e2; color:#991b1b; }
-    .score { display:flex; align-items:center; gap:12px; }
-    .score svg { width:74px; height:74px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-    /* Existing popup buttons */
     .btn { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; background: #f3f3f3; cursor: pointer; }
     .btn + .btn { margin-left: 6px; }
+    select { width: 100%; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px; font-size: 12px; background: #fff; }
+
+    /* Gauge & chips */
+    .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+    .chip { background:#eef2ff; color:#1f2937; border-radius:999px; padding:4px 8px; font-size:12px; }
+    .chip.bad { background:#fee2e2; color:#991b1b; }
+    .score { display:flex; align-items:center; gap:12px; margin-top:6px; }
+    .score svg { width:74px; height:74px; }
+
+    /* Skill sub-boxes */
+    .skillBox {
+      flex:1;
+      border:1px solid #e5e7eb;
+      border-radius:8px;
+      padding:6px;
+      background:#fafafa;
+      min-height:50px;
+    }
+    .skillBox .muted { font-weight:600; display:block; margin-bottom:4px; }
+
+    /* Section lists */
     #status { margin: 8px 0; min-height: 18px; color: #333; }
     .section-header { margin-top: 8px; font-weight: 600; cursor: pointer; user-select: none; }
     .field-list { border: 1px solid #eee; padding: 8px; border-radius: 6px; max-height: 240px; overflow: auto; }
-    #controls { display: flex; gap: 8px; margin: 8px 0; }
-    #tryAgain { display: none; }
-    #testArea { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
   </style>
 </head>
 <body>
   <h1>Smart Form Filler</h1>
 
-  <!-- ===== AUTO MATCH (no button) ===== -->
+  <!-- ===== Card 1: Job Match ===== -->
   <div class="card" id="matchCard">
     <div class="row">
       <strong>Job Match</strong>
-      <span class="muted" id="matchHint">auto-detected from page</span>
+      <span class="muted" id="jdHint2">auto-detected from page</span>
     </div>
 
-    <div class="score" style="margin-top:6px">
+    <div class="score">
       <svg viewBox="0 0 36 36">
         <circle cx="18" cy="18" r="16" fill="none" stroke="#e5e7eb" stroke-width="4" />
         <path id="arc" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round"
@@ -53,37 +64,76 @@
       </div>
     </div>
 
-    <div style="height:6px"></div>
-    <div class="muted">Matched skills</div>
-    <div class="chips" id="matchedSkills"></div>
+    <!-- Matched (side by side Required & Preferred) -->
+    <div style="margin-top:8px;" class="muted"><strong>Matched skills</strong></div>
+    <div class="row">
+      <div class="skillBox">
+        <span class="muted">Required</span>
+        <div class="chips" id="matchedReq"></div>
+      </div>
+      <div class="skillBox">
+        <span class="muted">Preferred</span>
+        <div class="chips" id="matchedPref"></div>
+      </div>
+    </div>
 
-    <div style="height:6px"></div>
-    <div class="muted">Missing skills</div>
-    <div class="chips" id="missingSkills"></div>
+    <!-- Missing (side by side Required & Preferred) -->
+    <div style="margin-top:8px;" class="muted"><strong>Missing skills</strong></div>
+    <div class="row">
+      <div class="skillBox">
+        <span class="muted">Required</span>
+        <div class="chips" id="missingReq"></div>
+      </div>
+      <div class="skillBox">
+        <span class="muted">Preferred</span>
+        <div class="chips" id="missingPref"></div>
+      </div>
+    </div>
 
     <div class="muted mono" id="matchStatus" style="margin-top:6px;"></div>
   </div>
 
-  <!-- ===== FILLER CONTROLS (unchanged) ===== -->
-  <div id="controls">
-    <button id="fillForm" class="btn">Fill Form</button>
-    <button id="tryAgain" class="btn">Try Again</button>
+  <!-- ===== Card 2: Resume Suggestor ===== -->
+  <div class="card" id="resumeSuggestorCard">
+    <div class="row" style="margin-top:4px;">
+      <strong>Resume Suggestor</strong>
+      <span class="muted" id="jdHint">auto-detected from page</span>
+    </div>
+  
+    <div class="row" style="margin-bottom:4px;">
+      <div class="muted">Suggested resume - <div class="muted mono" id="chosenResume">—</div></div>
+      <div class="muted" id="chosenScore">Match: —</div>
+    </div>
+  
+    <div style="height:6px"></div>
+    <label for="resumeSelect" class="muted">Select resume for comparison</label>
+    <select id="resumeSelect"></select>
+  
+    <div class="muted mono" id="resumeStatus" style="margin-top:6px;">—</div>
+  </div>  
+
+  <!-- ===== Card 3: Apply Helper (Fill Form) ===== -->
+  <div class="card" id="applyCard">
+    <div class="row">
+      <strong>Apply Helper</strong>
+      <span class="muted">pick resume & fill</span>
+    </div>
+
+    <div id="controls" style="display:flex; gap:8px; margin-top:6px;">
+      <button id="fillForm" class="btn">Fill Form</button>
+      <button id="tryAgain" class="btn" style="display:none;">Try Again</button>
+      <button id="openMatcher" class="btn" style="display:none;">Open Side Panel</button>
+    </div>
+
+    <div id="status">Ready…</div>
+
+    <!-- Filled / Non-Filled sections -->
+    <div id="filledToggle" class="section-header">▶ Filled Fields</div>
+    <div id="filledFields" class="field-list" style="display:none;"></div>
+
+    <div id="notFilledToggle" class="section-header">▶ Non-Filled Fields</div>
+    <div id="notFilledFields" class="field-list"></div>
   </div>
-
-  <div id="status">Ready…</div>
-
-  <!-- Self-test controls -->
-  <div id="testArea">
-    <button id="btnBgTest" class="btn">Run BG Self-Test</button>
-    <button id="btnCtDry" class="btn">Dry-Run Fill</button>
-    <button id="btnCtDo" class="btn">Do Deterministic Fill</button>
-  </div>
-
-  <div id="filledToggle" class="section-header">▶ Filled Fields</div>
-  <div id="filledFields" class="field-list" style="display:none;"></div>
-
-  <div id="notFilledToggle" class="section-header">▶ Non-Filled Fields</div>
-  <div id="notFilledFields" class="field-list"></div>
 
   <script src="popup.js"></script>
 </body>

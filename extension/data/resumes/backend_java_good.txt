@@ -1,0 +1,25 @@
+Jordan Li
+Email: jordan.li@example.com | GitHub: github.com/jordanli | LinkedIn: linkedin.com/in/jordanli
+
+Summary
+Backend engineer with a focus on Java microservices and relational databases. Strong SQL and Git workflow; comfortable deploying containerized services. Learning Python for data tasks.
+
+Skills
+Java (Spring Boot) • SQL (MySQL/Postgres) • Git • AWS (EC2, RDS) • Docker • REST APIs • JUnit • Linux • CI/CD
+
+Experience
+Backend Developer | Fintegra | 2023–Present
+- Designed and implemented REST services in Java (Spring Boot), writing JPA entities and migrations.
+- Authored complex SQL queries and indexes that reduced p95 latency for a reporting endpoint by 35%.
+- Containerized services with Docker; deployed test environments on AWS EC2 and RDS.
+- Maintained CI pipelines (GitHub Actions); code reviews and trunk-based development with Git.
+
+Software Engineer (Entry) | DataBridge | 2022–2023
+- Extended Java services with new endpoints and request validation; wrote JUnit tests.
+- Tuned SQL queries and added composite indexes for monthly jobs; added basic metrics/alerts.
+
+Projects
+Invoice Processor (Java, Spring): Batching and retry policies; integration tests and simple observability.
+
+Education
+B.S. Software Engineering, Rutgers University, 2022

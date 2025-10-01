@@ -28,14 +28,15 @@
 
   "host_permissions": [
     "*://*/*",
-    "file://*/*"
+    "file://*/*",
+    "http://127.0.0.1/*", 
+    "http://localhost/*"
   ],
 
   "content_scripts": [
     {
       "matches": ["*://*/*", "file://*/*"],
       "js": ["content.js"],
-      "css": ["styles.css"],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true

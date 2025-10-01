@@ -121,11 +121,19 @@ A Chrome Extension that:
 ---
 
 ### Week 6 — Advanced Features
-- [ ] Multi-resume support (pick best-fit automatically).
-- [ ] Smarter field detection for unusual forms.
-- [ ] Resume optimizer with dynamic keyword suggestions.
+- [x] **Multi-resume support**  
+  - Extension auto-picks the best resume for the detected job description.  
+  - Suggested resume stays frozen; user can compare others via dropdown.  
+  - Inline resume picker always visible, defaults to last choice, and persists.  
 
----
+- [x] **Smarter field detection for unusual forms**  
+  - `content.js` improved DOM parsing: detects labels, placeholders, ARIA attributes, and hidden form structures.  
+  - Handles iframes and “best frame” selection for forms in nested documents.  
+  - Confidence bars + field grouping polished for better clarity.  
+
+**Deliverable:**  
+Full MVP of **AI Job Application Assistant**, combining the smart form filler and job-resume matcher into one interactive Chrome Extension.
+
 
 ### Week 7–8 — Polish & Deploy (Optional)
 - [ ] Package extension for Chrome Web Store (developer mode first).

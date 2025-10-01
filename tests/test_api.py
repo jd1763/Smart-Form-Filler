@@ -1,6 +1,6 @@
 import pytest
 
-from backend.api import app
+from backend.api import app as flask_app
 
 
 # === Test client fixture ===
@@ -8,9 +8,8 @@ from backend.api import app
 # Instead of running the server for real, we can call endpoints directly in tests.
 @pytest.fixture
 def client():
-    app.testing = True  # put Flask in testing mode (better error handling)
-    with app.test_client() as client:
-        yield client
+    flask_app.config["TESTING"] = True
+    return flask_app.test_client()
 
 
 # === Test single prediction ===

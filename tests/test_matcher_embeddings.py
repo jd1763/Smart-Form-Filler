@@ -10,80 +10,60 @@ These tests confirm that the /match endpoint:
 - Does NOT mark "django" missing if resume includes it
 """
 
-import json
-
 import pytest
 
-from backend import matcher_api
+from backend.api import app as flask_app
 
 
 @pytest.fixture
 def client():
-    """Create a Flask test client."""
-    matcher_api.app.config["TESTING"] = True
-    with matcher_api.app.test_client() as client:
-        yield client
+    flask_app.config["TESTING"] = True
+    return flask_app.test_client()
 
 
 def test_health(client):
-    """Health check should return status=ok."""
-    resp = client.get("/health")
-    data = json.loads(resp.data)
-    assert resp.status_code == 200
-    assert data["status"] == "ok"
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+
+
+def _score(client, jd, resume, method="tfidf"):
+    r = client.post("/match", json={"job_description": jd, "resume": resume, "method": method})
+    assert r.status_code == 200
+    return r.get_json()
 
 
 def test_match_tfidf_missing_django(client):
-    """TF-IDF should mark 'django' missing if not in resume."""
-    resp = client.post(
-        "/match",
-        json={
-            "resume": "Python developer with Flask experience",
-            "job_description": "Looking for Python developer with Django and SQL",
-            "method": "tfidf",
-        },
-    )
-    data = json.loads(resp.data)
-    missing_tokens = [
-        kw[0] if isinstance(kw, (list, tuple)) else kw for kw in data["missing_keywords"]
-    ]
-    assert "django" in [m.lower() for m in missing_tokens]
+    jd = "We need Django and React on AWS"
+    resume = "Built React apps on AWS"
+    out = _score(client, jd, resume, "tfidf")
+    assert "similarity_score" in out
+    # loose check: "django" should be in missing keywords
+    missing = [m[0] if isinstance(m, (list, tuple)) else m for m in out.get("missing_keywords", [])]
+    assert "django" in [str(x).lower() for x in missing]
 
 
-def normalize_missing_keywords(missing_keywords):
-    """Convert missing keywords into list of lowercase strings (works for tuple or str)."""
-    normalized = []
-    for kw in missing_keywords:
-        if isinstance(kw, (list, tuple)):
-            normalized.append(str(kw[0]).lower())
-        else:
-            normalized.append(str(kw).lower())
-    return normalized
-
-
+@pytest.mark.skipif(
+    pytest.importorskip("ml.matcher_embeddings", reason="Embeddings model not installed") is None,
+    reason="Embeddings not available",
+)
 def test_match_embedding_missing_django(client):
-    resp = client.post(
-        "/match",
-        json={
-            "resume": "Python developer with Flask experience",
-            "job_description": "Looking for Python developer with Django and SQL",
-            "method": "embedding",
-        },
-    )
-    data = json.loads(resp.data)
-    missing = normalize_missing_keywords(data["missing_keywords"])
-    assert "django" in missing
+    jd = "We need Django and React on AWS"
+    resume = "Built React apps on AWS"
+    out = _score(client, jd, resume, "embedding")
+    assert out.get("method") in ("embedding", "tfidf")  # some envs fallback
+    missing = [m[0] if isinstance(m, (list, tuple)) else m for m in out.get("missing_keywords", [])]
+    assert "django" in [str(x).lower() for x in missing]
 
 
+@pytest.mark.skipif(
+    pytest.importorskip("ml.matcher_embeddings", reason="Embeddings model not installed") is None,
+    reason="Embeddings not available",
+)
 def test_match_embedding_has_django(client):
-    resp = client.post(
-        "/match",
-        json={
-            "resume": "Python developer with Django and Flask experience",
-            "job_description": "Looking for Python developer with Django and SQL",
-            "method": "embedding",
-        },
-    )
-    data = json.loads(resp.data)
-    missing = normalize_missing_keywords(data["missing_keywords"])
-    assert "django" not in missing
+    jd = "We need Django and React on AWS"
+    resume = "Built Django services on AWS with React"
+    out = _score(client, jd, resume, "embedding")
+    assert out.get("method") in ("embedding", "tfidf")
+    missing = [m[0] if isinstance(m, (list, tuple)) else m for m in out.get("missing_keywords", [])]
+    assert "django" not in [str(x).lower() for x in missing]
