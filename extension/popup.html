@@ -15,6 +15,7 @@
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     .btn { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; background: #f3f3f3; cursor: pointer; }
     .btn + .btn { margin-left: 6px; }
+    .btn-primary { background:#111; color:#ffffff; }
     select { width: 100%; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px; font-size: 12px; background: #fff; }
 
     /* Gauge & chips */
@@ -43,6 +44,14 @@
 </head>
 <body>
   <h1>Smart Form Filler</h1>
+  <!-- ===== Card 0: No Resumes Notice ===== -->
+  <div class="card" id="noResumesCard" style="display:none;">
+    <strong>No resumes on file</strong>
+    <p class="muted" style="margin:6px 0 10px;">
+      Upload a resume to see your match score and get a suggested resume.
+    </p>
+    <button id="uploadResumeCTA" class="btn btn-primary">Upload resume</button>
+  </div>
 
   <!-- ===== Card 1: Job Match ===== -->
   <div class="card" id="matchCard">
@@ -122,7 +131,8 @@
     <div id="controls" style="display:flex; gap:8px; margin-top:6px;">
       <button id="fillForm" class="btn">Fill Form</button>
       <button id="tryAgain" class="btn" style="display:none;">Try Again</button>
-      <button id="openMatcher" class="btn" style="display:none;">Open Side Panel</button>
+      <button id="manageProfileBtn" class="btn">Edit My Answers</button>
+      <button id="manageResumesBtn" class="btn">Manage Resumes</button>
     </div>
 
     <div id="status">Ready…</div>

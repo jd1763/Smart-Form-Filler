@@ -1,0 +1,67 @@
+{
+  "personal": {
+    "firstName": "Jorgeluis",
+    "lastName": "Done",
+    "email": "jd1763@scarletmail.rutgers.edu",
+    "phoneNumber": "8482035238",
+    "dob": "2002-08-20",
+    "gender": "Male"
+  },
+  "address": {
+    "street": "598 Elizabeth St",
+    "city": "Perth Amboy",
+    "state": "NJ",
+    "zip": "08861",
+    "country": "United States"
+  },
+  "links": {
+    "linkedin": "https://www.linkedin.com/in/jorgeluis-done/",
+    "github": "https://github.com/jd1763",
+    "website": "https://example.com"
+  },
+  "eligibility": {
+    "authUS": "Yes",
+    "authCA": "No",
+    "authUK": "No",
+    "sponsorship": "No",
+    "disability": "No",
+    "lgbtq": "No",
+    "veteran": "No",
+    "ethnicity": "Hispanic/Latinx"
+  },
+  "education": [
+    {
+      "school": "Rutgers University",
+      "field": "Computer Science",
+      "gpa": "3.5",
+      "startMonth": "9",
+      "startYear": "2023",
+      "endMonth": "5",
+      "endYear": "2025",
+      "degreeShort": "BS",
+      "degreeLong": "Bachelor of Science"
+    },
+    {
+      "school": "Middlesex County College",
+      "field": "Computer Science",
+      "gpa": "3.6",
+      "startMonth": "9",
+      "startYear": "2021",
+      "endMonth": "8",
+      "endYear": "2023",
+      "degreeShort": "AS",
+      "degreeLong": "Associate of Science"
+    }
+  ],
+  "experience": [
+    {
+      "company": "Target",
+      "jobTitle": "Team Member Trainer",
+      "description": "▪ Delivered training programs for new hires, accelerating onboarding and improving team performance.\n▪ Used in-store systems to schedule shipments, track trailer arrivals, and manage inventory operations.\n▪ Maintained communication with leadership teams to support logistics and resolve operational issues.\n▪ Supported daily warehouse operations by assisting with inventory movement, equipment handling, and task\ncoordination to ensure smooth workflows.",
+      "startMonth": "2",
+      "startYear": "2021",
+      "endMonth": "6",
+      "endYear": "2024"
+    }
+  ]
+}

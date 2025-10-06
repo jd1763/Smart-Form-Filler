@@ -15,6 +15,8 @@
     "default_title": "Smart Form Filler" 
   },
 
+  "options_page": "resumes.html",
+
   "background": { 
     "service_worker": "background.js" 
   },
@@ -23,7 +25,8 @@
     "scripting",
     "storage",
     "tabs",
-    "webNavigation"
+    "webNavigation",
+    "activeTab"
   ],
 
   "host_permissions": [
@@ -35,7 +38,7 @@
 
   "content_scripts": [
     {
-      "matches": ["*://*/*", "file://*/*"],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": true,
@@ -45,7 +48,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["data/resumes/*.txt"],
+      "resources": ["data/resumes/*.txt", "styles.css"],
       "matches": ["<all_urls>"]
     }
   ]

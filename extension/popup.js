@@ -7,6 +7,7 @@ const err = (...a) => console.error("[popup]", ...a);
 
 /* ===================== MATCHER CONFIG ===================== */
 const MATCH_API_BASE = "http://127.0.0.1:5000"; // api.py host/port
+const RESUME_API_BASE = MATCH_API_BASE; 
 const MATCH_ROUTE = "/match";
 
 // Tight whitelist so “missing skills” stays clean
@@ -229,19 +230,19 @@ function computeDisplayScore({ apiBasePct, jdText, missing }) {
 }
 
 /* ===================== API CALLS ===================== */
-async function callMethod(method, job_text, resume_text) {
+async function callMethod(method, job_text, resume_id) {
   const r = await fetch(MATCH_API_BASE + MATCH_ROUTE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ resume: resume_text, job_description: job_text, method })
+    body: JSON.stringify({ resume_id, job_description: job_text, method })
   });
   if (!r.ok) throw new Error(`match ${method} ${r.status}`);
   return r.json();
 }
-async function callBoth(job_text, resume_text){
+async function callBoth(job_text, resume_id){
   const [t, e] = await Promise.allSettled([
-    callMethod("tfidf", job_text, resume_text),
-    callMethod("embedding", job_text, resume_text)
+    callMethod("tfidf", job_text, resume_id),
+    callMethod("embedding", job_text, resume_id)
   ]);
   const resT = t.status==="fulfilled" ? t.value : null;
   const resE = e.status==="fulfilled" ? e.value : null;
@@ -250,6 +251,24 @@ async function callBoth(job_text, resume_text){
 }
 
 /* ===================== CONTENT HELPERS ===================== */
+function showNoResumesCard() {
+  const card = document.getElementById("noResumesCard");
+  const matchCard = document.getElementById("matchCard");
+  const suggestor = document.getElementById("resumeSuggestorCard");
+  const fillBtn = document.getElementById("fillForm");
+  if (card) card.style.display = "";
+  if (matchCard) matchCard.style.display = "none";
+  if (suggestor) suggestor.style.display = "none";
+  if (fillBtn) { fillBtn.disabled = true; fillBtn.title = "Upload a resume first"; }
+}
+
+function hideNoResumesCard() {
+  const card = document.getElementById("noResumesCard");
+  const fillBtn = document.getElementById("fillForm");
+  if (card) card.style.display = "none";
+  if (fillBtn) { fillBtn.disabled = false; fillBtn.title = ""; }
+}
+
 async function getActiveTab(){
   return new Promise(res=>{
     chrome.tabs.query({active:true,currentWindow:true},tabs=>res(tabs?.[0]||null));
@@ -303,25 +322,21 @@ async function getJobDescription(){
 }
 
 /* ===================== RESUME STORAGE ===================== */
-async function ensureSeededResume(){
-  const { resumes } = await chrome.storage.local.get("resumes");
-  if (Array.isArray(resumes) && resumes.some(r => (r.text||"").trim().length)) return;
+async function loadAllResumesFromBackend(){
   try{
-    const url = chrome.runtime.getURL("data/resumes/resume11_jorgeluis_done.txt");
-    const resp = await fetch(url);
-    if(resp.ok){
-      const text=(await resp.text()).trim();
-      if(text){
-        const seed=[{ id:crypto.randomUUID(), name:"Jorgeluis — Base Resume", text, lastUpdated:Date.now() }];
-        await chrome.storage.local.set({ resumes: seed });
-        log("Seeded resume from data/resumes/resume11_jorgeluis_done.txt");
-      }
-    }
-  }catch(e){ err("resume seed:", e); }
-}
-async function loadAllResumes(){
-  const resumes = (await chrome.storage.local.get("resumes")).resumes || [];
-  return resumes.filter(r => (r.text||"").trim());
+    const r = await fetch(`${RESUME_API_BASE}/resumes`);
+    const data = await r.json();
+    // Return minimal objects used by the UI
+    return (data.items||[]).map(it => ({
+      id: it.id,
+      name: it.original_name,
+      // we don’t need text; /match will read by id
+      createdAt: it.created_at
+    }));
+  }catch(e){
+    console.error("[popup] backend /resumes error:", e);
+    return [];
+  }
 }
 async function getLastResumeId(){
   return (await chrome.storage.local.get("lastResumeId")).lastResumeId || null;
@@ -398,7 +413,8 @@ async function autoMatch(){
   // Hook UI
   elsM.arc = document.getElementById("arc");
   elsM.scoreNum = document.getElementById("scoreNum");
-  elsM.hint = document.getElementById("matchHint");
+  // FIX: your popup.html uses id="jdHint2"
+  elsM.hint = document.getElementById("jdHint2"); 
   elsM.status = document.getElementById("matchStatus");
   const matchCard = document.getElementById("matchCard");
   const hideMatch = () => { if(matchCard) matchCard.style.display = "none"; };
@@ -410,9 +426,14 @@ async function autoMatch(){
   if (elsM.status) elsM.status.textContent = "";
 
   // Ensure resumes + inline picker (always visible)
-  await ensureSeededResume();
-  const resumes = await loadAllResumes();
-  if (!resumes.length){ hideMatch(); ensureInlineResumePicker([]); return; }
+  const resumes = await loadAllResumesFromBackend();
+  if (!resumes.length){
+    showNoResumesCard();
+    // keep inline picker empty (if you show it at all)
+    ensureInlineResumePicker([]);
+    return;
+  }
+  hideNoResumesCard();
   ensureInlineResumePicker(resumes);
 
   // Read JD
@@ -428,7 +449,6 @@ async function autoMatch(){
     if (suggestor) suggestor.style.display = "none";
     return;
   }
-  
 
   showMatch();
   if (elsM.hint) elsM.hint.textContent = note || "detected from page";
@@ -437,7 +457,8 @@ async function autoMatch(){
     // For each resume → run both methods → normalize → compute display score → choose best
     let best = null;
     for (const r of resumes) {
-      const both = await callBoth(jd, r.text);
+      // IMPORTANT: pass resume_id (not text)
+      const both = await callBoth(jd, r.id);
       const nT = both.tfidf ? normalizeMatchResponse(both.tfidf, jd) : null;
       const nE = both.embedding ? normalizeMatchResponse(both.embedding, jd) : null;
 
@@ -462,8 +483,10 @@ async function autoMatch(){
     setArc(best.score);
     renderBucketsIntoUI(computeBucketsFromJDAndMissing(jd, best.missing || []));
 
+    // FIX: backend resumes have createdAt (ISO string); fall back if missing
     if (elsM.status) {
-      elsM.status.textContent = `Using: ${best.resume.name || best.resume.id} · added ${fmtDateTime(best.resume.lastUpdated||Date.now())}`;
+      const when = best.resume.createdAt ? Date.parse(best.resume.createdAt) : Date.now();
+      elsM.status.textContent = `Using: ${best.resume.name || best.resume.id} · uploaded ${fmtDateTime(when)}`;
     }
 
     // Resume Suggestor card dropdown
@@ -478,12 +501,12 @@ async function autoMatch(){
       dd.innerHTML = "";
       resumes.forEach(r => {
         const o = document.createElement("option");
-        o.value = r.id || r.name;
+        o.value = r.id;                                   // FIX: value = id
         o.textContent = r.name || r.id || "(untitled)";
         dd.appendChild(o);
       });
 
-      dd.value = best.resume.id || best.resume.name || dd.options[0]?.value || "";
+      dd.value = best.resume.id;
       const _bestPct = Math.max(0, Math.min(100, Number(best.score) || 0));
 
       if (chosenEl)   chosenEl.textContent   = best.resume.name || best.resume.id || "(untitled)";
@@ -493,12 +516,13 @@ async function autoMatch(){
       if (resumeStatusEl) resumeStatusEl.textContent = "Suggested resume selected. Change to compare.";
 
       dd.addEventListener("change", async () => {
-        const sel = resumes.find(r => (r.id||r.name) === dd.value);
+        const sel = resumes.find(r => r.id === dd.value); // FIX: match by id
         if (!sel) return;
         try {
           if (resumeStatusEl) resumeStatusEl.textContent = "Scoring selected resume…";
 
-          const both = await callBoth(jd, sel.text);
+          // IMPORTANT: pass resume_id for selection too
+          const both = await callBoth(jd, sel.id);
           const nT = both.tfidf     ? normalizeMatchResponse(both.tfidf, jd)     : null;
           const nE = both.embedding ? normalizeMatchResponse(both.embedding, jd) : null;
 
@@ -512,7 +536,10 @@ async function autoMatch(){
           // Re-render side-by-side buckets for the selection
           renderBucketsIntoUI(computeBucketsFromJDAndMissing(jd, missingUnion));
 
-          if (elsM.status) elsM.status.textContent = `Using: ${sel.name || sel.id} · added ${fmtDateTime(sel.lastUpdated||Date.now())}`;
+          if (elsM.status) {
+            const when = sel.createdAt ? Date.parse(sel.createdAt) : Date.now();
+            elsM.status.textContent = `Using: ${sel.name || sel.id} · uploaded ${fmtDateTime(when)}`;
+          }
           if (selectedEl)  selectedEl.textContent  = sel.name || sel.id || "(untitled)";
           const _selPct = Math.max(0, Math.min(100, Number(dispScore) || 0));
           if (selectedSc)  selectedSc.textContent  = `Match: ${_selPct}%`;
@@ -618,8 +645,7 @@ async function preloadAndRestore(){
   const url = tab.url||"";
 
   // Inline resume picker (always show)
-  await ensureSeededResume();
-  const resumes = await loadAllResumes();
+  const resumes = await loadAllResumesFromBackend();
   ensureInlineResumePicker(resumes);
 
   // toggles + last results
@@ -712,6 +738,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 // Buttons
 document.getElementById("fillForm")?.addEventListener("click", runFill);
 document.getElementById("tryAgain")?.addEventListener("click", runFill);
+document.getElementById("manageProfileBtn")?.addEventListener("click", () => {
+  // open the profile editor page
+  const url = chrome.runtime.getURL("profile.html");
+  window.open(url, "_blank");
+});
+document.getElementById("manageResumesBtn")?.addEventListener("click", () => {
+  if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
+  else window.open(chrome.runtime.getURL("resumes.html"));
+});
+document.getElementById("uploadResumeCTA")?.addEventListener("click", () => {
+  if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
+  else window.open(chrome.runtime.getURL("resumes.html"));
+});
+
 
 // Optional: open side panel if you still keep it
 document.getElementById("openMatcher")?.addEventListener("click", () => {

@@ -134,11 +134,46 @@ A Chrome Extension that:
 **Deliverable:**  
 Full MVP of **AI Job Application Assistant**, combining the smart form filler and job-resume matcher into one interactive Chrome Extension.
 
+---
 
-### Week 7–8 — Polish & Deploy (Optional)
-- [ ] Package extension for Chrome Web Store (developer mode first).
-- [ ] Add persistence with SQLite/JSON for resumes and profile data.
-- [ ] Deploy Flask backend to Heroku/Render.
+### Week 7–8 — Polish & Deploy (Resume Vault + Profile Backend + Popup UX)
+
+### What’s new
+- **Backend Resume Vault**
+  - `POST /resumes` — upload PDF/DOCX. We save the original file and extract text to `.txt`.
+  - `GET /resumes` — list uploaded resumes (id, name, size, created_at).
+  - `GET /resumes/<id>/file` — stream the original PDF/DOCX (for “View PDF” in UI).
+  - `GET /resumes/<id>/text` — returns extracted text (debug).
+  - `DELETE /resumes/<id>` — removes DB row + files.
+  - **Storage root:** `backend/data/` (not inside the extension). Original files under `data/resumes/`, extracted text under `data/text/`.
+  - **Limit:** max 5 resumes enforced server-side.
+
+- **Matcher & Resume Suggestor**
+  - Popup now loads resumes from the backend and calls:
+    - `POST /match` with `{ resume_id, job_description }`.
+  - `/match` accepts either `resume_id` (preferred) or raw `resume` text and returns:
+    - `similarity_score` (0–1), `missing_keywords`, and which method was used.
+  - **Self-healing paths:** if files were moved from `uploads/` to `data/`, `/match` repairs paths and re-extracts text as needed.
+
+- **Profile (“Edit My Answers”) — server-backed**
+  - New endpoints:
+    - `GET /profile` → serve `backend/data/profile.json`.
+    - `POST /profile` → save edits to `backend/data/profile.json`.
+  - Editor UI supports:
+    - **Degree single dropdown** (e.g., “B.S. — Bachelor of Science”) mapped to `degreeShort` + `degreeLong`.
+    - **Month/Year selectors** for Education and Experience (`startMonth`, `startYear`, `endMonth`, `endYear`).
+    - Date of Birth as native `<input type=date>`.
+    - Eligibility/self-ID radios & selects with clean alignment.
+  - “Fill This Page Now” sends the current in-memory profile to the content script (`EXT_FILL_FROM_PROFILE`).
+
+- **Popup UX**
+  - **No resumes on file** card with CTA → “Upload resume” opens the Manage Resumes page.
+  - Removed the old **Fill (My Answers)** button from popup to avoid clutter.
+  - CSP violation fixed by removing inline `<script>` in `popup.html` and moving handlers to `popup.js`.
+
+- **Styling**
+  - Centralized button/hover/focus styles and select focus rings in `styles.css`.
+
 
 ---
 ## Setup

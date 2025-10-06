@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Resume Vault</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { font: 14px system-ui; margin: 20px; }
+    .row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; background: #fff; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; font-size:13px; }
+    .muted { color: #64748b; }
+    .btn { border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
+    .btn-primary { background:#111; color:#ffffff; }
+    .btn-danger { background:#ef4444; color:#fff; }
+    .btn-ghost { background:#f3f4f6; }
+    .cap { font-weight:600; }
+  </style>
+</head>
+<body>
+  <h1>Resume Vault</h1>
+  <p class="muted">Upload up to <span id="maxCount">5</span> resumes. We store the original PDF/DOCX for preview and a text version for matching.</p>
+
+  <div class="row">
+    <div class="card">
+      <h2 class="cap">Uploaded Resumes</h2>
+      <table id="resumeTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Uploaded (UTC)</th>
+            <th>Size</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="resumeTbody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2 class="cap">Upload New</h2>
+      <input id="fileInput" type="file" accept=".pdf,.docx" />
+      <div style="margin-top:10px;">
+        <button id="uploadBtn" class="btn btn-primary">Upload</button>
+        <span id="uploadHint" class="muted"></span>
+      </div>
+
+      <hr style="margin:16px 0;">
+      <p class="muted">Tip: You can preview any uploaded resume via the “View PDF” button in the table.</p>
+    </div>
+  </div>
+
+  <script src="resumes.js"></script>
+</body>
+</html>

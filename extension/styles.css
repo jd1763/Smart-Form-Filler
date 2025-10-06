@@ -147,3 +147,64 @@ body { background: #fff; color: var(--ink); }
 /* Make lists scroll nice */
 .field-list { max-height: 260px; overflow: auto; }
 
+/* ===== Buttons: variants & states (shared) ===== */
+:root{
+  --btn-primary: #111827;
+  --btn-primary-hover: #2563eb;
+  --btn-primary-active: #1d4ed8;
+
+  --btn-danger: #ef4444;
+  --btn-danger-hover: #dc2626;
+  --btn-danger-active: #b91c1c;
+
+  --btn-ghost: #f3f4f6;
+  --btn-ghost-hover: #e5e7eb;
+  --btn-ghost-active: #d1d5db;
+
+  --focus-ring: #93c5fd;
+}
+
+/* base already exists, add transitions */
+.btn {
+  transition: background-color 120ms ease, transform 80ms ease, border-color 120ms ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* variants */
+.btn-primary { background: var(--btn-primary); color: #fff; border-color: transparent; }
+.btn-primary:hover  { background: var(--btn-primary-hover); }
+.btn-primary:active { background: var(--btn-primary-active); }
+
+.btn-danger { background: var(--btn-danger); color: #fff; border-color: transparent; }
+.btn-danger:hover  { background: var(--btn-danger-hover); }
+.btn-danger:active { background: var(--btn-danger-active); }
+
+.btn-ghost { background: var(--btn-ghost); color: var(--ink); }
+.btn-ghost:hover  { background: var(--btn-ghost-hover); }
+.btn-ghost:active { background: var(--btn-ghost-active); }
+
+/* ===== Selects (shared) ===== */
+select {
+  background: #fff;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+select:hover { background: #f9fafb; }
+select:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 40%, transparent);
+}
+
+/* Better alignment for radio groups in the profile editor */
+.elig-row { display: flex; gap: 12px; align-items: center; }
+.elig-row label { display: flex; align-items: center; gap: 6px; margin: 0; }
+.elig-row input[type="radio"] { margin: 0; transform: translateY(0.5px); }

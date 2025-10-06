@@ -79,6 +79,7 @@
     "oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT",
     "virginia":"VA","washington":"WA","west virginia":"WV","wisconsin":"WI","wyoming":"WY"
   };
+  
   const ABBR_TO_STATE = Object.fromEntries(Object.entries(STATE_TO_ABBR).map(([k,v]) => [v, k.replace(/\b\w/g, c => c.toUpperCase())]));
   const toAbbr = (v) => STATE_TO_ABBR[lower(v)] || (v || "").toString().toUpperCase();
   const sameNormalized = (a,b) => { const A = norm(a), B = norm(b); return A===B || A.includes(B) || B.includes(A); };
@@ -341,6 +342,380 @@
     }
   }
 
+  // === Week 8 ===
+// ----- Month names + date formatting -----
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function fmtMonthYear(m, y, style="long"){
+  if (!m && !y) return "";
+  if (style === "MM/YYYY") {
+    const mm = String(m||"").padStart(2,"0");
+    return `${mm}/${y||""}`.trim();
+  }
+  const monthName = MONTHS[(Number(m)||0)-1] || "";
+  return `${monthName} ${y||""}`.trim();
+}
+
+// ----- Try multiple values on either a select or input -----
+function trySetSelectOrInput(el, values){
+  for (const v of values){
+    if (!v) continue;
+    if (el.tagName.toLowerCase()==="select") {
+      if (setSelectValue(el, v)) return true;        // your existing robust matcher
+    } else {
+      el.value = String(v);
+      fireAll(el);
+      return true;
+    }
+  }
+  // If it's a select and nothing matched, fallback to closest option (token overlap)
+  if (el.tagName.toLowerCase()==="select") {
+    return trySelectClosest(el, values);
+  }
+  return false;
+}
+
+// ----- "Closest" select option by token overlap (lightweight fuzzy) -----
+function normTokens(s){
+  return String(s||"").toLowerCase().replace(/[^a-z0-9+./\s-]/g," ").split(/\s+/).filter(Boolean);
+}
+function overlapScore(a, b){
+  const A = new Set(normTokens(a)), B = new Set(normTokens(b));
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  return inter / Math.max(A.size, B.size);
+}
+function trySelectClosest(select, candidates){
+  const opts = Array.from(select.options);
+  let bestIdx = -1, bestScore = 0;
+  for (let i=0;i<opts.length;i++){
+    const text = opts[i].text || opts[i].value;
+    for (const cand of candidates){
+      const s = overlapScore(text, cand);
+      if (s > bestScore) { bestScore = s; bestIdx = i; }
+    }
+  }
+  if (bestIdx >= 0 && bestScore >= 0.5) {      // only pick if reasonably close
+    select.selectedIndex = bestIdx;
+    select.dispatchEvent(new Event("change", { bubbles:true }));
+    return true;
+  }
+  return false;
+}
+  
+  // === Simple profile-based filler (Week 7) ===
+  // Lightweight helpers you can call with a structured profile object.
+  function _setValue(el, val) {
+    if (!el) return false;
+    try {
+      el.focus();
+      el.value = String(val ?? "");
+      fireAll(el);
+      return true;
+    } catch { return false; }
+  }
+
+  function _setSelect(select, value) {
+    if (!select) return false;
+    // Reuse robust select matching from setSelectValue
+    return setSelectValue(select, value);
+  }
+
+  function _setCheckboxesByName(name, values) {
+    const want = new Set((values || []).map(v => String(v).toLowerCase()));
+    const boxes = document.querySelectorAll(`input[type="checkbox"][name="${CSS.escape(name)}"]`);
+    let hit = false;
+    boxes.forEach(b => {
+      const val = String(b.value || "").toLowerCase();
+      if (want.has(val) && !b.checked) { b.click(); hit = true; }
+    });
+    return hit;
+  }
+
+  // Try a few id/name candidates
+  function _byIdOrName(...ids) {
+    for (const id of ids) {
+      const el = document.getElementById(id) || document.querySelector(`[name="${CSS.escape(id)}"]`);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  // Map of canonical profile keys → common id/name synonyms on forms
+  const PROFILE_MAP = {
+    firstName:  ["first_name_input","firstName","first_name","fname","first"],
+    lastName:   ["last_name_input","lastName","last_name","lname","last","surname","family_name"],
+    email:      ["email_input","email","emailAddress","contact_email"],
+    phoneNumber:["phone_input","phone","mobile","tel","telephone"],
+    linkedin:   ["linkedin_url","linkedin","profile_linkedin"],
+    github:     ["github_url","github","portfolio","website","site","url"],
+
+    // Address
+    street:     ["addr_line1","address","address1","street","address_line1","line1"],
+    city:       ["addr_city","city","town"],
+    state:      ["addr_state","state","province","region","stateProvince"],
+    zip:        ["addr_zip","zip","postal","postcode","postal_code"],
+    country:    ["country_sel","country"],
+
+    // Employment / education (examples)
+    company:    ["company","employer","organization"],
+    jobTitle:   ["job_title","title","position","role"],
+    start_date: ["start_date","employment_start","start"],
+    end_date:   ["end_date","employment_end","end"],
+
+    // Radios / selects
+    gender:     ["gender","sex"],
+    dob:        ["dob","birth_date","date_of_birth"]
+  };
+
+  // Fill by direct key → element mapping
+  function fillFromProfile(profile = {}) {
+    let fills = 0;
+
+    // Inputs & selects by PROFILE_MAP
+    for (const [key, ids] of Object.entries(PROFILE_MAP)) {
+      const val = profile[key];
+      if (val == null || val === "") continue;
+
+      const el = _byIdOrName(...ids);
+      if (!el) continue;
+
+      const tag = (el.tagName||"").toLowerCase();
+      const type = (el.type || "").toLowerCase();
+
+      if (tag === "select") {
+        if (_setSelect(el, val)) fills++;
+        continue;
+      }
+
+      if (type === "radio") {
+        // choose by label/value match within group
+        const name = el.getAttribute("name") || ids.find(Boolean);
+        if (name) {
+          const group = document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
+          for (const r of group) {
+            const lt = labelTextFor(r);
+            if (sameNormalized(lt, val) || sameNormalized(r.value, val)) {
+              if (!r.checked) { r.checked = true; fireAll(r); fills++; }
+              break;
+            }
+          }
+        }
+        continue;
+      }
+
+      if (type === "checkbox") {
+        // If profile value is boolean, set this single box; if array, use name-based group set
+        if (Array.isArray(val)) {
+          const name = el.getAttribute("name");
+          if (name) { if (_setCheckboxesByName(name, val)) fills++; }
+        } else {
+          const want = (val === true || String(val).toLowerCase() === "true");
+          if (el.checked !== want) { el.checked = want; fireAll(el); fills++; }
+        }
+        continue;
+      }
+
+      if (el.isContentEditable || el.getAttribute("contenteditable") === "" || el.getAttribute("contenteditable") === "true") {
+        el.innerText = String(val);
+        fireAll(el);
+        fills++;
+        continue;
+      }
+
+      if (_setValue(el, val)) fills++;
+    }
+
+    // Example: skills checkboxes by shared name=skills
+    if (Array.isArray(profile.skills) && profile.skills.length) {
+      if (_setCheckboxesByName("skills", profile.skills)) fills++;
+    }
+
+    return fills;
+  }
+
+    // === Repeating group filler (education[], experience[]) ===
+  // Strategy:
+  //  1) Find groups/sections by common patterns (fieldset, section, data-section="education", etc.).
+  //  2) For each found block, try to locate child controls via id/name/label synonyms.
+  //  3) Fill items[i] into block i (up to min(blocks, items.length)).
+
+  function queryGroupBlocks(hints) {
+    // Try the most specific selectors first, then fall back.
+    const sels = [
+      ...hints.map(h => `[data-section="${h}"]`),
+      ...hints.map(h => `[data-group="${h}"]`),
+      ...hints.map(h => `section.${h}, .${h}-section, .${h}-block, .${h}-item`),
+      ...hints.map(h => `fieldset.${h}, fieldset[data-type="${h}"]`),
+      ...hints.map(h => `div.${h}, div.${h}-item, div.${h}-block`)
+    ];
+    const seen = new Set();
+    const blocks = [];
+    for (const sel of sels) {
+      document.querySelectorAll(sel).forEach(el => {
+        if (!seen.has(el)) { seen.add(el); blocks.push(el); }
+      });
+      if (blocks.length) break; // keep first match set to avoid duplicates
+    }
+    // If nothing matched, fall back to generic repeaters:
+    if (!blocks.length) {
+      document.querySelectorAll("fieldset, section, .group, .repeater, .repeatable").forEach(el => {
+        if (!seen.has(el)) { seen.add(el); blocks.push(el); }
+      });
+    }
+    return blocks;
+  }
+
+  function findInBlock(block, idsOrNames) {
+    for (const key of idsOrNames) {
+      const el = block.querySelector(`#${CSS.escape(key)}`) ||
+                 block.querySelector(`[name="${CSS.escape(key)}"]`);
+      if (el) return el;
+    }
+    // Try label text within block
+    for (const key of idsOrNames) {
+      const lc = key.replace(/[_-]/g, " ").toLowerCase();
+      const labeled = Array.from(block.querySelectorAll("label")).find(l => (l.innerText||"").trim().toLowerCase().includes(lc));
+      if (labeled) {
+        const forId = labeled.getAttribute("for");
+        if (forId) {
+          const byFor = block.querySelector(`#${CSS.escape(forId)}`);
+          if (byFor) return byFor;
+        }
+        // nearest input/select/textarea
+        const nearby = labeled.parentElement?.querySelector("input,select,textarea");
+        if (nearby) return nearby;
+      }
+    }
+    return null;
+  }
+
+  // Per-group field synonym maps
+  const EDU_FIELD_MAP = {
+    school:    ["school","university","college","institute","education_school"],
+    degree:    ["degree","qualification"],
+    field:     ["field","major","study","field_of_study"],
+    startDate: ["start","start_date","education_start","from"],
+    endDate:   ["end","end_date","education_end","to"],
+    gpa:       ["gpa","grade","cgpa"]
+  };  
+
+  const EXP_FIELD_MAP = {
+    company:    ["company","employer","organization","org","company_name"],
+    jobTitle:   ["title","job_title","position","role"],
+    startDate:  ["start","start_date","employment_start","from"],
+    endDate:    ["end","end_date","employment_end","to"],
+    description:["description","summary","role_description","responsibilities","duties"]
+  };  
+
+  function fillEducationArray(edus = []) {
+    if (!Array.isArray(edus) || !edus.length) return 0;
+    const blocks = queryGroupBlocks(["education","edu","school"]);
+    let filled = 0;
+  
+    for (let i = 0; i < Math.min(blocks.length, edus.length); i++) {
+      const b = blocks[i], item = edus[i];
+  
+      for (const [key, synonyms] of Object.entries(EDU_FIELD_MAP)) {
+        const el = findInBlock(b, synonyms);
+        if (!el) continue;
+  
+        // Degree: try short/long/both ("BS", "Bachelor of Science", "BS — Bachelor of Science")
+        if (key === "degree") {
+          const short = (item.degreeShort || "").trim();
+          const long  = (item.degreeLong  || "").trim();
+          const both1 = short && long ? `${short} — ${long}` : "";
+          const both2 = short && long ? `${short} - ${long}`  : "";
+          const candidates = [short, long, both1, both2].filter(Boolean);
+          if (candidates.length && trySetSelectOrInput(el, candidates)) filled++;
+          continue;
+        }
+  
+        // Dates: prefer "Month YYYY", fallback "MM/YYYY"
+        if (key === "startDate") {
+          const vals = [
+            fmtMonthYear(item.startMonth, item.startYear, "long"),
+            fmtMonthYear(item.startMonth, item.startYear, "MM/YYYY")
+          ];
+          if (trySetSelectOrInput(el, vals)) filled++;
+          continue;
+        }
+        if (key === "endDate") {
+          const vals = [
+            fmtMonthYear(item.endMonth, item.endYear, "long"),
+            fmtMonthYear(item.endMonth, item.endYear, "MM/YYYY")
+          ];
+          if (trySetSelectOrInput(el, vals)) filled++;
+          continue;
+        }
+  
+        // Everything else
+        const val = item[key];
+        if (val != null) {
+          if (el.tagName.toLowerCase() === "select") setSelectValue(el, val);
+          else { el.value = String(val); fireAll(el); }
+          filled++;
+        }
+      }
+    }
+    return filled;
+  }  
+
+  function fillExperienceArray(exps = []) {
+    if (!Array.isArray(exps) || !exps.length) return 0;
+    const blocks = queryGroupBlocks(["experience","exp","employment","work"]);
+    let filled = 0;
+  
+    for (let i = 0; i < Math.min(blocks.length, exps.length); i++) {
+      const b = blocks[i], item = exps[i];
+  
+      for (const [key, synonyms] of Object.entries(EXP_FIELD_MAP)) {
+        const el = findInBlock(b, synonyms);
+        if (!el) continue;
+  
+        if (key === "startDate") {
+          const vals = [
+            fmtMonthYear(item.startMonth, item.startYear, "long"),
+            fmtMonthYear(item.startMonth, item.startYear, "MM/YYYY")
+          ];
+          if (trySetSelectOrInput(el, vals)) filled++;
+          continue;
+        }
+        if (key === "endDate") {
+          const vals = [
+            fmtMonthYear(item.endMonth, item.endYear, "long"),
+            fmtMonthYear(item.endMonth, item.endYear, "MM/YYYY")
+          ];
+          if (trySetSelectOrInput(el, vals)) filled++;
+          continue;
+        }
+  
+        let val = item[key];
+        if (val != null) {
+          if (el.tagName.toLowerCase() === "select") setSelectValue(el, val);
+          else { el.value = String(val); fireAll(el); }
+          filled++;
+        }
+      }
+    }
+    return filled;
+  }
+  
+  // Wrap into the main profile filler: call these after the scalar fields
+  function fillFromProfileWithArrays(profile = {}) {
+    let total = 0;
+    total += fillFromProfile(profile.personal || profile); // reuse singles (firstName, etc.)
+    // address/links if your form uses single blocks (outside repeaters)
+    const addr = profile.address || {};
+    const links = profile.links || {};
+    total += fillFromProfile({ ...addr, ...links });
+
+    total += fillEducationArray(profile.education || []);
+    total += fillExperienceArray(profile.experience || []);
+    return total;
+  }
+
   // ---------- SELF-TEST: deterministic mapping without ML ----------
   function detectKeyByAttrs(inputEl) {
     const attrs = [
@@ -466,14 +841,6 @@
         const catalog = Object.entries(ALL_FIELDS).map(([key, label]) => ({ key, label }));
         sendResponse({ ok: true, catalog, v: CONTENT_VERSION }); return;
       }
-      if (req.action === "content.selftest") {
-        const dry = req?.dryRun !== false; // default true
-        getUserData().then((ud) => {
-          const result = deterministicFill(ud, dry);
-          sendResponse({ ok: true, ...result, dryRun: dry });
-        });
-        return true;
-      }
       if (req.action === "fillFormSmart") {
         scanAndFill().then(sendResponse);
         return true;
@@ -481,6 +848,17 @@
       if (req.action === "EXT_GET_JOB_DESC") {
         const jd = extractJD();
         sendResponse({ ok: true, jd });
+        return;
+      }
+      if (req.action === "EXT_FILL_FROM_PROFILE") {
+        try {
+          const profile = req?.profile || {};
+          const count = fillFromProfileWithArrays(profile);
+          sendResponse({ ok: true, filledCount: count });
+        } catch (e) {
+          console.error("[content] EXT_FILL_FROM_PROFILE error:", e);
+          sendResponse({ ok: false, error: String(e) });
+        }
         return;
       }
       if (req.action === "EXT_GET_FILLER_SUMMARY") {

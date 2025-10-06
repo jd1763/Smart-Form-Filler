@@ -4,3 +4,6 @@ joblib
 scikit-learn==1.6.1
 nltk
 numpy<2  # lock here as well for consistency
+SQLAlchemy
+pdfminer.six
+python-docx

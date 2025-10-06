@@ -1,4 +1,3 @@
-import json
 import re
 from typing import Dict, List, Tuple
 
@@ -51,8 +50,3 @@ def select_best_resume(jd_text: str, resumes: List[Dict]) -> Tuple[Dict, List[Tu
     best = ranked[0][0]
     ranking = [(r["id"], float(s)) for r, s in ranked]
     return best, ranking
-
-
-def load_resumes(resumes_path: str) -> List[Dict]:
-    with open(resumes_path, "r", encoding="utf-8") as f:
-        return json.load(f)
