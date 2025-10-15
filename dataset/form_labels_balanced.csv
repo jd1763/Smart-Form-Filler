@@ -39,6 +39,63 @@ Postal Code,address
 Apartment,address
 Residential Address,address
 Town,address
+County,address
+Parish,address
+Borough,address
+Shire,address
+Province,address
+Municipality,address
+District,address
+Region,address
+Area,address
+Locality,address
+Prefecture,address
+Commune,address
+Canton,address
+Departamento,address
+Estado,address
+Emirate,address
+Suburb,address
+Ward,address
+Tehsil,address
+Taluk,address
+Canton,address
+Canton / Province,address
+Province / Canton,address
+Canton (Region),address
+State / Province / Canton,address
+City,address
+Town,address
+State,address
+Province,address
+Region,address
+Zip,address
+Zip Code,address
+Postal Code,address
+Postcode,address
+Country,address
+Nation,address
+County,address
+Municipality,address
+District,address
+Locality,address
+Area,address
+Prefecture,address
+Commune,address
+Canton,address
+Departamento,address
+Suburb,address
+Ward,address
+Tehsil,address
+Taluk,address
+State / Province,address
+City / Town,address
+Postcode / Zip Code,address
+Country / Nation,address
+Company HQ Address,address
+Street Address,address
+Permanent Address,address
+Mailing Address,address
 Background check consent,background_check
 Consent to background check,background_check
 I agree to a background check,background_check
@@ -119,6 +176,42 @@ Date Born,birth_date
 Birth Details,birth_date
 Birth Record,birth_date
 Date of Birth Field,birth_date
+Organization,company
+Employer,company
+Hiring Company,company
+Business,company
+Corporation,company
+Company Name,company
+Company Name Legal,company
+Company Legal Name,company
+Company Division,company
+Company Department,company
+Subsidiary,company
+Parent Company,company
+Hiring Organization,company
+Hiring Company,company
+Employer Company,company
+Employer Organization,company
+Corporate Name,company
+Corporation Name,company
+Business Unit,company
+Operating Unit,company
+Office Location Company,company
+Company Location,company
+Company Headquarters,company
+Headquarters Company,company
+HQ Company,company
+Current Company,company
+Current Employer,company
+Previous Company,company
+Previous Employer,company
+Most Recent Employer,company
+Last Employer,company
+Company URL,company
+Company Website,company
+Employer Website,company
+Organization Website,company
+Workplace Name,company
 Company,company
 Employer Name,company
 Organization Name,company
@@ -159,6 +252,13 @@ Corporation,company
 Firm,company
 Office,company
 Employer,company
+Male,demographics
+Female,demographics
+Non-binary,demographics
+Prefer not to say,demographics
+Gender: Male,demographics
+Gender: Female,demographics
+Gender: Non-binary,demographics
 Demographics,demographics
 What is your ethnicity?,demographics
 What is your gender?,demographics
@@ -239,6 +339,63 @@ Application Materials,document
 Resume Attachment,document
 Upload Resume,document
 Cover Letter / Additional Information,document
+Highest Degree,education
+University / College / Institute,education
+Field of Study,education
+Year of Graduation,education
+Major,education
+Minor,education
+GPA,education
+Degree Awarded,education
+Program,education
+Program Name,education
+Course,education
+Course Name,education
+Concentration,education
+Faculty,education
+School Name,education
+Education Level,education
+Training Program,education
+Diploma,education
+Qualification,education
+Major,education
+Minor,education
+GPA,education
+CGPA,education
+Grade Point Average,education
+Concentration,education
+Academic Concentration,education
+Program,education
+Academic Program,education
+Degree Awarded,education
+Degree Type,education
+Credential,education
+Credential Type,education
+Qualification,education
+Academic Qualification,education
+Area of Study,education
+Field of Study,education
+Discipline,education
+Department,education
+School of Study,education
+Academic Level,education
+Education Level,education
+Undergraduate Institution,education
+Graduate Institution,education
+Alma Mater,education
+University Name,education
+College Name,education
+Institute Name,education
+Expected Graduation,education
+Graduation Term,education
+Honors,education
+Deans List,education
+Academic Awards,education
+Coursework,education
+Relevant Coursework,education
+Bootcamp,education
+Certification Program,education
+Professional Certification,education
 Training Program,education
 College,education
 Year Completed,education
@@ -559,6 +716,45 @@ Employment Duties,role_description
 Daily Tasks,role_description
 Main Role,role_description
 Primary Duties,role_description
+LinkedIn, social
+LinkedIn URL, social
+GitHub, social
+GitHub Link, social
+Portfolio, social
+Personal Website, social
+Website, social
+Online Profile, social
+Professional Website, social
+LinkedIn,social
+LinkedIn Profile,social
+LinkedIn URL,social
+LinkedIn Username,social
+LinkedIn Handle,social
+GitHub,social
+GitHub URL,social
+GitHub Username,social
+GitHub Profile,social
+Portfolio,social
+Portfolio URL,social
+Personal Website,social
+Website,social
+Professional Website,social
+Online Portfolio,social
+Devpost,social
+Behance,social
+Dribbble,social
+Kaggle,social
+Medium,social
+Blog,social
+X Profile,social
+Twitter Profile,social
+Twitter URL,social
+Stack Overflow Profile,social
+LeetCode Profile,social
+HackerRank Profile,social
+Codeforces Profile,social
+Codesignal Profile,social
+AngelList Profile,social
 LinkedIn Profile,social
 Portfolio / GitHub / Personal Website,social
 LinkedIn URL,social
@@ -639,6 +835,21 @@ Joining Date,start_date
 Commencement Date,start_date
 Start Date,start_date
 When did you start at your latest role?,start_date
+Employment Start,start_date
+Employment End,end_date
+Work Start,start_date
+Work End,end_date
+Job Start Date,start_date
+Job End Date,end_date
+Education Start,start_date
+Education End,end_date
+Graduation Date,end_date
+Program Start,start_date
+Program End,end_date
+Course Start,start_date
+Course End,end_date
+Degree Awarded Date,end_date
+University Start,start_date
 Terms Agreement,terms_consent
 I agree to the Terms & Conditions,terms_consent
 Accept Terms & Conditions,terms_consent

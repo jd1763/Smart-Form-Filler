@@ -5,6 +5,49 @@ const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[popup]", ...a);
 const err = (...a) => console.error("[popup]", ...a);
 
+// ========= DIAGNOSTICS PANEL =========
+let DIAG; // root <div> we render into
+
+function ensureDiagPanel() {
+  if (DIAG && document.body.contains(DIAG)) return DIAG;
+  DIAG = document.createElement("div");
+  DIAG.id = "sffDiag";
+  DIAG.style.cssText = `
+    margin-top: 8px; padding: 8px; border: 1px solid #ddd; border-radius: 8px;
+    max-height: 220px; overflow: auto; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    background: #fafafa;
+  `;
+  const h = document.createElement("div");
+  h.textContent = "Diagnostics";
+  h.style.cssText = "font-weight:600;margin-bottom:6px;";
+  DIAG.appendChild(h);
+  const pre = document.createElement("pre");
+  pre.id = "sffDiagPre";
+  pre.style.cssText = "white-space:pre-wrap;margin:0;";
+  DIAG.appendChild(pre);
+  const host = document.getElementById("resultsBox") || document.body;
+  host.appendChild(DIAG);
+  return DIAG;
+}
+
+function showDiag(obj){
+  ensureDiagPanel();
+  const pre = document.getElementById("sffDiagPre");
+  try {
+    pre.textContent = JSON.stringify(obj, null, 2);
+  } catch {
+    pre.textContent = String(obj);
+  }
+}
+
+function diagError(step, message, extra={}) {
+  const e = new Error(`[${step}] ${message}`);
+  e.step = step;
+  e.extra = extra;
+  log("DIAG ERROR", step, message, extra);
+  throw e;
+}
+
 /* ===================== MATCHER CONFIG ===================== */
 const MATCH_API_BASE = "http://127.0.0.1:5000"; // api.py host/port
 const RESUME_API_BASE = MATCH_API_BASE; 
@@ -19,6 +62,37 @@ const SKILL_WORDS = new Set([
   "kafka","snowflake","databricks","tableau","git","ci","cd","tomcat",
   "android","gradle","junit","eclipse","intellij","vscode","jsp","html","css"
 ]);
+
+// === skill aliases (keep minimal) ===
+const SFF_SKILL_ALIASES = Object.assign(Object.create(null), {
+  "github": "git",
+  "git": "git",
+});
+
+// small normalizer used only here
+function sffNormSkillToken(s) {
+  const t = String(s || "").toLowerCase().trim()
+    .replace(/(^[^a-z0-9]+|[^a-z0-9]+$)/g, ""); // trim punctuation at ends
+  return SFF_SKILL_ALIASES[t] || t;
+}
+
+// make sure 'git' is in the canonical vocab
+if (typeof SKILL_WORDS === "undefined") {
+  window.SKILL_WORDS = new Set(["git"]);
+} else {
+  SKILL_WORDS.add("git");
+}
+
+function sffCollectSkills(text) {
+  const toks = (String(text || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [])
+    .map(sffNormSkillToken);
+
+  const out = new Set();
+  for (const tk of toks) {
+    if (tk && SKILL_WORDS.has(tk)) out.add(tk);
+  }
+  return out; // Set of canonical skill tokens present in text
+}
 
 /* ===================== UI HANDLES (Matcher) ===================== */
 const elsM = { arc:null, scoreNum:null, hint:null, status:null };
@@ -101,20 +175,52 @@ function renderBucketsIntoUI(buckets){
 function tokenize(text){
   return (text||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g)||[];
 }
+
+/* ===== Extract Required / Preferred from JD (sentence-scoped preferred) =====
+   - Required = all skills mentioned anywhere in the JD.
+   - Preferred = ONLY the skills in sentences that contain a preferred keyword
+                 (or the explicit "Preferred:" span). We DO NOT take the whole paragraph.
+   - Final: required = allSkills - preferred.
+*/
 function extractImportance(jdText) {
-  const jd = (jdText || "").toLowerCase();
-  const reqMatch  = jd.match(/(?:required|must[-\s]?have|requirements?)[:\-—]\s*([\s\S]{0,500})/i);
-  const prefMatch = jd.match(/(?:preferred|nice[-\s]?to[-\s]?have)[:\-—]\s*([\s\S]{0,500})/i);
-  const tokens = (s) => (s || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [];
-  const toSkillSet = (arr) => {
-    const set = new Set();
-    arr.forEach(t => { if (SKILL_WORDS.has(t)) set.add(t); });
-    return set;
-  };
-  return {
-    requiredKeys: toSkillSet(tokens(reqMatch?.[1] || "")),
-    preferredKeys: toSkillSet(tokens(prefMatch?.[1] || "")),
-  };
+  const jd = String(jdText || "");
+
+  // Canonical skill collector
+  function sffCollectSkills(text) {
+    const toks = (String(text || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [])
+      .map(sffNormSkillToken);
+    const out = new Set();
+    for (const tk of toks) if (tk && SKILL_WORDS.has(tk)) out.add(tk);
+    return out;
+  }
+
+  // 1) All skills anywhere → base Required candidates
+  const allSkills = sffCollectSkills(jd);
+
+  // 2) Preferred from explicit inline "Preferred:" span
+  const preferred = new Set();
+  const lower = jd.toLowerCase();
+  const inlinePrefMatch = lower.match(/\b(preferred|nice[-\s]?to[-\s]?have|bonus|plus)\s*:\s*([^\n\.]+)/i);
+  if (inlinePrefMatch) {
+    const originalTail = jd.slice(inlinePrefMatch.index + inlinePrefMatch[0].length - inlinePrefMatch[2].length);
+    // originalTail should be the same text as capture group 2 in original casing
+    for (const k of sffCollectSkills(inlinePrefMatch[2])) preferred.add(k);
+  }
+
+  // 3) Also capture sentence-scoped preferred (no colon form, e.g., "Nice to have experience with ...")
+  const prefRx = /\b(preferred|nice[-\s]?to[-\s]?have|bonus|plus)\b/i;
+  // Split into sentences conservatively (., ?, !, or newlines)
+  const sentences = jd.split(/(?<=[.!?])\s+|\n+/);
+  for (const sent of sentences) {
+    if (prefRx.test(sent)) {
+      for (const k of sffCollectSkills(sent)) preferred.add(k);
+    }
+  }
+
+  // 4) Finalize buckets: Required = All - Preferred
+  const required = new Set([...allSkills].filter(k => !preferred.has(k)));
+
+  return { requiredKeys: required, preferredKeys: preferred };
 }
 
 /* ===================== RESPONSE NORMALIZATION & BUCKETS ===================== */
@@ -123,110 +229,103 @@ function normalizeMatchResponse(res, jdText){
   let s = Number(res?.similarity_score ?? res?.score ?? 0);
   const scorePct = Math.max(0, Math.min(100, Math.round(s > 1 ? s : (s*100))));
 
-  // flatten missing: ["aws", ...] or [["aws",0.31], ...]
-  const rawMissing = Array.isArray(res?.missing_keywords ?? res?.missing_skills) ? (res.missing_keywords ?? res.missing_skills) : [];
-  const flat = rawMissing.map(m => Array.isArray(m) ? String(m[0]) : String(m))
-                         .map(x => x.toLowerCase().trim());
+  // flatten missing: ["aws", ...] or [["aws",0.31], ...] → lower → canonical
+  const rawMissing = Array.isArray(res?.missing_keywords ?? res?.missing_skills)
+    ? (res.missing_keywords ?? res.missing_skills)
+    : [];
+  const flat = rawMissing.map(m => Array.isArray(m) ? String(m[0]) : String(m));
 
-  // keep only real JD skills (whitelist ∩ actually in JD)
-  const jdTokens = new Set((jdText||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []);
-  const missingClean = [...new Set(flat.filter(x => SKILL_WORDS.has(x) && jdTokens.has(x)))];
+  // JD tokens → canonical set (aliases applied)
+  const jdCanonSet = new Set(
+    ((jdText||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [])
+      .map(sffNormSkillToken)
+      .filter(t => t && SKILL_WORDS.has(t))
+  );
 
+  // Keep only canonical skills that are in whitelist AND actually mentioned (canon) in the JD
+  const missingCanon = flat
+    .map(x => sffNormSkillToken(String(x).toLowerCase().trim()))
+    .filter(t => t && SKILL_WORDS.has(t) && jdCanonSet.has(t));
+
+  const missingClean = Array.from(new Set(missingCanon));
   return { scorePct, missingClean };
 }
 
 function computeBucketsFromJDAndMissing(jdText, missingClean){
-  const toks   = (jdText||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [];
-  const jdKeys = toks.filter(w => SKILL_WORDS.has(w));
-  const jdSet  = new Set(jdKeys);
-  const missSet = new Set((missingClean||[]).map(x=>String(x).toLowerCase()));
+  // Canonical JD skill set
+  const jdCanonSet = new Set(
+    ((jdText||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [])
+      .map(sffNormSkillToken)
+      .filter(t => t && SKILL_WORDS.has(t))
+  );
 
-  // Headings
+  // Get extractor buckets, then canonize them too
   let { requiredKeys, preferredKeys } = extractImportance(jdText||"");
 
-  // ---- Fallbacks (handle unlabeled JDs) ----
-  if ((!requiredKeys || requiredKeys.size === 0) && (!preferredKeys || preferredKeys.size === 0)) {
-    requiredKeys  = new Set(jdSet);
-    preferredKeys = new Set();
-  } else if (requiredKeys.size === 0 && preferredKeys.size > 0) {
-    requiredKeys = new Set([...jdSet].filter(k => !preferredKeys.has(k)));
-  } else {
-    requiredKeys  = new Set([...requiredKeys].filter(k => jdSet.has(k)));
-    preferredKeys = new Set([...preferredKeys].filter(k => jdSet.has(k) && !requiredKeys.has(k)));
-  }
+  const reqCanon = new Set(
+    Array.from(requiredKeys || [])
+      .map(k => sffNormSkillToken(String(k)))
+      .filter(t => t && SKILL_WORDS.has(t))
+  );
+  const prefCanon = new Set(
+    Array.from(preferredKeys || [])
+      .map(k => sffNormSkillToken(String(k)))
+      .filter(t => t && SKILL_WORDS.has(t))
+  );
+
+  // Intersect with JD canon set so only skills that actually appear in the JD remain
+  const required = new Set([...reqCanon].filter(t => jdCanonSet.has(t)));
+  const preferred = new Set([...prefCanon].filter(t => jdCanonSet.has(t) && !required.has(t)));
+
+  // Canonical missing set (so "github" vs "git" can match)
+  const missSet = new Set((missingClean||[]).map(x => sffNormSkillToken(String(x))));
 
   // Matched / Missing per bucket
-  const matchedReq  = [...requiredKeys].filter(k => !missSet.has(k));
-  const matchedPref = [...preferredKeys].filter(k => !missSet.has(k));
-  const missReq     = [...requiredKeys].filter(k =>  missSet.has(k));
-  const missPref    = [...preferredKeys].filter(k =>  missSet.has(k));
+  const matchedReq  = [...required].filter(k => !missSet.has(k));
+  const missReq     = [...required].filter(k =>  missSet.has(k));
+  const matchedPref = [...preferred].filter(k => !missSet.has(k));
+  const missPref    = [...preferred].filter(k =>  missSet.has(k));
 
   return { matchedReq, matchedPref, missReq, missPref };
 }
 
-/* ===================== DISPLAY SCORE (required-first; “Other” removed) ===================== */
+/* ================= DISPLAY SCORE (uses the same buckets the UI shows) =================
+   Rules:
+   - If ANY required missing: score = 90 * (matchedReq / (matchedReq + missReq))  -> 0..90
+   - If NO required missing:
+       - If there are preferred:
+           - If ALL preferred matched -> 100
+           - Else (some preferred missing) -> 90
+       - If no preferred present in JD -> 90
+*/
 function computeDisplayScore({ apiBasePct, jdText, missing }) {
-  // Perfect if nothing is missing at all
-  if ((missing||[]).length === 0) return 100;
+  // 'missing' here is the normalized list we already built (e.g., missingUnion).
+  // Build the same buckets the UI uses so math matches what user sees.
+  const buckets = computeBucketsFromJDAndMissing(jdText || "", missing || []);
 
-  // Tokenize JD & build sets
-  const toks   = Array.from(new Set((jdText || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []));
-  const jdKeys = toks.filter(w => SKILL_WORDS.has(w));
-  const jdSet  = new Set(jdKeys);
-  const missSet = new Set((missing||[]).map(m => String(Array.isArray(m)? m[0]: m).toLowerCase()));
+  const reqMatched = (buckets.matchedReq || []).length;
+  const reqMissing = (buckets.missReq    || []).length;
+  const prefMatched = (buckets.matchedPref || []).length;
+  const prefMissing = (buckets.missPref    || []).length;
 
-  // Headings + robust fallbacks
-  let { requiredKeys, preferredKeys } = extractImportance(jdText);
-  if ((!requiredKeys || requiredKeys.size === 0) && (!preferredKeys || preferredKeys.size === 0)) {
-    requiredKeys = new Set(jdSet);
-    preferredKeys = new Set();
-  } else if (requiredKeys.size === 0 && preferredKeys.size > 0) {
-    requiredKeys = new Set([...jdSet].filter(k => !preferredKeys.has(k)));
-  } else {
-    requiredKeys = new Set([...requiredKeys].filter(k => jdSet.has(k)));
-    preferredKeys = new Set([...preferredKeys].filter(k => jdSet.has(k) && !requiredKeys.has(k)));
+  const reqTotal  = reqMatched + reqMissing;
+  const prefTotal = prefMatched + prefMissing;
+
+  // Case A: some Required missing → 0..90 proportional to coverage
+  if (reqMissing > 0 && reqTotal > 0) {
+    const coverage = reqMatched / reqTotal;      // 0..1
+    const score = 90 * coverage;                 // 0..90
+    return Number(score.toFixed(2));
   }
 
-  // Matched / Missing
-  const matchedReq  = [...requiredKeys].filter(k => !missSet.has(k));
-  const matchedPref = [...preferredKeys].filter(k => !missSet.has(k));
-  const missReq     = [...requiredKeys].filter(k =>  missSet.has(k));
-  const missPref    = [...preferredKeys].filter(k =>  missSet.has(k));
+  // Case B: all Required met
+  if (prefTotal > 0) {
+    // If ALL preferred matched → 100, else → 90
+    return (prefMissing === 0) ? 100 : 90;
+  }
 
-  // === Coverage / Boost (NO "Other")
-  // Preferred matches get a slight ≥ boost than Required (per your request)
-  const bReq  = 1.00;
-  const bPref = 1.08;
-
-  const boostNum   = (bReq*matchedReq.length) + (bPref*matchedPref.length);
-  const boostDenom = (bReq*requiredKeys.size) + (bPref*preferredKeys.size);
-  let coverageBoost = boostDenom ? (boostNum / boostDenom) : 0; // 0..1
-  coverageBoost = Math.min(1, Math.max(0, Math.pow(coverageBoost, 0.92)));
-
-  // Blend with API similarity (slightly forgiving)
-  const W_API=0.42, W_COV=0.58;
-  const base = W_API * (apiBasePct||0) + W_COV * (coverageBoost*100);
-
-  // === Penalties: preferred lighter than required
-  const sevReq   = requiredKeys.size  ? (missReq.length  / requiredKeys.size)  : 0;
-  const sevPref  = preferredKeys.size ? (missPref.length / preferredKeys.size) : 0;
-  const penReq   = Math.pow(sevReq,  1.12) * 24;
-  const penPref  = Math.pow(sevPref, 1.02) *  6;
-  let score = Math.round(base - (penReq + penPref));
-
-  // === Floors (avoid zeros on partial matches)
-  const coverageFloor   = Math.round((coverageBoost * 100) * 0.68);
-  const prefSignalFloor = matchedPref.length > 0 ? 16 : 0; // bump if any preferred matched
-  score = Math.max(score, coverageFloor, prefSignalFloor);
-
-  // === Caps when Required missing
-  if (missReq.length >= 2)      score = Math.min(score, 74);
-  else if (missReq.length >= 1) score = Math.min(score, 84);
-
-  // Guardrail when coverage is tiny
-  if (coverageBoost < 0.06) score = Math.min(score, Math.round(coverageBoost * 100) + 6);
-
-  return Math.max(0, Math.min(100, Math.round(score)));
+  // Case C: no Preferred listed in JD; cap is 90 when all Required met
+  return 90;
 }
 
 /* ===================== API CALLS ===================== */
@@ -284,12 +383,19 @@ async function pingAny(tabId){
   });
 }
 async function ensureContent(tabId){
-  if(await pingAny(tabId)) return true;
-  try{
-    await chrome.scripting.executeScript({ target:{tabId, allFrames:true}, files:["content.js"] });
-  }catch(e){ err("inject content.js:", e.message||e); return false; }
+  if (await pingAny(tabId)) return true;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ["helpers.js", "content.js"]  // ← helpers first, then content
+    });
+  } catch (e) {
+    err("inject helpers/content:", e.message || e);
+    return false;
+  }
   return await pingAny(tabId);
 }
+
 async function getBestFrame(tabId){
   let frames=[];
   try{ frames = await chrome.webNavigation.getAllFrames({tabId}); }
@@ -564,7 +670,10 @@ const filledBox = document.getElementById("filledFields");
 const notFilledBox = document.getElementById("notFilledFields");
 const filledToggle = document.getElementById("filledToggle");
 const notFilledToggle = document.getElementById("notFilledToggle");
-const $ = (id) => document.getElementById(id);
+const detectedToggle = document.getElementById("detectedToggle");
+const detectedBox    = document.getElementById("detectedFields");
+const detectedHint   = document.getElementById("detectedHint");
+const detectedList   = document.getElementById("detectedList");
 
 // Catalog shown if page has none
 const LOCAL_CATALOG = [
@@ -638,41 +747,90 @@ function renderFieldList(container, items, { title="", showSummary=true } = {}){
   });
 }
 
-// Filler orchestration
+function renderDetected(arr){
+  if (!detectedList) return;
+  if (!Array.isArray(arr) || arr.length === 0) {
+    detectedList.innerHTML = `<div class="muted">None.</div>`;
+    return;
+  }
+  detectedList.innerHTML = arr.map(it => {
+    const k = it.key || it.name || "";
+    const label = it.label || k;
+    return `<div class="row">
+      <div><strong>${label}</strong><span class="muted"> (${k})</span></div>
+    </div>`;
+  }).join("");
+}
+
+
 async function preloadAndRestore(){
   const tab = await getActiveTab();
   if(!tab){ setStatus("❌ No active tab."); return; }
   const url = tab.url||"";
 
-  // Inline resume picker (always show)
+  // Resume picker as-is
   const resumes = await loadAllResumesFromBackend();
   ensureInlineResumePicker(resumes);
 
-  // toggles + last results
+  // Toggles
   let filledOpen=false, notFilledOpen=false;
   const { last, toggles } = await loadState(url);
   if(toggles){ filledOpen=!!toggles.filledOpen; notFilledOpen=!!toggles.notFilledOpen; }
-  installToggle(filledToggle, filledBox, filledOpen, (open)=>{ saveToggles(url,{filledOpen:open, notFilledOpen}).catch(()=>{}); filledOpen=open; });
-  installToggle(notFilledToggle, notFilledBox, notFilledOpen, (open)=>{ saveToggles(url,{filledOpen, notFilledOpen:open}).catch(()=>{}); notFilledOpen=open; });
+  installToggle(filledToggle, filledBox, filledOpen, (open)=>{ saveToggles(url,{filledOpen:open, notFilledOpen}).catch(()=>{}); });
+  installToggle(notFilledToggle, notFilledBox, notFilledOpen, (open)=>{ saveToggles(url,{filledOpen, notFilledOpen:open}).catch(()=>{}); });
+  // NEW: detected toggle
+  if (detectedToggle && detectedBox) installToggle(detectedToggle, detectedBox, false);
+  // keep header arrow and count synced when toggling
+  if (detectedToggle) {
+    detectedToggle.addEventListener("click", () => {
+      const txt = detectedToggle.textContent.replace(/^[▶▼]\s*/, "");
+      const isOpen = detectedBox && detectedBox.style.display !== "none";
+      detectedToggle.textContent = `${isOpen ? "▼ " : "▶ "}${txt}`;
+    });
+  }
 
+  // If we have a last run, render it; else keep the hint
   if(last){
     const when = new Date(last.ts).toLocaleString();
     renderFieldList(filledBox, last.filled||[], { title:"Filled" });
-    renderFieldList(notFilledBox, last.nonFilled||LOCAL_CATALOG.map(({key,label})=>({key,label,confidence:"N/A"})), { title:"Non-Filled" });
+    renderFieldList(notFilledBox, last.nonFilled||[], { title:"Non-Filled" });
     setStatus(last.status? `${last.status} (last: ${when})` : `Last run: ${when}`);
   }else{
-    renderFieldList(notFilledBox, LOCAL_CATALOG.map(({key,label})=>({key,label,confidence:"N/A"})), { title:"Non-Filled" });
+    filledBox.innerHTML    = `<div class="muted">Fill Form to populate.</div>`;
+    notFilledBox.innerHTML = `<div class="muted">Fill Form to populate.</div>`;    
     setStatus("Ready.");
   }
 
-  // Optional: pull catalog from content
+  // Detect actual fields on the page (no filling)
   if(isSupportedUrl(url) && await ensureContent(tab.id)){
     const frameId = await getBestFrame(tab.id);
-    const resp = await sendToFrame(tab.id, frameId, { action:"getAllFieldCatalog" });
-    if(resp && resp.ok && Array.isArray(resp.catalog) && (!last || !(last.nonFilled?.length))){
-      const nonFilled = resp.catalog.map(({key,label})=>({key,label,confidence:"N/A"}));
-      renderFieldList(notFilledBox, nonFilled, { title:"Non-Filled" });
+    const resp = await sendToFrame(tab.id, frameId, { action:"EXT_DETECT_FIELDS" });
+    if (!resp) {
+      if (detectedHint) detectedHint.textContent = "Could not reach page.";
+    } else if (resp.ok) {
+      // after we receive resp from EXT_DETECT_FIELDS
+      const n = resp.detected?.length || 0;
+      if (detectedToggle) {
+        const base = "Detected Fields";
+        const isOpen = detectedBox && detectedBox.style.display !== "none";
+        detectedToggle.textContent = `${isOpen ? "▼" : "▶"} ${base} — ${n}`;
+      }
+      detectedList.innerHTML = (resp.detected || [])
+        .map(({key,label}) => `<div class="row"><div><strong>${label||key}</strong><span class="muted"> (${key})</span></div></div>`)
+        .join("") || `<div class="muted">None.</div>`;
+
+      if (resp.inputs === 0 || n === 0) {
+        if (detectedHint) detectedHint.textContent = "No fields detected.";
+        renderDetected([]);
+      } else {
+        if (detectedHint) detectedHint.textContent = ""; // no body hint; header shows count
+        renderDetected(resp.detected || []);
+      }
+    } else {
+      if (detectedHint) detectedHint.textContent = "Detection failed (see console).";
     }
+  } else {
+    if (detectedHint) detectedHint.textContent = "No access to this page.";
   }
 }
 
@@ -680,8 +838,7 @@ function renderResultsAndRemember(url, resp, statusText){
   const filled = Array.isArray(resp.filled)? resp.filled.slice() : [];
   const nonFilled = Array.isArray(resp.notFilled)
     ? resp.notFilled.map(({key,label})=>({key,label,confidence:"N/A"}))
-    : LOCAL_CATALOG.filter(({key})=> !filled.some(f=>f.key===key))
-        .map(({key,label})=>({key,label,confidence:"N/A"}));
+    : [];
 
   filled.sort((a,b)=>(Number(a.confidence)||0)-(Number(b.confidence)||0));
   renderFieldList(filledBox, filled, { title:"Filled" });
@@ -752,15 +909,238 @@ document.getElementById("uploadResumeCTA")?.addEventListener("click", () => {
   else window.open(chrome.runtime.getURL("resumes.html"));
 });
 
+// ====== STEP 1 DETECTOR UI (popup.js) ======
+function popupLog(...a){ console.log("[popup][detect]", ...a); }
+function popupErr(...a){ console.error("[popup][detect]", ...a); }
 
-// Optional: open side panel if you still keep it
-document.getElementById("openMatcher")?.addEventListener("click", () => {
-  (async () => {
-    try {
-      const [tab] = await chrome.tabs.query({ active:true, currentWindow:true });
-      if (!tab?.id) throw new Error("No active tab");
-      if (chrome.sidePanel?.setOptions) await chrome.sidePanel.setOptions({ tabId:tab.id, path:"sidepanel.html", enabled:true });
-      if (chrome.sidePanel?.open) await chrome.sidePanel.open({ tabId:tab.id });
-    } catch (e) { console.error("open side panel:", e); }
-  })();
+async function getActiveTabSimple(){
+  const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return t || null;
+}
+
+// Avoid clobbering the 3-arg sendToFrame(tabId, frameId, msg) used by the matcher.
+async function sendToFrameSimple(tabId, action){
+  return await chrome.tabs.sendMessage(tabId, { action });
+}
+
+
+function renderDetected(list){
+  const sel = document.getElementById("detectedSelect");
+  const det = document.getElementById("detectedDetails");
+  const count = document.getElementById("detectCount");
+  sel.innerHTML = "";
+  det.textContent = "";
+
+  (list || []).forEach((d, i) => {
+    const opt = document.createElement("option");
+    const label = d.labelText || "(no label)";
+    opt.value = String(i);
+    opt.textContent = `${label}  —  [${d.detectedBy}]`;
+    sel.appendChild(opt);
+  });
+
+  count.textContent = `${list.length} detected`;
+
+  sel.onchange = () => {
+    const idx = Number(sel.value);
+    const d = list[idx];
+    if (!d) { det.textContent = ""; return; }
+    det.textContent = JSON.stringify(d, null, 2);
+  };
+
+  // autoselect first item to show details immediately
+  if (list.length) {
+    sel.selectedIndex = 0;
+    sel.onchange();
+  }
+}
+
+async function runDetector(){
+  const tab = await getActiveTab();
+  if (!tab) throw new Error("No active tab");
+  // Light probe
+  const probe = await chrome.tabs.sendMessage(tab.id, { action: "probe" }).catch(()=>null);
+  if (!probe || !probe.ok) throw new Error("Content script not reachable. Make sure helpers/content are injected.");
+
+  // Detect
+  const resp = await sendToFrameSimple(tab.id, "EXT_DETECT_FIELDS").catch(()=>null);
+  if (!resp || !resp.ok) throw new Error("Detector failed in content script");
+  if (!Array.isArray(resp.detected)) throw new Error("Detector returned unexpected shape");
+
+  renderDetected(resp.detected);
+  popupLog("Detected", resp.detected.length, "fields", resp.detected);
+  return resp.detected;
+}
+
+// Bootstrap the button
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("btnDetect");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      try {
+        await runDetector();
+      } catch (e) {
+        popupErr(e);
+        const det = document.getElementById("detectedDetails");
+        if (det) det.textContent = `Error: ${e.message || e}`;
+      }
+    });
+  }
 });
+
+// ====== STEP 2 PREDICTOR UI (popup.js) ======
+let SFF_DETECTED = []; // cache from Step 1
+
+// Override detector renderer to keep cache
+async function runDetector(){
+  const tab = await getActiveTab();
+  if (!tab) throw new Error("No active tab");
+  // If you require injection, call your ensureContent(tab.id) here.
+
+  const probe = await chrome.tabs.sendMessage(tab.id, { action: "probe" }).catch(()=>null);
+  if (!probe || !probe.ok) throw new Error("Content script not reachable. Make sure helpers/content are injected.");
+
+  const resp = await chrome.tabs.sendMessage(tab.id, { action: "EXT_DETECT_FIELDS" }).catch(()=>null);
+  if (!resp || !resp.ok || !Array.isArray(resp.detected)) throw new Error("Detector failed in content script");
+
+  SFF_DETECTED = resp.detected.slice(); // cache
+  renderDetected(SFF_DETECTED);
+  console.log("[popup][predict] Detected", SFF_DETECTED.length, "fields");
+  return SFF_DETECTED;
+}
+
+// Call background → /predict
+async function predictForDetected(){
+  const labels = SFF_DETECTED.map(d => (d.labelText || "").trim());
+  const resp = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: "predictLabels", labels }, (r) => resolve(r));
+  });
+
+  if (!resp || !resp.success) throw new Error(`Prediction failed: ${resp?.error || "no response"}`);
+
+  // Attach predictions to cached detected rows by index
+  const results = Array.isArray(resp.results) ? resp.results : [];
+  (SFF_DETECTED || []).forEach((d, i) => {
+    const r = results[i] || {};
+    d.prediction = r.prediction ?? null;
+    d.confidence = typeof r.confidence === "number" ? r.confidence : null;
+  });
+
+  renderDetected(SFF_DETECTED, /*withPred*/ true);
+  const pc = document.getElementById("predictCount");
+  if (pc) pc.textContent = `${results.filter(r => r && r.prediction).length}/${results.length} predicted`;
+  console.log("[popup][predict] Predictions", results);
+  return SFF_DETECTED;
+}
+
+// Enhanced renderer: show prediction when present
+function renderDetected(list, withPred=false){
+  const sel = document.getElementById("detectedSelect");
+  const det = document.getElementById("detectedDetails");
+  const count = document.getElementById("detectCount");
+  sel.innerHTML = "";
+  det.textContent = "";
+
+  (list || []).forEach((d, i) => {
+    const opt = document.createElement("option");
+    const label = d.labelText || "(no label)";
+    const how = d.detectedBy || "unknown";
+    const suffix = (withPred && d.prediction) ? ` → ${d.prediction} (${(d.confidence ?? 0).toFixed(3)})` : "";
+    opt.value = String(i);
+    opt.textContent = `${label}  —  [${how}]${suffix}`;
+    sel.appendChild(opt);
+  });
+
+  count.textContent = `${list.length} detected`;
+
+  sel.onchange = () => {
+    const idx = Number(sel.value);
+    const d = list[idx];
+    if (!d) { det.textContent = ""; return; }
+    // Include prediction in the details object for clarity
+    const details = {
+      labelText: d.labelText,
+      detectedBy: d.detectedBy,
+      tagName: d.tagName,
+      inputType: d.inputType,
+      id: d.id,
+      name: d.name,
+      placeholder: d.placeholder,
+      selector: d.selector,
+      prediction: d.prediction ?? null,
+      confidence: d.confidence ?? null
+    };
+    det.textContent = JSON.stringify(details, null, 2);
+  };
+
+  if (list.length) {
+    sel.selectedIndex = 0;
+    sel.onchange();
+  }
+}
+
+async function getProfileFromBackend() {
+  const resp = await new Promise(res => chrome.runtime.sendMessage({ action:"getProfile" }, r => res(r)));
+  if (!resp?.success) throw new Error(resp?.error || "Profile fetch failed");
+  return resp.profile || {};
+}
+
+function renderFillReport(report) {
+  const pre = document.getElementById("fillReport");
+  const sum = document.getElementById("fillSummary");
+  if (!pre || !sum) return;
+  const ok = report.filter(r => r.status === "filled").length;
+  sum.textContent = `${ok} filled, ${report.length - ok} skipped`;
+  pre.textContent = report.map(r => {
+    const conf = typeof r.confidence === "number" ? ` @${r.confidence.toFixed(3)}` : "";
+    const val  = r.valuePreview ? ` = "${r.valuePreview}"` : "";
+    const why  = r.reason ? ` — ${r.reason}` : "";
+    return `• ${r.label} → ${r.prediction}${conf}${val} [${r.status}]${why}`;
+  }).join("\n");
+}
+
+
+// Wire the new button
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("btnPredict");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      try {
+        if (!SFF_DETECTED.length) await runDetector(); // auto-detect if not done
+        await predictForDetected();
+      } catch (e) {
+        console.error("[popup][predict] error:", e);
+        const det = document.getElementById("detectedDetails");
+        if (det) det.textContent = `Prediction Error: ${e.message || e}`;
+      }
+    });
+  }
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("btnFill");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    try {
+      if (!SFF_DETECTED?.length) await runDetector();
+      if (!SFF_DETECTED[0]?.prediction) await predictForDetected();
+      const profile = await getProfileFromBackend();
+      const { lastResumeId } = await chrome.storage.local.get("lastResumeId");
+      const resp = await new Promise(res => {
+        chrome.runtime.sendMessage(
+          { action:"fillDetected", items:SFF_DETECTED, profile, resumeId: lastResumeId || null },
+          r => res(r)
+        );
+      });
+      if (!resp?.success) throw new Error(resp?.error || "Fill failed");
+      renderFillReport(resp.report || []);
+    } catch (e) {
+      const pre = document.getElementById("fillReport");
+      const sum = document.getElementById("fillSummary");
+      if (sum) sum.textContent = "fill failed";
+      if (pre) pre.textContent = String(e);
+      console.error("[popup][fill] error:", e);
+    }
+  });
+});
+

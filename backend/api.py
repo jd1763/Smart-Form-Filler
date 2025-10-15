@@ -30,7 +30,7 @@ from pdfminer.high_level import extract_text as pdf_extract_text
 from sqlalchemy import Column, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from matcher.resume_selector import select_best_resume
+from .matcher.resume_selector import select_best_resume
 
 # === Import matchers ===
 # - BaselineMatcher: TF-IDF + cosine similarity

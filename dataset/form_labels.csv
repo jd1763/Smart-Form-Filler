@@ -42,6 +42,37 @@ Employer Name,company
 Organization Name,company
 Business Name,company
 Workplace,company
+Company Name Legal,company
+Company Legal Name,company
+Company Division,company
+Company Department,company
+Subsidiary,company
+Parent Company,company
+Hiring Organization,company
+Hiring Company,company
+Employer Company,company
+Employer Organization,company
+Corporate Name,company
+Corporation Name,company
+Business Unit,company
+Operating Unit,company
+Office Location Company,company
+Company Location,company
+Company Headquarters,company
+Headquarters Company,company
+HQ Company,company
+Current Company,company
+Current Employer,company
+Previous Company,company
+Previous Employer,company
+Most Recent Employer,company
+Last Employer,company
+Company URL,company
+Company Website,company
+Employer Website,company
+Organization Website,company
+Workplace Name,company
+
 
 Education Level,education
 Highest Degree,education
@@ -63,6 +94,45 @@ Relevant Certifications,education
 Professional Certificates,education
 Diploma,education
 Training Program,education
+Major,education
+Minor,education
+GPA,education
+CGPA,education
+Grade Point Average,education
+Concentration,education
+Academic Concentration,education
+Program,education
+Academic Program,education
+Degree Awarded,education
+Degree Type,education
+Credential,education
+Credential Type,education
+Qualification,education
+Academic Qualification,education
+Area of Study,education
+Field of Study,education
+Discipline,education
+Department,education
+School of Study,education
+Academic Level,education
+Education Level,education
+Undergraduate Institution,education
+Graduate Institution,education
+Alma Mater,education
+University Name,education
+College Name,education
+Institute Name,education
+Expected Graduation,education
+Graduation Term,education
+Honors,education
+Deans List,education
+Academic Awards,education
+Coursework,education
+Relevant Coursework,education
+Bootcamp,education
+Certification Program,education
+Professional Certification,education
+
 
 Upload Resume,document
 Cover Letter / Additional Information,document

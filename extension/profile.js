@@ -184,6 +184,7 @@ async function load(){
   
     $("street").value  = data?.address?.street  || "";
     $("city").value    = data?.address?.city    || "";
+    $("county").value  = data?.address?.county  || "";   
     $("state").value   = data?.address?.state   || "";
     $("zip").value     = data?.address?.zip     || "";
     $("country").value = data?.address?.country || "";
@@ -202,6 +203,8 @@ async function load(){
     $("lgbtq").value      = data?.eligibility?.lgbtq || "";
     $("veteran").value    = data?.eligibility?.veteran || "";
     $("ethnicity").value  = data?.eligibility?.ethnicity || "";
+    $("race").value           = data?.eligibility?.race || "";
+    $("hispanicLatinx").value = data?.eligibility?.hispanicLatinx || "";
   
     window._edu = Array.isArray(data.education) ? data.education.slice() : [];
     window._exp = Array.isArray(data.experience) ? data.experience.slice() : [];
@@ -225,10 +228,11 @@ function collectMain(){
     address: {
       street: $("street").value.trim(),
       city: $("city").value.trim(),
+      county: $("county").value.trim(),     
       state: $("state").value.trim(),
       zip: $("zip").value.trim(),
       country: $("country").value.trim()
-    },
+    },    
     links: {
       linkedin: $("linkedin").value.trim(),
       github: $("github").value.trim(),
@@ -242,8 +246,10 @@ function collectMain(){
       disability: $("disability").value.trim(),
       lgbtq: $("lgbtq").value.trim(),
       veteran: $("veteran").value.trim(),
-      ethnicity: $("ethnicity").value.trim()
-    }
+      ethnicity: $("ethnicity").value.trim(),
+      race: $("race").value.trim(),                       
+      hispanicLatinx: $("hispanicLatinx").value.trim()    
+    }    
   };
 }
 

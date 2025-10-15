@@ -1,12 +1,88 @@
 (function () {
-  const CONTENT_VERSION = "6.0.0";
+  const CONTENT_VERSION = "6.1.0";
   if (window.__SFF_CONTENT_VERSION__ === CONTENT_VERSION) {
     console.log("[content] already loaded (v" + CONTENT_VERSION + ") — skipping");
     return;
   }
   window.__SFF_CONTENT_VERSION__ = CONTENT_VERSION;
 
-  console.log("[content] content.js injected v" + CONTENT_VERSION);
+  // ---- bring helpers into local scope ----
+  const H = window.H || window.SFFHelpers || {};
+  const {
+    lower, norm, sameNormalized, STATE_TO_ABBR, ABBR_TO_STATE = {}, toAbbr = (s) => s, normCountry = (s) => s,
+    inferNamePartFromLabel, splitFullName, inferAddressPartFromLabel,
+    resolveValueAndKey = (k, lbl, ud) => ({ value: (ud||{})[k] ?? "", key: k }),
+    fmtMonthYear, scalarize,   toISODate = (s) => s,
+    toISOMonth = (s) => s,
+    normalizeToken, canonGender, normTokens, overlapScore
+  } = H;
+
+  // small degree aliases used by select smart matcher
+  const DEGREE_ALIASES = {
+    "bachelorofscience": ["bs", "b.s.", "b sc", "b.sc", "bachelor of science"],
+    "bachelorofarts":    ["ba", "b.a.", "bachelor of arts"],
+    "associateofscience":["as", "a.s.", "associate of science"],
+    "associateofarts":   ["aa", "a.a.", "associate of arts"],
+    "masterscience":     ["ms", "m.s.", "master of science", "msc", "m.sc"],
+    "masterarts":        ["ma", "m.a.", "master of arts"]
+  };
+  const _nz   = v => (v ?? "").toString().trim();
+  const _norm = s => _nz(s).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  
+  function chooseSelectOption(el, desired, extraSynonyms = []) {
+    if (!el || el.tagName?.toLowerCase() !== "select") return false;
+    const want = _norm(desired);
+    const opts = Array.from(el.options || []).map((o,i)=>({
+      i,
+      text: _nz(o.textContent),
+      value: _nz(o.value),
+      ntext: _norm(o.textContent),
+      nvalue: _norm(o.value)
+    }));
+  
+    // exact normalized text/value
+    let hit = opts.find(o => o.ntext === want || o.nvalue === want);
+    if (hit) { el.selectedIndex = hit.i; el.dispatchEvent(new Event("input",{bubbles:true})); el.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+  
+    // synonyms normalized
+    for (const syn of extraSynonyms) {
+      const ns = _norm(syn);
+      hit = opts.find(o => o.ntext === ns || o.nvalue === ns);
+      if (hit) { el.selectedIndex = hit.i; el.dispatchEvent(new Event("input",{bubbles:true})); el.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+    }
+  
+    // contains match
+    hit = opts.find(o => o.ntext.includes(want) || o.nvalue.includes(want));
+    if (hit) { el.selectedIndex = hit.i; el.dispatchEvent(new Event("input",{bubbles:true})); el.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+  
+    return false;
+  }
+
+  function chooseRadio(elOrRoot, desired, extraSynonyms = []) {
+    const root = elOrRoot.closest?.("form, fieldset, .form-group, .grid, .row") || document;
+    const radios = root.querySelectorAll('input[type="radio"]');
+    if (!radios.length) return false;
+    const want = _norm(desired);
+    const cand = new Set([desired, ...extraSynonyms].map(_norm));
+  
+    for (const r of radios) {
+      // try value
+      if (cand.has(_norm(r.value))) { r.click?.(); r.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+      // try associated label text
+      const lab = root.querySelector(`label[for="${r.id}"]`) || r.closest("label");
+      const ltxt = _nz(lab?.textContent || "");
+      if (ltxt && (cand.has(_norm(ltxt)) || _norm(ltxt) === want)) { r.click?.(); r.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+    }
+    // final pass: any label containing desired
+    for (const r of radios) {
+      const lab = root.querySelector(`label[for="${r.id}"]`) || r.closest("label");
+      const ltxt = _nz(lab?.textContent || "");
+      if (ltxt && (_norm(ltxt).includes(want))) { r.click?.(); r.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+    }
+    return false;
+  }
+  
+  console.log("[content] content.js injected v" + CONTENT_VERSION, "helpers:", H.HVER || "missing");
 
   // ---------- Catalog shown in popup ----------
   const ALL_FIELDS = {
@@ -44,45 +120,65 @@
   // ---------- ML → userData map ----------
   const MODEL_TO_USERDATA = {
     name: "fullName",
+    fullName: "fullName",
     first_name: "firstName",
+    firstName: "firstName",
+    given_name: "firstName",
     last_name: "lastName",
+    lastName: "lastName",
+    surname: "lastName",
+    family_name: "lastName",
+
     email: "email",
+    email_address: "email",
+    emailAddress: "email",
+    contact_email: "email",
+    work_email: "email",
+    personal_email: "email",
+
     phone: "phoneNumber",
+    phone_number: "phoneNumber",
     phoneNumber: "phoneNumber",
+    mobile: "phoneNumber",
+    cell: "phoneNumber",
+    telephone: "phoneNumber",
+    contact_number: "phoneNumber",
+
     street: "street",
     address: "street",
+    address1: "street",
+    address_line1: "street",
+    address_line_1: "street",
+    addr_line1: "street",
+    line1: "street",
+
     city: "city",
+    town: "city",
     state: "state",
+    province: "state",
+    region: "state",
     zip: "zip",
     postal: "zip",
-    company: "company",
-    job_title: "jobTitle",
+    postal_code: "zip",
+    postcode: "zip",
+    country: "country",
+    nation: "country",
+    county: "county",
+
     linkedin: "linkedin",
     github: "github",
+    portfolio: "github",
+    website: "website",
+
+    company: "company",
+    employer: "company",
+    job_title: "jobTitle",
+    title: "jobTitle",
+
     dob: "dob",
     birth_date: "dob",
-    gender: "gender",
-    fullName: "fullName",
-    firstName: "firstName",
-    lastName: "lastName"
+    gender: "gender"
   };
-
-  // ---------- helpers ----------
-  const lower = (s) => (s ?? "").toString().toLowerCase().trim();
-  const norm  = (s) => lower(s).replace(/[^a-z0-9]/g, "");
-
-  const STATE_TO_ABBR = {
-    "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA","colorado":"CO","connecticut":"CT","delaware":"DE","district of columbia":"DC",
-    "florida":"FL","georgia":"GA","hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN","iowa":"IA","kansas":"KS","kentucky":"KY","louisiana":"LA",
-    "maine":"ME","maryland":"MD","massachusetts":"MA","michigan":"MI","minnesota":"MN","mississippi":"MS","missouri":"MO","montana":"MT","nebraska":"NE",
-    "nevada":"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND","ohio":"OH","oklahoma":"OK",
-    "oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT",
-    "virginia":"VA","washington":"WA","west virginia":"WV","wisconsin":"WI","wyoming":"WY"
-  };
-  
-  const ABBR_TO_STATE = Object.fromEntries(Object.entries(STATE_TO_ABBR).map(([k,v]) => [v, k.replace(/\b\w/g, c => c.toUpperCase())]));
-  const toAbbr = (v) => STATE_TO_ABBR[lower(v)] || (v || "").toString().toUpperCase();
-  const sameNormalized = (a,b) => { const A = norm(a), B = norm(b); return A===B || A.includes(B) || B.includes(A); };
 
   // ===== JD extraction =====
   const JD_SELECTORS = [
@@ -102,7 +198,6 @@
       const text = (el?.innerText || el?.textContent || "").trim();
       if (text && text.length > 200) return text;
     }
-    // fallback: largest text block
     const blocks = Array.from(document.querySelectorAll("main, article, section, div"));
     let best = "";
     for (const b of blocks) {
@@ -112,24 +207,671 @@
     return best.slice(0, 200000);
   }
 
+  // ====== STEP 1 DETECTOR (content.js) ======
+(function(){
+  const SFF_NS = "SFF";
+
+  function textClean(s) {
+    return (s || "")
+      .replace(/\s+/g, " ")
+      .replace(/[ \t\r\n]+/g, " ")
+      .trim();
+  }
+
+  function getLabelViaFor(el) {
+    if (!el.id) return null;
+    const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (!lab) return null;
+    const txt = textClean(lab.textContent);
+    if (!txt) return null;
+    return { text: txt, reason: 'label[for]' };
+  }
+
+  function getLabelViaWrapper(el) {
+    // <label><input ...> Name</label>
+    const lab = el.closest('label');
+    if (!lab) return null;
+    const txt = textClean(lab.textContent);
+    if (!txt) return null;
+    return { text: txt, reason: 'label>input' };
+  }
+
+  function getLabelNearby(el) {
+    // a) previous sibling <label>
+    let n = el.previousElementSibling;
+    if (n && n.tagName === 'LABEL') {
+      const t = textClean(n.textContent);
+      if (t) return { text: t, reason: 'sibling<label' };
+    }
+  
+    // b) previous sibling text in common wrappers (div/p/strong/span)
+    const sib = el.previousElementSibling;
+    if (sib && /^(div|p|strong|span)$/i.test(sib.tagName)) {
+      const t = textClean(sib.textContent);
+      if (t) return { text: t, reason: 'sibling:text' };
+    }
+  
+    // c) parent container’s first <label>
+    let p = el.parentElement;
+    if (p) {
+      const lab = p.querySelector(':scope > label');
+      if (lab) {
+        const t = textClean(lab.textContent);
+        if (t) return { text: t, reason: 'parent>label' };
+      }
+    }
+  
+    // d) look up a couple levels for a header-like element preceding the field
+    let up = el.parentElement;
+    for (let hops = 0; up && hops < 3; hops++, up = up.parentElement) {
+      // sibling heading above
+      const prev = up.previousElementSibling;
+      if (prev && /^(h1|h2|h3|h4|h5|h6|p|div)$/i.test(prev.tagName)) {
+        const t = textClean(prev.textContent);
+        if (t) return { text: t, reason: 'header-above' };
+      }
+      // any child label in this block
+      const lab = up.querySelector(':scope > label');
+      if (lab) {
+        const t = textClean(lab.textContent);
+        if (t) return { text: t, reason: 'ancestor>label' };
+      }
+    }
+  
+    // e) aria-describedby
+    const ids = (el.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+    if (ids.length) {
+      for (const id of ids) {
+        const d = document.getElementById(id);
+        if (d) {
+          const t = textClean(d.textContent);
+          if (t) return { text: t, reason: 'aria-describedby' };
+        }
+      }
+    }
+    return null;
+  }  
+
+  function getLabelFromAttrs(el) {
+    const aria = textClean(el.getAttribute('aria-label'));
+    if (aria) return { text: aria, reason: 'aria-label' };
+    const ph = textClean(el.getAttribute('placeholder'));
+    if (ph) return { text: ph, reason: 'placeholder' };
+    const nm = textClean(el.getAttribute('name'));
+    if (nm) return { text: nm, reason: 'name' };
+    return null;
+  }
+
+  function getLabelFromUpload(el) {
+    const t = tagOf(el);
+    const ty = typeOf(el);
+    if (!(t === 'input' && ty === 'file')) return null;
+  
+    const accept = (el.getAttribute('accept') || '').toLowerCase();
+    const idnm = ((el.id || '') + ' ' + (el.name || '')).toLowerCase();
+  
+    const saysResume = /resume|cv/.test(idnm) || /pdf|doc/.test(accept);
+    const saysDoc = /document|attachment|file|upload/.test(idnm) || /pdf|doc|docx/.test(accept);
+  
+    if (saysResume) return { text: 'Upload Resume', reason: 'file:accept|name' };
+    if (saysDoc)    return { text: 'Supporting Document', reason: 'file:accept|name' };
+  
+    // If nothing explicit, still tag as a generic upload so it appears in the list
+    return { text: 'Upload File', reason: 'file:generic' };
+  }  
+
+  function tagOf(el) {
+    return (el.tagName || '').toLowerCase();
+  }
+
+  function typeOf(el) {
+    return (el.getAttribute('type') || '').toLowerCase();
+  }
+
+  function cssPath(el) {
+    // short readable selector for debugging
+    if (!(el instanceof Element)) return '';
+    const parts = [];
+    while (el && el.nodeType === 1 && parts.length < 6) {
+      let part = el.nodeName.toLowerCase();
+      if (el.id) { part += `#${el.id}`; parts.unshift(part); break; }
+      let sib = el;
+      let idx = 1;
+      while ((sib = sib.previousElementSibling)) {
+        if (sib.nodeName === el.nodeName) idx++;
+      }
+      part += `:nth-of-type(${idx})`;
+      parts.unshift(part);
+      el = el.parentElement;
+    }
+    return parts.join(' > ');
+  }
+
+  function isFillable(el) {
+    const t = tagOf(el);
+    const ty = typeOf(el);
+  
+    if (t === 'input') {
+      // Exclude only things we truly never fill
+      if (['button','submit','reset','image','hidden'].includes(ty)) return false;
+      // Include file inputs (we'll detect them; filling is step 3)
+      return true; // text, email, tel, date, radio, checkbox, file, etc.
+    }
+    if (t === 'textarea' || t === 'select') return true;
+  
+    return false;
+  }  
+
+  function hasKeyword(txt, words) {
+    const s = (txt || "").toLowerCase();
+    return words.some(w => s.includes(w));
+  }
+  
+  function inferContextFromHeadings(el) {
+    // look up to 3 ancestor blocks and their previous sibling headings
+    let up = el.parentElement;
+    for (let hops = 0; up && hops < 3; hops++, up = up.parentElement) {
+      // direct heading above
+      const prev = up.previousElementSibling;
+      if (prev && /^(h1|h2|h3|h4|h5|h6|legend|p|div)$/i.test(prev.tagName)) {
+        const t = (prev.textContent || "").trim();
+        if (hasKeyword(t, ["education","school","university","college","degree","academic"])) return "education";
+        if (hasKeyword(t, ["employment","experience","work history","work experience","job","career","position","employer","company"])) return "employment";
+      }
+      // fieldset legend
+      const legend = up.querySelector(":scope > legend");
+      if (legend) {
+        const t = legend.textContent || "";
+        if (hasKeyword(t, ["education","school","university","college","degree","academic"])) return "education";
+        if (hasKeyword(t, ["employment","experience","work history","work experience","job","career","position","employer","company"])) return "employment";
+      }
+    }
+    return null;
+  }
+  
+  function inferContextFromSiblings(el) {
+    // look in the closest block for sibling labels to hint the section
+    const block = el.closest("form, section, fieldset, div");
+    if (!block) return null;
+    const text = (block.textContent || "").toLowerCase();
+    const eduHit = /university|college|institute|degree|major|gpa|graduation/.test(text);
+    const empHit = /company|employer|job title|position|employment|start date|end date|role/.test(text);
+    if (eduHit && !empHit) return "education";
+    if (empHit && !eduHit) return "employment";
+    return null;
+  }
+  
+  function inferContext(el) {
+    return inferContextFromHeadings(el) || inferContextFromSiblings(el) || null;
+  }  
+
+  function findGroupQuestion(el) {
+    // 1) If inside a <fieldset>, prefer its <legend>
+    const fs = el.closest('fieldset');
+    if (fs) {
+      const lg = fs.querySelector(':scope > legend');
+      const legendText = lg && lg.textContent ? lg.textContent.trim() : '';
+      if (legendText) return { text: legendText, reason: 'fieldset>legend' };
+    }
+  
+    // 2) Look upwards for a heading or strong label immediately above the group
+    let up = el.closest('div, section, form') || el.parentElement;
+    for (let hops = 0; up && hops < 3; hops++, up = up.parentElement) {
+      const prev = up.previousElementSibling;
+      if (prev && /^(h1|h2|h3|h4|h5|h6|p|div)$/i.test(prev.tagName)) {
+        const t = (prev.textContent || '').trim();
+        if (t) return { text: t, reason: 'header-above' };
+      }
+      const lab = up.querySelector(':scope > label');
+      if (lab) {
+        const t = (lab.textContent || '').trim();
+        if (t) return { text: t, reason: 'ancestor>label' };
+      }
+    }
+  
+    // 3) As a fallback, if the radio/checkbox has aria-labelledby/aria-describedby referencing a question
+    const ids = (el.getAttribute('aria-labelledby') || el.getAttribute('aria-describedby') || '')
+                  .split(/\s+/).filter(Boolean);
+    for (const id of ids) {
+      const n = document.getElementById(id);
+      if (n) {
+        const t = (n.textContent || '').trim();
+        if (t) return { text: t, reason: 'aria-labeled' };
+      }
+    }
+  
+    return null; // unknown
+  }
+  
+  function getOptionLabel(el) {
+    // label that is directly tied to a single option (e.g., Yes / No)
+    // via wrapper <label><input>Yes</label> or <label for=id>Yes</label>
+    // We try wrapper first:
+    const wrap = el.closest('label');
+    if (wrap) {
+      const t = (wrap.textContent || '').trim();
+      if (t) return { text: t, reason: 'label>input' };
+    }
+    // then for=[id]
+    if (el.id) {
+      const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (lab) {
+        const t = (lab.textContent || '').trim();
+        if (t) return { text: t, reason: 'label[for]' };
+      }
+    }
+    return null;
+  }  
+
+  function isQuestionyText(t) {
+    const s = (t || "").trim().toLowerCase();
+    if (!s) return false;
+    // Heuristics: contains a question mark OR key “question words” common in forms
+    return s.includes("?") || /authorized|sponsorship|sponsor|gender|ethnicity|veteran|consent|background|agree|terms|policy/.test(s);
+  }
+  
+  function firstText(node) {
+    return (node && (node.textContent || "").trim()) || "";
+  }
+  
+  function prevSiblingQuestion(node, limit = 2) {
+    let n = node;
+    for (let i = 0; i < limit && n; i++) {
+      n = n.previousElementSibling;
+      if (!n) break;
+      if (/^(h1|h2|h3|h4|h5|h6|p|div|label|strong|span)$/i.test(n.tagName)) {
+        const txt = firstText(n);
+        if (txt && isQuestionyText(txt)) return { text: txt, reason: "prev-sibling" };
+      }
+    }
+    return null;
+  }
+  
+  function getGroupRoot(el, type, name) {
+    // Try to find the smallest ancestor that contains the full group for radios
+    if (type === "radio" && name) {
+      let root = el.closest("div, fieldset, section, form") || el.parentElement;
+      let best = null;
+      for (let hops = 0; root && hops < 5; hops++, root = root.parentElement) {
+        const allSameName = root.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
+        if (allSameName.length >= 2) { best = root; break; }
+      }
+      return best || el.closest("fieldset, div, section, form") || el.parentElement;
+    }
+    // For single checkboxes, the immediate label/parent container is usually enough
+    return el.closest("label, div, fieldset, section, form") || el.parentElement;
+  }
+  
+  function questionInsideContainer(container) {
+    if (!container) return null;
+    // 1) direct child heading/label before options
+    const kids = Array.from(container.children);
+    for (const k of kids) {
+      if (/^(label|h1|h2|h3|h4|h5|h6|p|div|strong|span)$/i.test(k.tagName)) {
+        const txt = firstText(k);
+        if (txt && isQuestionyText(txt)) return { text: txt, reason: "container-child" };
+      }
+    }
+    // 2) try a header immediately above the container
+    const prev = prevSiblingQuestion(container, 2);
+    if (prev) return prev;
+  
+    // 3) fieldset legend (least preferred but sometimes only source)
+    const fs = container.closest("fieldset");
+    if (fs) {
+      const lg = fs.querySelector(":scope > legend");
+      const t = firstText(lg);
+      if (t) return { text: t, reason: "fieldset>legend" };
+    }
+    return null;
+  }  
+
+  function detectAllFields() {
+    const nodes = Array.from(document.querySelectorAll('input, select, textarea'));
+    const out = [];
+    for (const el of nodes) {
+      if (!isFillable(el)) continue;
+
+      // group radios/checkboxes by name, but still show a single logical field
+      const t = typeOf(el);
+      if (["radio","checkbox"].includes(t)) {
+        const nm = el.getAttribute("name") || "";
+      
+        // Ensure single entry per radio group (first by name)
+        if (t === "radio" && nm) {
+          const first = document.querySelector(`input[type="radio"][name="${CSS.escape(nm)}"]`);
+          if (first !== el) continue; // skip duplicates
+        }
+      
+        // Extract a specific option label (Yes / No / etc.)
+        const opt = getOptionLabel(el); // {text, reason} or null
+      
+        // CHECKBOX: the label is usually the actual question ("I agree to a background check ...")
+        if (t === "checkbox" && opt && opt.text && opt.text.trim().length > 3) {
+          out.push({
+            labelText: opt.text,          // <-- use the checkbox label as the question
+            detectedBy: "checkbox-label",
+            tagName: tagOf(el),
+            inputType: t,
+            id: el.id || "",
+            name: nm || "",
+            placeholder: el.placeholder || "",
+            selector: cssPath(el),
+            optionText: opt.text,         // still keep it; filler may not need it for checkbox
+            group: nm || null
+          });
+          continue;
+        }
+      
+        // RADIO (and fallback for checkbox if no decent label): prefer the nearest specific question,
+        // not the generic fieldset legend.
+        const root = getGroupRoot(el, t, nm);
+        const q = questionInsideContainer(root) || prevSiblingQuestion(el, 3);
+      
+        // If nothing specific found, fall back to fieldset legend or aria labels
+        let labelText = q ? q.text : "";
+        let detectedBy = q ? q.reason : "none";
+      
+        if (!labelText) {
+          const gq = findGroupQuestion(el); // your earlier helper (legend/aria)
+          if (gq) { labelText = gq.text; detectedBy = gq.reason; }
+        }
+      
+        // If still blank, last resort: use one option text so it's not empty
+        if (!labelText && opt && opt.text) {
+          labelText = opt.text;
+          detectedBy = opt.reason || "option-fallback";
+        }
+      
+        out.push({
+          labelText,                 // <-- group question for prediction (e.g., "Are you authorized to work in the US?")
+          detectedBy,                // how we got the question
+          tagName: tagOf(el),
+          inputType: t,
+          id: el.id || '',
+          name: nm || '',
+          placeholder: el.placeholder || "",
+          selector: cssPath(el),
+          optionText: opt ? opt.text : "",    // <-- the option like "Yes" / "No" (we keep it for filling step)
+          group: nm || null                    // group name to locate all options during filling
+        });
+        continue; // done for this group
+      }      
+
+      let lab =
+      getLabelViaFor(el) ||
+      getLabelViaWrapper(el) ||
+      getLabelNearby(el) ||
+      getLabelFromUpload(el) ||  
+      getLabelFromAttrs(el);
+    
+
+      // If still nothing, we could skip; but for debugging show unnamed entries.
+      const labelText = lab ? lab.text : '';
+      const detectedBy = lab ? lab.reason : 'none';
+
+      out.push({
+        labelText,
+        detectedBy,
+        tagName: tagOf(el),
+        inputType: typeOf(el) || (tagOf(el) === 'select' ? 'select' : (tagOf(el) === 'textarea' ? 'textarea' : 'text')),
+        id: el.id || '',
+        name: el.name || '',
+        placeholder: el.placeholder || '',
+        selector: cssPath(el),
+        context: inferContext(el) 
+      });
+    }
+    return out;
+  }
+
+  // Lightweight probe
+  function probe() {
+    const inputs = document.querySelectorAll('input, select, textarea').length;
+    return { ok: true, inputs };
+  }
+
+  // message handler
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    try {
+      if (msg && msg.action === 'probe') {
+        sendResponse(probe());
+        return; // no async
+      }
+      if (msg && msg.action === 'EXT_DETECT_FIELDS') {
+        const detected = detectAllFields();
+        sendResponse({ ok: true, detected });
+        return; // no async
+      }
+    } catch (e) {
+      sendResponse({ ok: false, error: String(e) });
+    }
+    // Keep other listeners working
+  });
+})();
+
+
   async function getFillerRunSummary() {
     return new Promise((resolve) => {
       chrome.storage.local.get(["fillerRun"], (res) => resolve(res.fillerRun || null));
     });
   }
 
-  // ---------- Event dispatch helpers ----------
+  // ---------- Radio + label helpers (DOM) ----------
+  function labelForId(doc, id) {
+    if (!id) return "";
+    const l = doc.querySelector(`label[for="${CSS.escape(id)}"]`);
+    return (l?.textContent || "").trim();
+  }
+  function wrappedLabel(el) {
+    const w = el.closest("label");
+    return (w?.textContent || "").trim();
+  }
+  function siblingText(el) {
+    const sib = el.nextSibling;
+    return (sib && sib.nodeType === Node.TEXT_NODE) ? sib.textContent.trim() : "";
+  }
+  function optionText(el) {
+    return labelForId(el.ownerDocument, el.id)
+        || wrappedLabel(el)
+        || (el.getAttribute("aria-label") || "").trim()
+        || siblingText(el)
+        || (el.value || "").trim();
+  }
+  function matchRadioByValue(groupNodeList, desiredRaw) {
+    const want = normalizeToken(desiredRaw);
+    if (!want) return null;
+    const wantCanon = canonGender(want);
+
+    const candidates = Array.from(groupNodeList).map(r => {
+      const txt = normalizeToken(optionText(r));
+      const val = normalizeToken(r.value || "");
+      return { r, txt, val, txtCanon: canonGender(txt), valCanon: canonGender(val) };
+    });
+
+    const tests = [
+      (c) => c.valCanon === wantCanon,
+      (c) => c.txtCanon === wantCanon,
+      (c) => c.val === want || c.txt === want,
+      (c) => c.txt.includes(want) || want.includes(c.txt),
+    ];
+    for (const t of tests) {
+      const hit = candidates.find(t);
+      if (hit) return hit.r;
+    }
+    return null;
+  }
+
+  function setRadioGroupByValue(anyRadioInGroup, want){
+    const name = anyRadioInGroup.getAttribute("name");
+    if (!name) return false;
+    const group = anyRadioInGroup.ownerDocument.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
+    const m = matchRadioByValue(group, want);
+    if (m) { if (!m.checked) { m.checked = true; fireAll(m); } return true; }
+    // fallback: check the first if nothing matches (avoid no-ops)
+    const r0 = group[0];
+    if (r0 && !r0.checked) { r0.checked = true; fireAll(r0); return true; }
+    return false;
+  }
+
+  function setRadioByValue(containerOrDoc, name, rawVal) {
+    const H = window.H || window.SFFHelpers || {};
+    const nrm = H.norm || ((s)=> (s??"").toString().trim().toLowerCase().replace(/[^a-z0-9]/g,""));
+    const wanted = nrm(rawVal);
+    const root = containerOrDoc || document;
+    const nodes = root.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
+    for (const n of nodes) {
+      const val = nrm(n.value || "");
+      const labelText = nrm(n.closest("label")?.textContent || "");
+      if (val === wanted || labelText === wanted) {
+        n.checked = true;
+        n.dispatchEvent(new Event("input",{bubbles:true}));
+        n.dispatchEvent(new Event("change",{bubbles:true}));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function setRadioByLabel(groupNodes, wantedCandidates) {
+    // groupNodes: radios sharing name OR NodeList you pass
+    const H = window.H || window.SFFHelpers;
+    const candid = (wantedCandidates || []).map(s => (s || "").toString().trim().toLowerCase());
+    const radios = Array.from(groupNodes || []).filter(n => n && n.type === "radio");
+    // Build mapping: radio -> labelText
+    const pairs = radios.map(r => {
+      const id = r.id;
+      const lab = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+      const text = (lab?.textContent || r.value || "").trim().toLowerCase();
+      return { r, text };
+    });
+  
+    // try exact token overlap
+    for (const c of candid){
+      for (const p of pairs){
+        const ok = H.overlapScore ? H.overlapScore(p.text, c) >= 0.6
+                                  : p.text.includes(c) || c.includes(p.text);
+        if (ok) {
+          p.r.click?.();
+          p.r.checked = true;
+          p.r.dispatchEvent(new Event("change", { bubbles: true }));
+          p.r.dispatchEvent(new Event("input",  { bubbles: true }));
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  
+  function setCheckbox(el, checked=true) {
+    try {
+      if (!el) return false;
+      if (el.type !== "checkbox") return false;
+      if (el.checked !== !!checked) {
+        el.click?.(); // triggers listeners
+        el.checked = !!checked;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+      }
+      return true;
+    } catch { return false; }
+  }
+  
+  function setTextLike(el, value) {
+    if (!el) return false;
+    el.focus();
+    el.value = (value ?? "").toString();
+    el.dispatchEvent(new Event("input",{bubbles:true}));
+    el.dispatchEvent(new Event("change",{bubbles:true}));
+    el.blur?.();
+    return true;
+  }
+  
+  function setDateLike(el, value) {
+    const H = window.H || window.SFFHelpers || {};
+    const iso = H.toISODate ? H.toISODate(value) : null;
+    if (!iso) return false;
+    // some sites only react to valueAsDate
+    try { el.value = iso; } catch(_) {}
+    try { el.valueAsDate = new Date(iso); } catch(_) {}
+    el.dispatchEvent(new Event("input",{bubbles:true}));
+    el.dispatchEvent(new Event("change",{bubbles:true}));
+    return !!el.value;
+  }
+  
+  function setMonthLike(el, value) {
+    const H = window.H || window.SFFHelpers || {};
+    const mv = H.toMonthValue ? H.toMonthValue(value) : null;
+    if (!mv) return false;
+    try { el.value = mv; } catch(_) {}
+    el.dispatchEvent(new Event("input",{bubbles:true}));
+    el.dispatchEvent(new Event("change",{bubbles:true}));
+    return !!el.value;
+  }  
+
+  // --- expose DOM setters to the global filler below ---
+  window.SFFDom = Object.assign(window.SFFDom || {}, {
+    setRadioByValue,
+    setCheckbox,
+    setTextLike,
+    setDateLike,
+    setMonthLike
+  });
+
+  // also export as loose globals for legacy calls
+  window.setRadioByValue = setRadioByValue;
+  window.setCheckbox     = setCheckbox;
+  window.setTextLike     = setTextLike;
+  window.setDateLike     = setDateLike;
+  window.setMonthLike    = setMonthLike;
+
+
+  // ---------- Events ----------
   function fire(el, type) {
     try { el.dispatchEvent(new Event(type, { bubbles: true })); } catch {}
   }
   function fireAll(el) {
     fire(el, "input");
     fire(el, "change");
-    // Many frameworks (React/Vue) re-validate on blur
     if (typeof el.blur === "function") { try { el.blur(); } catch {} }
   }
 
-  // ---------- Select helper (robust) ----------
+  // ---------- File upload helpers ----------
+async function fetchResumeFileAsFile(resumeId) {
+  if (!resumeId) return { ok:false, reason:"no resume id" };
+  const resp = await new Promise(res => chrome.runtime.sendMessage(
+    { action: "getResumeFile", id: resumeId },
+    r => res(r)
+  ));
+  if (!resp?.ok) return { ok:false, reason: resp?.error || "resume fetch failed" };
+
+  // base64 → Uint8Array → Blob → File
+  const b64 = resp.base64 || "";
+  const len = b64.length;
+  // decode in chunks to avoid stack issues
+  const chunk = 0x8000;
+  const bytes = [];
+  for (let i = 0; i < len; i += chunk) {
+    const slice = b64.slice(i, i + chunk);
+    const arr = new Uint8Array(slice.length);
+    for (let j = 0; j < slice.length; j++) arr[j] = slice.charCodeAt(j);
+    bytes.push(arr);
+  }
+  const blob = new Blob(bytes, { type: resp.type || "application/pdf" });
+  const file = new File([blob], resp.name || "resume.pdf", { type: resp.type || "application/pdf" });
+  return { ok:true, file };
+}
+
+function setFileInputWithFile(el, file) {
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  el.files = dt.files;
+  el.dispatchEvent(new Event("input",{bubbles:true}));
+  el.dispatchEvent(new Event("change",{bubbles:true}));
+  return true;
+}
+
+  // ---------- Select helper (DOM) ----------
   function setSelectValue(selectEl, rawVal){
     if (!selectEl) return false;
     const val = (rawVal ?? "").toString().trim();
@@ -151,14 +893,12 @@
       return true;
     };
 
-    // Pass 1: exact (value/text)
     for (let i = 0; i < selectEl.options.length; i++) {
       const o = selectEl.options[i];
       const ov = nz(o.value), ot = nz(o.textContent);
       if (variants.some(v => nz(v).toLowerCase() === ov.toLowerCase()
                            || nz(v).toLowerCase() === ot.toLowerCase())) return commit(i);
     }
-    // Pass 2: loose normalized
     for (let i = 0; i < selectEl.options.length; i++) {
       const o = selectEl.options[i];
       const ovn = nrm(o.value), otn = nrm(o.textContent);
@@ -167,7 +907,6 @@
         return vn === ovn || vn === otn || ovn.includes(vn) || otn.includes(vn);
       })) return commit(i);
     }
-    // Pass 3: explicit abbr/full
     const tryList = [abbr, full].filter(Boolean);
     for (let i = 0; i < selectEl.options.length; i++) {
       const o = selectEl.options[i];
@@ -176,19 +915,58 @@
     return false;
   }
 
-  // ---------- Label discovery (robust) ----------
+  function setSelectValueSmart(sel, value, labelHint="") {
+    const H = window.H || window.SFFHelpers;
+    if (!sel || sel.tagName !== "SELECT") return false;
+    if (value == null || value === "") return false; // honor "no default" policy
+  
+    let candidates = [String(value)];
+  
+    // State & Country by label hint or select id/name
+    const l = (labelHint || "").toLowerCase() + " " + (sel.id||"") + " " + (sel.name||"");
+    if (/\b(state|province|region)\b/.test(l)) {
+      candidates = H.buildStateCandidates ? H.buildStateCandidates(value) : [value];
+    } else if (/\bcountry|nation\b/.test(l)) {
+      candidates = H.buildCountryCandidates ? H.buildCountryCandidates(value) : [value];
+    } else if (/\bdegree|highest\b/.test(l)) {
+      candidates = H.buildDegreeCandidates ? H.buildDegreeCandidates(value) : [value];
+    }
+  
+    // Ethnicity
+    if (/\bethnicity\b/.test(l)) {
+      candidates = H.buildEthnicityCandidates ? H.buildEthnicityCandidates(value) : [value];
+    }
+  
+    // Veteran
+    if (/\bveteran\b/.test(l)) {
+      candidates = H.buildVeteranCandidates ? H.buildVeteranCandidates(value) : [value];
+    }
+  
+    // Terms/Consent/Background → checkbox selects appear sometimes as <select>
+    if (/\b(terms|privacy|consent|background)\b/.test(l)) {
+      candidates = ["Yes", "I Agree", "Agree", "I Consent", "Consented", "Accept"];
+    }
+  
+    const idx = H.matchOptionIndex ? H.matchOptionIndex(sel, candidates) : -1;
+    if (idx >= 0) {
+      sel.selectedIndex = idx;
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      sel.dispatchEvent(new Event("input",  { bubbles: true }));
+      return true;
+    }
+    return false;
+  }
+
+  // ---------- Labels + DOM traversal ----------
   function labelTextFor(el){
-    // 1) <label for=ID>
     if (el.id) {
       const forLab = el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       const t = forLab?.textContent?.trim();
       if (t) return t;
     }
-    // 2) wrap <label> ... <input>
     let wrap = el.closest("label");
     if (wrap?.textContent?.trim()) return wrap.textContent.trim();
 
-    // 3) common “row/group/field” containers
     const near = el.closest('[class*="row"], [class*="group"], [class*="field"], [class*="Form"], [role="group"]');
     if (near){
       const t = (near.querySelector('label')?.textContent
@@ -197,8 +975,6 @@
               || "").trim();
       if (t) return t;
     }
-
-    // 4) aria/placeholder/name/id as last resort
     return (el.getAttribute("aria-label")
       || el.getAttribute("placeholder")
       || el.getAttribute("name")
@@ -207,7 +983,6 @@
     ).trim();
   }
 
-  // ---------- Shadow DOM traversal ----------
   function collectFields(root=document){
     const out = [];
     const push = (el)=> {
@@ -219,48 +994,19 @@
       }
     };
     const walk = (node) => {
-      // regular DOM
       node.querySelectorAll("input, textarea, select, [contenteditable=''], [contenteditable='true']").forEach(push);
-      // shadow roots
       node.querySelectorAll("*").forEach(n => { if (n.shadowRoot) walk(n.shadowRoot); });
     };
     walk(root);
     return out;
   }
 
-  // ---------- Pair up inputs with labels (uses shadow DOM + robust labels) ----------
   function collectPairs() {
     const inputs = collectFields(document);
     return inputs.map((el) => ({ inputEl: el, labelText: labelTextFor(el) || "(unlabeled)" }));
   }
 
-  // ---------- background messaging ----------
-  async function getUserData() {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ action: "getUserData" }, (resp) => {
-        if (!resp || resp.success === false) {
-          console.error("[content] getUserData failed:", resp && resp.error);
-          return resolve({});
-        }
-        resolve(resp.userData || {});
-      });
-    });
-  }
-
-  async function getPredictions(labels) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ action: "predictLabels", labels }, (resp) => {
-        if (!resp || resp.success === false) {
-          console.warn("[content] predictLabels unavailable, using heuristics.");
-          return resolve([]);
-        }
-        const arr = Array.isArray(resp.results) ? resp.results : [];
-        resolve(arr);
-      });
-    });
-  }
-
-  // ---------- heuristic helpers ----------
+  // ---------- Heuristics (lightweight mapping) ----------
   function context(inputEl, labelText){
     return [
       labelText,
@@ -290,50 +1036,42 @@
     return null;
   }
 
-  // ---------- set value robustly (inputs, selects, radios, checkboxes, contenteditable) ----------
+  // ---------- Value setter (DOM) ----------
   function setNodeValue(el, val){
     const tag = (el.tagName||"").toLowerCase();
-    const type = (el.type || "").toLowerCase();
+    const itype = (el.type || "").toLowerCase();
 
     try {
       if (tag === "select") {
-        // try robust select matching, then fallback to raw value
-        if (!setSelectValue(el, val)) { el.value = String(val); fireAll(el); }
+        if (!setSelectValueSmart(el, val)) { el.value = String(scalarize(val)); fireAll(el); }
         return true;
       }
+      if (itype === "file") return false;
 
-      if (type === "checkbox") {
-        const want = (val === true || String(val).toLowerCase() === "true");
+      if (itype === "checkbox") {
+        const want = (val === true || String(val).toLowerCase() === "true" || String(val).toLowerCase() === "yes");
         if (el.checked !== want) { el.checked = want; fireAll(el); }
         return true;
       }
-
-      if (type === "radio") {
-        // Try to find a sibling radio with matching label/value
-        const name = el.getAttribute("name");
-        if (name) {
-          const group = el.ownerDocument.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
-          for (const r of group) {
-            const lt = labelTextFor(r);
-            if (sameNormalized(lt, val) || sameNormalized(r.value, val)) {
-              if (!r.checked) { r.checked = true; fireAll(r); }
-              return true;
-            }
-          }
-        }
-        // fallback: set on the passed radio
+      if (itype === "radio") {
+        const ok = setRadioGroupByValue(el, val);
+        if (ok) return true;
         if (!el.checked) { el.checked = true; fireAll(el); }
         return true;
       }
-
       if (el.isContentEditable || el.getAttribute("contenteditable") === "" || el.getAttribute("contenteditable") === "true") {
-        el.innerText = String(val);
+        el.innerText = scalarize(val);
         fireAll(el);
         return true;
       }
 
-      // default text-like inputs/textarea
-      el.value = String(val);
+      let out = scalarize(val);
+      if (itype === "date") out = toISODate(out);
+      else if (itype === "month") {
+        const iso = toISODate(out);
+        out = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.slice(0,7) : toISOMonth(out);
+      }
+      el.value = String(out);
       fireAll(el);
       return true;
     } catch (e) {
@@ -342,381 +1080,7 @@
     }
   }
 
-  // === Week 8 ===
-// ----- Month names + date formatting -----
-const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-
-function fmtMonthYear(m, y, style="long"){
-  if (!m && !y) return "";
-  if (style === "MM/YYYY") {
-    const mm = String(m||"").padStart(2,"0");
-    return `${mm}/${y||""}`.trim();
-  }
-  const monthName = MONTHS[(Number(m)||0)-1] || "";
-  return `${monthName} ${y||""}`.trim();
-}
-
-// ----- Try multiple values on either a select or input -----
-function trySetSelectOrInput(el, values){
-  for (const v of values){
-    if (!v) continue;
-    if (el.tagName.toLowerCase()==="select") {
-      if (setSelectValue(el, v)) return true;        // your existing robust matcher
-    } else {
-      el.value = String(v);
-      fireAll(el);
-      return true;
-    }
-  }
-  // If it's a select and nothing matched, fallback to closest option (token overlap)
-  if (el.tagName.toLowerCase()==="select") {
-    return trySelectClosest(el, values);
-  }
-  return false;
-}
-
-// ----- "Closest" select option by token overlap (lightweight fuzzy) -----
-function normTokens(s){
-  return String(s||"").toLowerCase().replace(/[^a-z0-9+./\s-]/g," ").split(/\s+/).filter(Boolean);
-}
-function overlapScore(a, b){
-  const A = new Set(normTokens(a)), B = new Set(normTokens(b));
-  if (!A.size || !B.size) return 0;
-  let inter = 0;
-  for (const t of A) if (B.has(t)) inter++;
-  return inter / Math.max(A.size, B.size);
-}
-function trySelectClosest(select, candidates){
-  const opts = Array.from(select.options);
-  let bestIdx = -1, bestScore = 0;
-  for (let i=0;i<opts.length;i++){
-    const text = opts[i].text || opts[i].value;
-    for (const cand of candidates){
-      const s = overlapScore(text, cand);
-      if (s > bestScore) { bestScore = s; bestIdx = i; }
-    }
-  }
-  if (bestIdx >= 0 && bestScore >= 0.5) {      // only pick if reasonably close
-    select.selectedIndex = bestIdx;
-    select.dispatchEvent(new Event("change", { bubbles:true }));
-    return true;
-  }
-  return false;
-}
-  
-  // === Simple profile-based filler (Week 7) ===
-  // Lightweight helpers you can call with a structured profile object.
-  function _setValue(el, val) {
-    if (!el) return false;
-    try {
-      el.focus();
-      el.value = String(val ?? "");
-      fireAll(el);
-      return true;
-    } catch { return false; }
-  }
-
-  function _setSelect(select, value) {
-    if (!select) return false;
-    // Reuse robust select matching from setSelectValue
-    return setSelectValue(select, value);
-  }
-
-  function _setCheckboxesByName(name, values) {
-    const want = new Set((values || []).map(v => String(v).toLowerCase()));
-    const boxes = document.querySelectorAll(`input[type="checkbox"][name="${CSS.escape(name)}"]`);
-    let hit = false;
-    boxes.forEach(b => {
-      const val = String(b.value || "").toLowerCase();
-      if (want.has(val) && !b.checked) { b.click(); hit = true; }
-    });
-    return hit;
-  }
-
-  // Try a few id/name candidates
-  function _byIdOrName(...ids) {
-    for (const id of ids) {
-      const el = document.getElementById(id) || document.querySelector(`[name="${CSS.escape(id)}"]`);
-      if (el) return el;
-    }
-    return null;
-  }
-
-  // Map of canonical profile keys → common id/name synonyms on forms
-  const PROFILE_MAP = {
-    firstName:  ["first_name_input","firstName","first_name","fname","first"],
-    lastName:   ["last_name_input","lastName","last_name","lname","last","surname","family_name"],
-    email:      ["email_input","email","emailAddress","contact_email"],
-    phoneNumber:["phone_input","phone","mobile","tel","telephone"],
-    linkedin:   ["linkedin_url","linkedin","profile_linkedin"],
-    github:     ["github_url","github","portfolio","website","site","url"],
-
-    // Address
-    street:     ["addr_line1","address","address1","street","address_line1","line1"],
-    city:       ["addr_city","city","town"],
-    state:      ["addr_state","state","province","region","stateProvince"],
-    zip:        ["addr_zip","zip","postal","postcode","postal_code"],
-    country:    ["country_sel","country"],
-
-    // Employment / education (examples)
-    company:    ["company","employer","organization"],
-    jobTitle:   ["job_title","title","position","role"],
-    start_date: ["start_date","employment_start","start"],
-    end_date:   ["end_date","employment_end","end"],
-
-    // Radios / selects
-    gender:     ["gender","sex"],
-    dob:        ["dob","birth_date","date_of_birth"]
-  };
-
-  // Fill by direct key → element mapping
-  function fillFromProfile(profile = {}) {
-    let fills = 0;
-
-    // Inputs & selects by PROFILE_MAP
-    for (const [key, ids] of Object.entries(PROFILE_MAP)) {
-      const val = profile[key];
-      if (val == null || val === "") continue;
-
-      const el = _byIdOrName(...ids);
-      if (!el) continue;
-
-      const tag = (el.tagName||"").toLowerCase();
-      const type = (el.type || "").toLowerCase();
-
-      if (tag === "select") {
-        if (_setSelect(el, val)) fills++;
-        continue;
-      }
-
-      if (type === "radio") {
-        // choose by label/value match within group
-        const name = el.getAttribute("name") || ids.find(Boolean);
-        if (name) {
-          const group = document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
-          for (const r of group) {
-            const lt = labelTextFor(r);
-            if (sameNormalized(lt, val) || sameNormalized(r.value, val)) {
-              if (!r.checked) { r.checked = true; fireAll(r); fills++; }
-              break;
-            }
-          }
-        }
-        continue;
-      }
-
-      if (type === "checkbox") {
-        // If profile value is boolean, set this single box; if array, use name-based group set
-        if (Array.isArray(val)) {
-          const name = el.getAttribute("name");
-          if (name) { if (_setCheckboxesByName(name, val)) fills++; }
-        } else {
-          const want = (val === true || String(val).toLowerCase() === "true");
-          if (el.checked !== want) { el.checked = want; fireAll(el); fills++; }
-        }
-        continue;
-      }
-
-      if (el.isContentEditable || el.getAttribute("contenteditable") === "" || el.getAttribute("contenteditable") === "true") {
-        el.innerText = String(val);
-        fireAll(el);
-        fills++;
-        continue;
-      }
-
-      if (_setValue(el, val)) fills++;
-    }
-
-    // Example: skills checkboxes by shared name=skills
-    if (Array.isArray(profile.skills) && profile.skills.length) {
-      if (_setCheckboxesByName("skills", profile.skills)) fills++;
-    }
-
-    return fills;
-  }
-
-    // === Repeating group filler (education[], experience[]) ===
-  // Strategy:
-  //  1) Find groups/sections by common patterns (fieldset, section, data-section="education", etc.).
-  //  2) For each found block, try to locate child controls via id/name/label synonyms.
-  //  3) Fill items[i] into block i (up to min(blocks, items.length)).
-
-  function queryGroupBlocks(hints) {
-    // Try the most specific selectors first, then fall back.
-    const sels = [
-      ...hints.map(h => `[data-section="${h}"]`),
-      ...hints.map(h => `[data-group="${h}"]`),
-      ...hints.map(h => `section.${h}, .${h}-section, .${h}-block, .${h}-item`),
-      ...hints.map(h => `fieldset.${h}, fieldset[data-type="${h}"]`),
-      ...hints.map(h => `div.${h}, div.${h}-item, div.${h}-block`)
-    ];
-    const seen = new Set();
-    const blocks = [];
-    for (const sel of sels) {
-      document.querySelectorAll(sel).forEach(el => {
-        if (!seen.has(el)) { seen.add(el); blocks.push(el); }
-      });
-      if (blocks.length) break; // keep first match set to avoid duplicates
-    }
-    // If nothing matched, fall back to generic repeaters:
-    if (!blocks.length) {
-      document.querySelectorAll("fieldset, section, .group, .repeater, .repeatable").forEach(el => {
-        if (!seen.has(el)) { seen.add(el); blocks.push(el); }
-      });
-    }
-    return blocks;
-  }
-
-  function findInBlock(block, idsOrNames) {
-    for (const key of idsOrNames) {
-      const el = block.querySelector(`#${CSS.escape(key)}`) ||
-                 block.querySelector(`[name="${CSS.escape(key)}"]`);
-      if (el) return el;
-    }
-    // Try label text within block
-    for (const key of idsOrNames) {
-      const lc = key.replace(/[_-]/g, " ").toLowerCase();
-      const labeled = Array.from(block.querySelectorAll("label")).find(l => (l.innerText||"").trim().toLowerCase().includes(lc));
-      if (labeled) {
-        const forId = labeled.getAttribute("for");
-        if (forId) {
-          const byFor = block.querySelector(`#${CSS.escape(forId)}`);
-          if (byFor) return byFor;
-        }
-        // nearest input/select/textarea
-        const nearby = labeled.parentElement?.querySelector("input,select,textarea");
-        if (nearby) return nearby;
-      }
-    }
-    return null;
-  }
-
-  // Per-group field synonym maps
-  const EDU_FIELD_MAP = {
-    school:    ["school","university","college","institute","education_school"],
-    degree:    ["degree","qualification"],
-    field:     ["field","major","study","field_of_study"],
-    startDate: ["start","start_date","education_start","from"],
-    endDate:   ["end","end_date","education_end","to"],
-    gpa:       ["gpa","grade","cgpa"]
-  };  
-
-  const EXP_FIELD_MAP = {
-    company:    ["company","employer","organization","org","company_name"],
-    jobTitle:   ["title","job_title","position","role"],
-    startDate:  ["start","start_date","employment_start","from"],
-    endDate:    ["end","end_date","employment_end","to"],
-    description:["description","summary","role_description","responsibilities","duties"]
-  };  
-
-  function fillEducationArray(edus = []) {
-    if (!Array.isArray(edus) || !edus.length) return 0;
-    const blocks = queryGroupBlocks(["education","edu","school"]);
-    let filled = 0;
-  
-    for (let i = 0; i < Math.min(blocks.length, edus.length); i++) {
-      const b = blocks[i], item = edus[i];
-  
-      for (const [key, synonyms] of Object.entries(EDU_FIELD_MAP)) {
-        const el = findInBlock(b, synonyms);
-        if (!el) continue;
-  
-        // Degree: try short/long/both ("BS", "Bachelor of Science", "BS — Bachelor of Science")
-        if (key === "degree") {
-          const short = (item.degreeShort || "").trim();
-          const long  = (item.degreeLong  || "").trim();
-          const both1 = short && long ? `${short} — ${long}` : "";
-          const both2 = short && long ? `${short} - ${long}`  : "";
-          const candidates = [short, long, both1, both2].filter(Boolean);
-          if (candidates.length && trySetSelectOrInput(el, candidates)) filled++;
-          continue;
-        }
-  
-        // Dates: prefer "Month YYYY", fallback "MM/YYYY"
-        if (key === "startDate") {
-          const vals = [
-            fmtMonthYear(item.startMonth, item.startYear, "long"),
-            fmtMonthYear(item.startMonth, item.startYear, "MM/YYYY")
-          ];
-          if (trySetSelectOrInput(el, vals)) filled++;
-          continue;
-        }
-        if (key === "endDate") {
-          const vals = [
-            fmtMonthYear(item.endMonth, item.endYear, "long"),
-            fmtMonthYear(item.endMonth, item.endYear, "MM/YYYY")
-          ];
-          if (trySetSelectOrInput(el, vals)) filled++;
-          continue;
-        }
-  
-        // Everything else
-        const val = item[key];
-        if (val != null) {
-          if (el.tagName.toLowerCase() === "select") setSelectValue(el, val);
-          else { el.value = String(val); fireAll(el); }
-          filled++;
-        }
-      }
-    }
-    return filled;
-  }  
-
-  function fillExperienceArray(exps = []) {
-    if (!Array.isArray(exps) || !exps.length) return 0;
-    const blocks = queryGroupBlocks(["experience","exp","employment","work"]);
-    let filled = 0;
-  
-    for (let i = 0; i < Math.min(blocks.length, exps.length); i++) {
-      const b = blocks[i], item = exps[i];
-  
-      for (const [key, synonyms] of Object.entries(EXP_FIELD_MAP)) {
-        const el = findInBlock(b, synonyms);
-        if (!el) continue;
-  
-        if (key === "startDate") {
-          const vals = [
-            fmtMonthYear(item.startMonth, item.startYear, "long"),
-            fmtMonthYear(item.startMonth, item.startYear, "MM/YYYY")
-          ];
-          if (trySetSelectOrInput(el, vals)) filled++;
-          continue;
-        }
-        if (key === "endDate") {
-          const vals = [
-            fmtMonthYear(item.endMonth, item.endYear, "long"),
-            fmtMonthYear(item.endMonth, item.endYear, "MM/YYYY")
-          ];
-          if (trySetSelectOrInput(el, vals)) filled++;
-          continue;
-        }
-  
-        let val = item[key];
-        if (val != null) {
-          if (el.tagName.toLowerCase() === "select") setSelectValue(el, val);
-          else { el.value = String(val); fireAll(el); }
-          filled++;
-        }
-      }
-    }
-    return filled;
-  }
-  
-  // Wrap into the main profile filler: call these after the scalar fields
-  function fillFromProfileWithArrays(profile = {}) {
-    let total = 0;
-    total += fillFromProfile(profile.personal || profile); // reuse singles (firstName, etc.)
-    // address/links if your form uses single blocks (outside repeaters)
-    const addr = profile.address || {};
-    const links = profile.links || {};
-    total += fillFromProfile({ ...addr, ...links });
-
-    total += fillEducationArray(profile.education || []);
-    total += fillExperienceArray(profile.experience || []);
-    return total;
-  }
-
-  // ---------- SELF-TEST: deterministic mapping without ML ----------
+  // ---------- Detect-only ----------
   function detectKeyByAttrs(inputEl) {
     const attrs = [
       inputEl.getAttribute("name"),
@@ -724,9 +1088,7 @@ function trySelectClosest(select, candidates){
       inputEl.getAttribute("placeholder"),
       inputEl.getAttribute("aria-label")
     ].filter(Boolean).map(x => x.toLowerCase());
-
     const has = (...needles) => attrs.some(a => needles.some(n => a.includes(n)));
-
     if (has("first")) return "firstName";
     if (has("last")) return "lastName";
     if (has("email")) return "email";
@@ -738,48 +1100,208 @@ function trySelectClosest(select, candidates){
     return null;
   }
 
-  function deterministicFill(userData, dryRun = true) {
-    const inputs = collectFields(document);
-    const filled = [];
-
-    for (const el of inputs) {
-      const key = detectKeyByAttrs(el);
-      if (!key) continue;
-      const val = userData?.[key];
-      if (val == null || val === "") continue;
-
-      if (!dryRun) setNodeValue(el, val);
-
-      filled.push({ key, label: key, value: val, confidence: 0.99 });
+  function detectFieldsOnPage() {
+    const pairs = collectPairs();
+    const seen = new Set();
+    const detected = [];
+    for (const { inputEl, labelText } of pairs) {
+      const guess = heuristicKey(inputEl, labelText) || detectKeyByAttrs(inputEl);
+      if (!guess) continue;
+      const key = MODEL_TO_USERDATA[guess] || guess;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      detected.push({ key, label: ALL_FIELDS?.[key] || labelText || key, confidence: "N/A" });
     }
-    return { inputs: inputs.length, filled };
+    return { ok: true, inputs: pairs.length, detected };
   }
 
-  // ---------- generic ML + heuristic filler ----------
+  // ---------- background messaging ----------
+  async function getUserData() {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: "getUserData" }, (resp) => {
+        if (!resp || resp.success === false) {
+          console.error("[content] getUserData failed:", resp && resp.error);
+          return resolve({});
+        }
+        resolve(resp.userData || {});
+      });
+    });
+  }
+/* ================= NORMALIZED PREDICTIONS ================= */
+
+function _normalizeKey(k) {
+  if (!k) return null;
+  const s = String(k).trim();
+
+  // Common snake->camel and alias fixes used in tests
+  const lower = s.toLowerCase();
+  const alias = {
+    first_name: "firstName",
+    firstname: "firstName",
+    last_name: "lastName",
+    lastname: "lastName",
+    phone: "phoneNumber",
+    mobile: "phoneNumber",
+    cellphone: "phoneNumber",
+    postal: "zip",
+    zipcode: "zip",
+    birth_date: "dob",
+    birthdate: "dob",
+    date_of_birth: "dob",
+  }[lower];
+  if (alias) return alias;
+
+  // Keep camelCase if it's already that way
+  return s;
+}
+
+function _pickTopKeyFromAny(x) {
+  // Accept: string | {prediction, confidence} | {topk:[...]} | null
+  if (!x) return { prediction: null, confidence: 0 };
+
+  // string
+  if (typeof x === "string") {
+    return { prediction: _normalizeKey(x), confidence: 0.66 };
+  }
+
+  // explicit {prediction, ...}
+  if (x && typeof x === "object" && ("prediction" in x)) {
+    const conf = typeof x.confidence === "number" ? x.confidence : 0.66;
+    return { prediction: _normalizeKey(x.prediction), confidence: conf };
+  }
+
+  // { topk: [...] } where items can be string OR {label/ prediction, score/confidence}
+  if (x && typeof x === "object" && Array.isArray(x.topk) && x.topk.length) {
+    const first = x.topk[0];
+    if (typeof first === "string") {
+      return { prediction: _normalizeKey(first), confidence: 0.66 };
+    }
+    if (first && typeof first === "object") {
+      const cand =
+        first.prediction ?? first.label ?? first.key ?? first.name ?? null;
+      const conf = first.confidence ?? first.score ?? 0.66;
+      return { prediction: _normalizeKey(cand), confidence: Number(conf) || 0.66 };
+    }
+  }
+
+  return { prediction: null, confidence: 0 };
+}
+
+async function getPredictions(labels) {
+  // Always return array of {prediction, confidence} aligned to labels length.
+  // 1) Try background script (your existing flow)
+  const tryBg = () =>
+  new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(
+        { action: "predictLabels", labels: Array.from(labels || []) }, // ← action, not type
+        (resp) => resolve(resp && resp.results ? resp.results : null)
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+
+  // 2) Optional direct fetch fallback (if you run a local API). Safe no-op if unreachable.
+  const tryFetch = async () => {
+    try {
+      const r = await fetch("http://127.0.0.1:5000/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ labels: Array.from(labels || []) }),
+        credentials: "include",
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      // Unified endpoint returns {results:[...]} — normalize to array
+      if (Array.isArray(j)) return j;
+      if (j && Array.isArray(j.results)) return j.results;
+      return null;
+    } catch {
+      return null;
+    }
+  };  
+
+  let raw = await tryBg();
+  if (!raw) raw = await tryFetch();
+  if (!raw || !Array.isArray(raw)) {
+    // graceful empty
+    return (labels || []).map(() => ({ prediction: null, confidence: 0 }));
+  }
+
+  // Normalize, keeping alignment with labels
+  const out = (labels || []).map((_, i) => _pickTopKeyFromAny(raw[i]));
+  // Final safety: ensure shape
+  return out.map((r) => ({
+    prediction: r && typeof r.prediction === "string" ? r.prediction : null,
+    confidence: typeof r?.confidence === "number" ? r.confidence : 0,
+  }));
+}
+/* =============== END NORMALIZED PREDICTIONS =============== */
+
+
+  // ---------- main filler ----------
   async function genericScanAndFill() {
     const userData = await getUserData();
-    const pairs = collectPairs();
-    const inputsCount = pairs.length;
+    const p = userData || {};
+    const personal = p.personal || p;
+    const address  = p.address  || {};
+    const links    = p.links    || {};
+    const exp0 = Array.isArray(p.experience) && p.experience[0] ? p.experience[0] : {};
+    const flatUser = {
+      firstName: personal.firstName || "",
+      lastName:  personal.lastName  || "",
+      fullName:  [personal.firstName, personal.lastName].filter(Boolean).join(" ") || personal.fullName || "",
+      email:     personal.email     || "",
+      phoneNumber: personal.phoneNumber || "",
+      dob:       personal.dob       || "",
+      gender:    personal.gender    || "",
+      street:    address.street  || "",
+      city:      address.city    || "",
+      state:     address.state   || "",
+      zip:       address.zip     || "",
+      country:   address.country || "",
+      linkedin:  links.linkedin || "",
+      github:    links.github   || links.portfolio || "",
+      website:   links.website  || "",
+      company:   exp0.company   || "",
+      jobTitle:  exp0.jobTitle  || "",
+      start_date: (exp0.startMonth && exp0.startYear) ? `${String(exp0.startMonth).padStart(2,"0")}/${exp0.startYear}` : "",
+      end_date:   (exp0.endMonth   && exp0.endYear)   ? `${String(exp0.endMonth).padStart(2,"0")}/${exp0.endYear}`   : "",
+    };
 
-    if (inputsCount === 0) {
+    const pairs = collectPairs();
+    if (!pairs.length) {
       const notFilledAll = Object.entries(ALL_FIELDS).map(([k, label]) => ({ key: k, label }));
       return { ok: true, filled: [], notFilled: notFilledAll, inputs: 0 };
     }
 
     const labels = pairs.map((p) => p.labelText);
     let results = await getPredictions(labels);
-
-    const mlEmpty = !Array.isArray(results) || results.length === 0;
-    if (mlEmpty) results = labels.map(() => ({ prediction: null, confidence: 0 }));
+    if (!Array.isArray(results) || !results.length) results = labels.map(() => ({ prediction: null, confidence: 0 }));
     if (results.length !== pairs.length) {
-      const normArr = [];
-      for (let i = 0; i < pairs.length; i++) normArr[i] = results[i] || { prediction: null, confidence: 0 };
-      results = normArr;
+      results = pairs.map((_, i) => results[i] || { prediction: null, confidence: 0 });
     }
 
     const filled = [];
     const seenKeys = new Set();
 
+    // opportunistic gender set (radio)
+    try {
+      if (!seenKeys.has("gender")) {
+        const desired = (flatUser && (flatUser.gender || flatUser.Gender)) || "";
+        if (desired) {
+          const radios = Array.from(document.querySelectorAll('input[type="radio"]'))
+            .filter(r => (r.getAttribute("name") || "").toLowerCase().includes("gender"));
+          if (radios.length && setRadioGroupByValue(radios[0], desired)) {
+            filled.push({ key: "gender", label: "Gender", value: desired, confidence: 0.9 });
+            seenKeys.add("gender");
+          }
+        }
+      }
+    } catch {}
+
+    // ML pass
     results.forEach((res, i) => {
       const { inputEl, labelText } = pairs[i];
       let { prediction, confidence } = res || {};
@@ -791,19 +1313,22 @@ function trySelectClosest(select, candidates){
       }
       if (!mappedKey) return;
 
-      const val = (userData || {})[mappedKey];
-      if (val == null || val === "") return;
+      const { value: val, key: creditKey } = resolveValueAndKey(mappedKey, labelText, flatUser);
+      if (!val) return;
+
+      if (creditKey === "city" && /\d/.test(val)) return;
+      if (creditKey === "zip"  && !/^\d{3,10}(-\d{4})?$/.test(val)) return;
 
       try {
         const did = setNodeValue(inputEl, val);
         if (did) {
           filled.push({
-            key: mappedKey,
-            label: ALL_FIELDS[mappedKey] || labelText,
+            key: creditKey,
+            label: ALL_FIELDS[creditKey] || labelText,
             value: val,
             confidence: typeof confidence === "number" ? +(confidence.toFixed(2)) : 0
           });
-          seenKeys.add(mappedKey);
+          seenKeys.add(creditKey);
         }
       } catch (e) {
         console.error("[content] Error filling field:", { labelText, mappedKey, error: e });
@@ -814,25 +1339,38 @@ function trySelectClosest(select, candidates){
       .filter(([k]) => !seenKeys.has(k))
       .map(([k, label]) => ({ key: k, label }));
 
-    return { ok: true, filled, notFilled, inputs: inputsCount };
+    return { ok: true, filled, notFilled, inputs: pairs.length };
   }
 
   async function scanAndFill() {
-    try {
-      return await genericScanAndFill();
-    } catch (e) {
+    try { return await genericScanAndFill(); }
+    catch (e) {
       console.error("[content] scanAndFill fatal:", e);
       const notFilledAll = Object.entries(ALL_FIELDS).map(([k, label]) => ({ key: k, label }));
       return { ok: false, error: String(e), filled: [], notFilled: notFilledAll, inputs: 0 };
     }
   }
 
-  // ---------- listener ----------
+  function detectFields() {
+    const pairs = collectPairs();
+    const inputsCount = pairs.length;
+    if (!inputsCount) return { ok: true, inputs: 0, detected: [] };
+    const seen = new Set();
+    const detected = [];
+    for (const { inputEl, labelText } of pairs) {
+      const guess = heuristicKey(inputEl, labelText) || detectKeyByAttrs(inputEl);
+      if (!guess) continue;
+      const mapped = MODEL_TO_USERDATA[guess] || guess;
+      if (seen.has(mapped)) continue;
+      seen.add(mapped);
+      detected.push({ key: mapped, label: ALL_FIELDS[mapped] || labelText || mapped });
+    }
+    return { ok: true, inputs: inputsCount, detected };
+  }
+
   chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     try {
-      if (req.action === "ping") {
-        sendResponse({ ok: true, v: CONTENT_VERSION }); return;
-      }
+      if (req.action === "ping") { sendResponse({ ok: true, v: CONTENT_VERSION }); return; }
       if (req.action === "probe") {
         const count = collectFields(document).length;
         sendResponse({ ok: true, inputs: count, v: CONTENT_VERSION }); return;
@@ -841,33 +1379,515 @@ function trySelectClosest(select, candidates){
         const catalog = Object.entries(ALL_FIELDS).map(([key, label]) => ({ key, label }));
         sendResponse({ ok: true, catalog, v: CONTENT_VERSION }); return;
       }
-      if (req.action === "fillFormSmart") {
-        scanAndFill().then(sendResponse);
-        return true;
-      }
-      if (req.action === "EXT_GET_JOB_DESC") {
-        const jd = extractJD();
-        sendResponse({ ok: true, jd });
-        return;
-      }
-      if (req.action === "EXT_FILL_FROM_PROFILE") {
-        try {
-          const profile = req?.profile || {};
-          const count = fillFromProfileWithArrays(profile);
-          sendResponse({ ok: true, filledCount: count });
-        } catch (e) {
-          console.error("[content] EXT_FILL_FROM_PROFILE error:", e);
-          sendResponse({ ok: false, error: String(e) });
-        }
-        return;
-      }
-      if (req.action === "EXT_GET_FILLER_SUMMARY") {
-        getFillerRunSummary().then((summary) => sendResponse({ ok: true, summary }));
-        return true;
-      }
+      if (req.action === "EXT_DETECT_FIELDS") { sendResponse(detectFields()); return; }
+      if (req.action === "fillFormSmart") { genericScanAndFill().then(sendResponse); return true; }
+      if (req.action === "EXT_GET_JOB_DESC") { sendResponse({ ok: true, jd: extractJD() }); return; }
+      if (req.action === "EXT_GET_FILLER_SUMMARY") { getFillerRunSummary().then((summary)=>sendResponse({ ok:true, summary })); return true; }
     } catch (e) {
       console.error("[content] listener error:", e);
       sendResponse({ ok: false, error: String(e) });
     }
   });
 })();
+
+// ===== FILLER =====
+function setSelectValueSmart(selectEl, rawVal) {
+  if (!selectEl) return false;
+  const _nz  = (v) => (v ?? "").toString().trim();
+  const _nrm = (v) => _nz(v).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const val = _nz(rawVal);
+  if (!val) return false;
+
+  // Build candidates (raw + case variants)
+  const candidates = [val, val.toUpperCase(), val.toLowerCase()];
+
+  // Degree aliases
+  const valN = _nrm(val);
+  if (typeof DEGREE_ALIASES === "object" && DEGREE_ALIASES[valN]) {
+    candidates.push(...DEGREE_ALIASES[valN]);
+  }
+
+  // Heuristics based on the select's name/id
+  const nameId   = _nrm(`${selectEl.name} ${selectEl.id}`);
+  const isStatey = /state|province|region/.test(nameId);
+  const isCountry= /country|nation/.test(nameId);
+
+  // Use helpers if present
+  const H = window.H || window.SFFHelpers || {};
+  const toAbbr       = H.toAbbr       || ((s)=>s);
+  const ABBR_TO_STATE= H.ABBR_TO_STATE|| {};
+  const normCountry  = H.normCountry  || ((s)=>s);
+
+  // State: add abbr↔full variants
+  if (isStatey) {
+    // If a full name was provided, add its abbreviation
+    const tryAbbr = toAbbr(val);
+    if (tryAbbr && tryAbbr !== val) candidates.push(tryAbbr);
+
+    // If a two-letter abbr was provided, add the full state name
+    if (/^[A-Z]{2}$/i.test(val)) {
+      const full = ABBR_TO_STATE[val.toUpperCase()];
+      if (full) candidates.push(full);
+    }
+  }
+
+  // Country: normalize common variants
+  if (isCountry) {
+    const nc = normCountry(val);
+    if (nc && nc !== val) candidates.push(nc);
+    // Add a couple of frequent spellings just in case
+    if (/^us$/i.test(val)) candidates.push("United States", "USA", "U.S.");
+    if (/^u\.?s\.?a\.?$/i.test(val)) candidates.push("United States");
+  }
+
+  // Prepare options snapshot
+  const opts = Array.from(selectEl.options || []).map((o, idx) => ({
+    idx,
+    text:  _nz(o.textContent),
+    value: _nz(o.value),
+    textN: _nrm(o.textContent),
+    valueN: _nrm(o.value)
+  }));
+
+  // 1) direct case-insensitive exact
+  for (const c of candidates) {
+    const cL = c.toLowerCase();
+    const hit = opts.find(o => o.text.toLowerCase() === cL || o.value.toLowerCase() === cL);
+    if (hit) { selectEl.selectedIndex = hit.idx; selectEl.dispatchEvent(new Event("change", {bubbles:true})); return true; }
+  }
+  // 2) normalized exact
+  for (const c of candidates.map(_nrm)) {
+    const hit = opts.find(o => o.textN === c || o.valueN === c);
+    if (hit) { selectEl.selectedIndex = hit.idx; selectEl.dispatchEvent(new Event("change", {bubbles:true})); return true; }
+  }
+  // 3) normalized “contains” (covers things like “United States (US)”)
+  for (const c of candidates.map(_nrm)) {
+    const hit = opts.find(o => o.textN.includes(c) || o.valueN.includes(c));
+    if (hit) { selectEl.selectedIndex = hit.idx; selectEl.dispatchEvent(new Event("change", {bubbles:true})); return true; }
+  }
+
+  return false;
+}
+
+function parseMonthYear(raw) {
+  const s = (raw || "").toString().trim();
+  // MM/YYYY
+  let m = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
+  if (m) return { month: Number(m[1]), year: Number(m[2]) };
+
+  // Month YYYY (any case)
+  m = s.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (m) {
+    const months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+    const idx = months.indexOf(m[1].toLowerCase());
+    if (idx >= 0) return { month: idx + 1, year: Number(m[2]) };
+  }
+
+  // YYYY-MM
+  m = s.match(/^(\d{4})-(\d{2})$/);
+  if (m) return { month: Number(m[2]), year: Number(m[1]) };
+
+  return null;
+}
+
+// Try to find sibling selects for month/year in the same row/container
+function findPeerMonthYearSelects(anchor) {
+  const root = anchor.closest(".row, .grid, .form-group, .form-row, fieldset, form") || anchor.parentElement || document;
+  const selects = Array.from(root.querySelectorAll("select"));
+  const score = (el) => {
+    const idn = `${(el.name||"")} ${(el.id||"")}`.toLowerCase();
+    const lab = (() => {
+      if (el.id) {
+        const labEl = el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (labEl) return labEl.textContent || "";
+      }
+      const clos = el.closest("label");
+      return clos ? (clos.textContent || "") : "";
+    })().toLowerCase();
+    const text = `${idn} ${lab}`;
+    return {
+      month: /month|mm\b/.test(text),
+      year:  /year|yyyy\b/.test(text)
+    };
+  };
+
+  let monthSel = null, yearSel = null;
+  for (const el of selects) {
+    const sc = score(el);
+    if (sc.month && !monthSel) monthSel = el;
+    if (sc.year  && !yearSel)  yearSel  = el;
+  }
+  // As a fallback, if we only have two selects in the same group, assume [0]=month, [1]=year
+  if ((!monthSel || !yearSel) && selects.length === 2) {
+    monthSel ||= selects[0]; yearSel ||= selects[1];
+  }
+  return { monthSel, yearSel };
+}
+
+function trySetMonthYearGroup(selectEl, rawVal) {
+  const my = parseMonthYear(rawVal);
+  if (!my) return false;
+  const { monthSel, yearSel } = findPeerMonthYearSelects(selectEl);
+  if (!monthSel && !yearSel) return false;
+
+  let ok = false;
+  if (monthSel) ok = setSelectValueSmart(monthSel, String(my.month)) || ok;
+  if (yearSel)  ok = setSelectValueSmart(yearSel,  String(my.year))  || ok;
+  return ok;
+}
+
+function getDOBValue(p) {
+  const dob = p?.birth_date;
+  if (!dob) return null;
+  if (Array.isArray(dob) && dob.length >= 3) {
+    const [y,m,d] = dob;
+    return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  }
+  return dob; // assume already "YYYY-MM-DD" or similar
+}
+
+function getMonthValueFromList(v) {
+  if (Array.isArray(v) && v.length >= 2) {
+    const [y,m] = v;
+    return `${y}-${String(m).padStart(2,"0")}`;
+  }
+  return v; // "02/2021" or "2021-02" will be normalized by setMonthLike
+}
+
+function pickValueForFeature(feature, profile) {
+  // ... your existing switch/case
+  switch (feature) {
+    case "birth_date": return getDOBValue(profile);
+    case "start_date": return getMonthValueFromList(profile?.employment?.current?.start || profile?.start_date);
+    case "end_date":   return getMonthValueFromList(profile?.employment?.current?.end   || profile?.end_date);
+
+    case "address":    return profile?.address_line_1 || profile?.address;
+    case "city":       return profile?.city;
+    case "state":      return profile?.state;   // "NJ" or "New Jersey" – both supported
+    case "zip":        return profile?.zip || profile?.postal_code;
+    case "country":    return profile?.country || null;
+    case "county":     return profile?.county || null;            // NEW
+    case "portfolio":  return profile?.portfolio || profile?.website || profile?.github || null; // fill that GitHub box
+    // demographics fallbacks
+    case "gender":     return profile?.gender || null;
+    case "ethnicity":  return profile?.ethnicity || null;
+    case "gender_id":  return profile?.gender_identity || null;
+    case "veteran":    return profile?.veteran_status || null;
+  }
+  return null;
+}
+
+function setInputValue(el, value) {
+  if (!el) return false;
+  const tag = (el.tagName || "").toLowerCase();
+  const type = (el.type || "").toLowerCase();
+
+  if (tag === "select") return setSelectValueSmart(el, value);
+  if (tag === "textarea") return setTextLike(el, value);
+
+  if (tag === "input") {
+    if (type === "radio")   return setRadioByValue(el.ownerDocument || document, el.name, value);
+    if (type === "checkbox")return setCheckbox(el, !!value && `${value}`.toLowerCase() !== "unchecked");
+
+    if (type === "date")    return setDateLike(el, value);
+    if (type === "month")   return setMonthLike(el, value);
+
+    // text-like
+    return setTextLike(el, value);
+  }
+  return false;
+}
+
+function chooseRadioByValue(name, want) {
+  if (!name) return { ok:false, reason:"no group name" };
+  const radios = Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`));
+  if (!radios.length) return { ok:false, reason:"no radios found" };
+  const target = String(want || "").trim().toLowerCase();
+
+  for (const r of radios) {
+    const lab = document.querySelector(`label[for="${CSS.escape(r.id || "")}"]`) || r.closest("label");
+    const txt = (lab && lab.textContent || "").trim().toLowerCase();
+    if (txt && target && (txt === target || txt.includes(target))) { r.click(); return { ok:true }; }
+  }
+  for (const r of radios) if ((r.value || "").toLowerCase() === target) { r.click(); return { ok:true }; }
+  return { ok:false, reason:"no matching option" };
+}
+
+function setCheckboxByBool(el, on) {
+  if (!el) return { ok:false, reason:"no element" };
+  if (el.type !== "checkbox") return { ok:false, reason:"not checkbox" };
+  if (!!el.checked !== !!on) el.click();
+  return { ok:true };
+}
+
+function fmtMMYYYY(m, y) {
+  if (!m || !y) return null;
+  const mm = String(m).padStart(2,"0");
+  return `${mm}/${y}`;
+}
+
+async function setComboOrTextNear(el, value) {
+  const H = window.H || window.SFFHelpers || {};
+  const root = el.closest(".form-group, .row, .grid, fieldset, form") || el.parentElement || el.ownerDocument;
+
+  // ARIA combobox
+  const combo = root.querySelector('[role="combobox"], input[role="combobox"]');
+  if (combo) {
+    combo.focus();
+    combo.value = value;
+    combo.dispatchEvent(new Event("input", { bubbles:true }));
+    combo.dispatchEvent(new KeyboardEvent("keydown", { key:"Enter", bubbles:true }));
+    combo.dispatchEvent(new Event("change", { bubbles:true }));
+    combo.blur?.();
+    return true;
+  }
+  // Plain text input nearby
+  const text = root.querySelector('input[type="text"], input:not([type]), textarea, [contenteditable="true"]');
+  if (text) {
+    text.focus();
+    if ("value" in text) text.value = value; else text.textContent = value;
+    text.dispatchEvent(new Event("input", { bubbles:true }));
+    text.dispatchEvent(new Event("change", { bubbles:true }));
+    text.blur?.();
+    return true;
+  }
+  return false;
+}
+
+function valueFromProfile(row, profile) {
+  const label = (row.labelText || "").toLowerCase();
+  const pred  = row.prediction;
+
+  const p  = profile.personal || {};
+  const l  = profile.links || {};
+  const a  = profile.address || {};
+  const ed = (profile.education || [])[0] || {};
+  const ex = (profile.experience || [])[0] || {};
+  const d  = profile?.demographics || {};
+
+
+  if (pred === "name") {
+    if (/first/.test(label)) return p.firstName || null;
+    if (/(last|surname|family)/.test(label)) return p.lastName || null;
+    return `${p.firstName || ""} ${p.lastName || ""}`.trim() || null;
+  }
+  if (pred === "email") return p.email || null;
+  if (pred === "phone") return p.phoneNumber || null;
+  if (pred === "birth_date") return p.dob || null;
+
+  // Social / LinkedIn / Portfolio / GitHub — choose the *right* link per field
+  if (pred === "linkedin" || /linkedin/.test(label)) {
+    const l = profile?.links || {};
+    return l.linkedin || null;
+  }
+  if (pred === "github" || /github/.test(label)) {
+    const l = profile?.links || {};
+    return l.github || l.website || null;
+  }
+  // Generic "social" or Portfolio/Website buckets → prefer portfolio/website first, then GitHub, then LinkedIn
+  if (pred === "social" || /portfolio|website|personal website|personal site/.test(label)) {
+    const l = profile?.links || {};
+    return l.website || l.portfolio || l.github || l.linkedin || null;
+  }
+
+  if (pred === "company") return ex.company || null;
+  if (pred === "job_title") return ex.jobTitle || null;
+  if (pred === "role_description") return ex.description || ex.roleDescription || null;
+
+  if (pred === "education") {
+    if (/degree/.test(label)) {
+      const raw = ed.degreeLong || ed.degreeShort || null;
+      if (!raw) return null;
+      return (window.H?.normalizeDegreeLabel ? window.H.normalizeDegreeLabel(raw) : raw);
+    }
+    if (/school|university|college|institute/.test(label)) return ed.school || null;
+    if (/field|major|concentration/.test(label)) return ed.field || null;
+    if (/gpa/.test(label)) return ed.gpa || null;
+    if (/graduation|year/.test(label)) return ed.endYear || null;
+    return null;
+  }
+
+  if (pred === "address") {
+    if (/mailing address/.test(label)) return a.street || null;
+    if (/permanent address/.test(label)) return a.street || null;
+    if (/street|address line/.test(label)) return a.street || null;
+    if (/city|town|municipality|locality|suburb/.test(label)) return a.city || null;
+    if (/state|province|region|prefecture|canton|shire|ward|tehsil|taluk/.test(label)) return a.state || null;
+    if (/zip|postal|postcode/.test(label)) return a.zip || null;
+    if (/\bcounty\b/.test(label)) return a.county || null;
+    if (/country|nation/.test(label)) return a.country || null;
+    return null; // county not in profile by default
+  }
+
+  // Demographics group (no defaults — skip if unknown)
+  if (pred === "demographics") {
+    if (/gender identity|gender/.test(label)) return d.genderIdentity || p.gender || null;
+    if (/ethnicity|race/.test(label))         return d.ethnicity || null;
+    if (/veteran/.test(label))                return d.veteranStatus || null;
+    return null;
+  }
+
+  if (pred === "start_date") {
+    const scope = row.scope || row.context || "";
+    if (scope === "education") return fmtMMYYYY(ed.startMonth, ed.startYear);
+    return fmtMMYYYY(ex.startMonth, ex.startYear) || fmtMMYYYY(ed.startMonth, ed.startYear);
+  }
+  if (pred === "end_date") {
+    const scope = row.scope || row.context || "";
+    if (scope === "education") return fmtMMYYYY(ed.endMonth, ed.endYear);
+    return fmtMMYYYY(ex.endMonth, ex.endYear) || fmtMMYYYY(ed.endMonth, ed.endYear);
+  }
+
+  // ===== Eligibility & Compliance values (NO DEFAULTS) =====
+
+  // Work authorization ("Are you authorized to work in the US?")
+  if (pred === "work_auth" && /authorized|work in the (us|united states)/i.test(label)) {
+    const v = profile?.eligibility?.authUS ?? profile?.personal?.workAuth ?? null; // boolean or "Yes"/"No"
+    if (v == null) return null;
+    return (typeof v === "boolean") ? (v ? "Yes" : "No") : v;
+  }
+
+  // Sponsorship ("Will you now or in the future require sponsorship?")
+  if (pred === "work_auth" && /sponsor|sponsorship/i.test(label)) {
+    const v = profile?.eligibility?.needSponsorship ?? profile?.personal?.needSponsorship ?? null;
+    if (v == null) return null;
+    return (typeof v === "boolean") ? (v ? "Yes" : "No") : v;
+  }
+
+  // Background check consent
+  if (pred === "background_check") {
+    const v = profile?.eligibility?.backgroundCheck ?? null; // boolean or "Yes"/"No"
+    return v ?? null;
+  }
+
+  // Terms consent
+  if (pred === "terms_consent") {
+    const v = profile?.eligibility?.termsConsent ?? null; // boolean or "Yes"/"No"
+    return v ?? null;
+  }
+
+  // Ethnicity (string; e.g., "Hispanic or Latino", "White", "Prefer not to say")
+  if (pred === "demographics" && /ethnicity/i.test(label)) {
+    return profile?.demographics?.ethnicity ?? null;
+  }
+
+  // Gender Identity (already working; keep)
+  if (pred === "demographics" && /gender identity|gender\b/i.test(label)) {
+    return profile?.demographics?.genderIdentity ?? profile?.personal?.gender ?? null;
+  }
+
+  // Veteran Status (string or yes/no phrasing)
+  if (pred === "demographics" && /veteran/i.test(label)) {
+    return profile?.demographics?.veteranStatus ?? null; // e.g., "I am not a veteran"
+  }
+
+  // Referral — ALWAYS skip (user chooses)
+  if (pred === "referral_source") {
+    return null;
+  }
+  return null;
+}
+
+async function fillDetected(items, profile, resumeId) {
+  const report = [];
+  for (const row of items || []) {
+    const el = row.selector ? document.querySelector(row.selector) : null;
+    const pred = row.prediction;
+    const label = row.labelText || "";
+
+    if (!el) {
+      report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"element not found" });
+      continue;
+    }
+
+    // handle file inputs (resume upload)
+    if (el.tagName.toLowerCase() === "input" && (el.type || "").toLowerCase() === "file") {
+      if (pred !== "document") {
+        report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"not a document field" });
+        continue;
+      }
+
+      // Intentionally skip cover letter / additional docs (per spec)
+      const lbl = (label || "").toLowerCase();
+      if (/\bcover\s*letter\b|\badditional\s*information\b/.test(lbl)) {
+        report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"cover letter intentionally skipped" });
+        continue;
+      }
+
+      const rid = resumeId || (await chrome.storage.local.get("lastResumeId")).lastResumeId || null;
+      if (!rid) {
+        report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"no resume selected" });
+        continue;
+      }
+
+      try {
+        // ask background for the resume file
+        const blobResp = await new Promise(res =>
+          chrome.runtime.sendMessage({ action:"getResumeFile", id: rid }, r => res(r))
+        );
+        if (!blobResp?.ok) throw new Error(blobResp?.error || "resume fetch failed");
+
+        const bytes = Uint8Array.from(atob(blobResp.base64), c => c.charCodeAt(0));
+        const file  = new File([bytes], blobResp.name || "resume.pdf", { type: blobResp.type || "application/pdf" });
+
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        el.files = dt.files;
+
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+
+        report.push({ label, prediction: pred, confidence: row.confidence, status:"filled", valuePreview: file.name });
+      } catch (e) {
+        report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason: String(e) });
+      }
+      continue;
+    }
+
+
+    // radios
+    if ((el.type || "").toLowerCase() === "radio") {
+      const desired = valueFromProfile(row, profile);
+      if (!desired) { report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"no profile value" }); continue; }
+      const res = chooseRadioByValue(row.name, desired);
+      report.push({ label, prediction: pred, confidence: row.confidence, status: res.ok?"filled":"skipped", reason: res.ok?"":res.reason, valuePreview: desired });
+      continue;
+    }
+
+    // checkboxes
+    if ((el.type || "").toLowerCase() === "checkbox") {
+      const desired = valueFromProfile(row, profile);
+      if (desired == null) { report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"no profile value" }); continue; }
+      const wantOn = (typeof desired === "boolean") ? desired : /^y(es)?$/i.test(String(desired));
+      const res = setCheckboxByBool(el, wantOn);
+      report.push({ label, prediction: pred, confidence: row.confidence, status: res.ok?"filled":"skipped", reason: res.ok?"":res.reason, valuePreview: wantOn ? "checked" : "unchecked" });
+      continue;
+    }
+
+    // text/select/textarea
+    const value = valueFromProfile(row, profile);
+    if (!value) {
+      report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"no profile value" });
+      continue;
+    }
+    const ok = setInputValue(el, String(value));
+    report.push({ label, prediction: pred, confidence: row.confidence, status: ok?"filled":"skipped", reason: ok?"":"set value failed", valuePreview: String(value) });
+  }
+  return report;
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  (async () => {
+    try {
+      if (msg?.action === "EXT_FILL_FIELDS") {
+        const report = await fillDetected(msg.items || [], msg.profile || {}, msg.resumeId || null);
+        sendResponse({ ok:true, report });
+        return;
+      }      
+    } catch (e) {
+      sendResponse({ ok:false, error:String(e) });
+    }
+  })();
+  return true;
+});

@@ -137,6 +137,37 @@
 
     <div id="status">Ready…</div>
 
+    <!-- Debug -->
+    <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+      <button id="btnFill" type="button">🪄 Fill Form</button>
+      <span id="fillSummary" style="font-size:12px;color:#6b7280;"></span>
+    </div>
+    <pre id="fillReport" style="max-height:160px;overflow:auto;background:#0b1020;color:#d7e1ff;padding:8px;border-radius:6px;font-size:12px;"></pre>
+    
+    <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+      <button id="btnPredict" type="button">▶️ Predict</button>
+      <span id="predictCount" style="font-size:12px;color:#6b7280;"></span>
+    </div>
+    
+    <section id="detectorPanel" style="margin-top:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <button id="btnDetect" type="button">🔎 Detect Fields</button>
+        <span id="detectCount" style="font-size:12px;color:#6b7280;">(none)</span>
+      </div>
+    
+      <div style="display:grid;grid-template-columns: 1fr; gap:6px;">
+        <select id="detectedSelect" size="8" style="width:100%;max-height:160px;"></select>
+        <pre id="detectedDetails" style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px;max-height:160px;overflow:auto;margin:0;"></pre>
+      </div>
+    </section>    
+
+    <!-- Detected fields (pre-fill) -->
+    <div id="detectedToggle" class="section-header">▶ Detected Fields</div>
+    <div id="detectedFields" class="field-list" style="display:none;">
+      <div class="muted" id="detectedHint">Scanning page for fields…</div>
+      <div id="detectedList"></div>
+    </div>
+
     <!-- Filled / Non-Filled sections -->
     <div id="filledToggle" class="section-header">▶ Filled Fields</div>
     <div id="filledFields" class="field-list" style="display:none;"></div>

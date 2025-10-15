@@ -52,6 +52,27 @@ async function callPredictAPI(labels) {
   return res.json();
 }
 
+function canonicalize(pred) {
+  if (!pred) return null;
+  const lower = String(pred).trim().toLowerCase();
+  const alias = {
+    "first_name": "firstName",
+    "firstname": "firstName",
+    "last_name": "lastName",
+    "lastname": "lastName",
+    "phone": "phoneNumber",
+    "mobile": "phoneNumber",
+    "cellphone": "phoneNumber",
+    "postal": "zip",
+    "zipcode": "zip",
+    "birth_date": "dob",
+    "birthdate": "dob",
+    "date_of_birth": "dob"
+  };
+  return alias[lower] || pred;
+}
+
+
 /* ===================== Seeding resumes (non-destructive) ===================== */
 async function seedResumes() {
   try {
@@ -131,27 +152,10 @@ async function seedUserDataIfPresent() {
 chrome.runtime.onInstalled.addListener(async () => {
   await seedResumes();
   await seedUserDataIfPresent();
-
-  // Ensure action click opens the popup, not the side panel
-  if (chrome.sidePanel?.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
-  }
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await seedResumes();
-
-  if (chrome.sidePanel?.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
-  }
-});
-
-// Enable side panel on page load (optional; safe if you keep sidepanel.html around)
-chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-  if (!chrome.sidePanel?.setOptions) return;
-  if (info.status === "complete" && tab?.url && /^https?:|^file:/.test(tab.url)) {
-    try { await chrome.sidePanel.setOptions({ tabId, path: "sidepanel.html", enabled: true }); } catch {}
-  }
 });
 
 /* ===================== Router ===================== */
@@ -207,21 +211,158 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return;
     }
 
+    // 1) Full profile fetch (nested JSON)
+    if (msg?.action === "getProfile") {
+      try {
+        const r = await fetch(`${API_BASE}/profile`, { credentials: "include" });
+        if (!r.ok) throw new Error(`Profile HTTP ${r.status}`);
+        const data = await r.json();
+        sendResponse({ success:true, profile:data || {} });
+      } catch (e) {
+        sendResponse({ success:false, error:String(e) });
+      }
+      return;
+    }
+
+    // 2) Resume file fetch as base64 (by id)
+    if (msg?.action === "getResumeFile") {
+      const rid = msg?.id;
+      if (!rid) { sendResponse({ ok:false, error:"missing resume id" }); return; }
+    
+      try {
+        const r = await fetch(`${API_BASE}/resumes/${encodeURIComponent(rid)}/file?t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        });
+        if (!r.ok) throw new Error(`resume file HTTP ${r.status}`);
+    
+        const buf = await r.arrayBuffer();
+    
+        // Chunked base64 (encode) — prevents stack overflow on large files
+        const bytes = new Uint8Array(buf);
+        const chunkSize = 0x8000; // 32KB
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const sub = bytes.subarray(i, i + chunkSize);
+          binary += String.fromCharCode.apply(null, sub);
+        }
+        const b64 = btoa(binary);
+    
+        const cd = r.headers.get("Content-Disposition") || "";
+        const nameMatch = cd.match(/filename\*?=(?:UTF-8''|")?([^";\n]+)/i);
+        const name = nameMatch ? decodeURIComponent(nameMatch[1].replace(/^"+|"+$/g, "")) : "resume.pdf";
+        const type = r.headers.get("Content-Type") || "application/pdf";
+    
+        sendResponse({ ok:true, base64:b64, name, type });
+      } catch (e) {
+        sendResponse({ ok:false, error:String(e) });
+      }
+      return;
+    }    
+
+    // 3) Existing relay to content, but now pass resumeId too
+    if (msg?.action === "fillDetected") {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) throw new Error("No active tab");
+      const resp = await chrome.tabs.sendMessage(tab.id, {
+        action: "EXT_FILL_FIELDS",
+        items: msg.items || [],
+        profile: msg.profile || {},
+        resumeId: msg.resumeId || null
+      }).catch(e => ({ ok:false, error:String(e) }));
+      sendResponse({ success: !!resp?.ok, report: resp?.report || [], error: resp?.error });
+      return;
+    }
+
     // ===== Week-5 messages (action-based) =====
     if (msg?.action === "getUserData") {
-      const { userData } = await chrome.storage.local.get("userData");
-      sendResponse({ success: true, userData: userData || {} });
+      try {
+        const res = await fetch(`${API_BASE}/profile`, { credentials: "include" });
+        let data = {};
+        if (res.ok) {
+          const raw = await res.json();
+          // ---- Flatten nested profile into single-level userData for the filler ----
+          const p = raw || {};
+          const personal = p.personal || {};
+          const address  = p.address  || {};
+          const links    = p.links    || {};
+          // Optional: first education/experience
+          const edu0 = Array.isArray(p.education)  && p.education[0]  ? p.education[0]  : {};
+          const exp0 = Array.isArray(p.experience) && p.experience[0] ? p.experience[0] : {};
+
+          data = {
+            // core identity
+            firstName:   personal.firstName || "",
+            lastName:    personal.lastName  || "",
+            fullName:    [personal.firstName, personal.lastName].filter(Boolean).join(" "),
+            email:       personal.email     || "",
+            phoneNumber: personal.phoneNumber || "",
+            dob:         personal.dob       || "",
+            gender:      personal.gender    || "",
+
+            // address
+            street:  address.street  || "",
+            city:    address.city    || "",
+            state:   address.state   || "",
+            zip:     address.zip     || "",
+            country: address.country || "",
+
+            // links
+            linkedin: links.linkedin || "",
+            github:   links.github   || "",
+            website:  links.website  || "",
+
+            // simple employment/education fallbacks (many forms ask these)
+            company:   exp0.company   || "",
+            jobTitle:  exp0.jobTitle  || "",
+            start_date: (exp0.startMonth && exp0.startYear) ? `${String(exp0.startMonth).padStart(2,"0")}/${exp0.startYear}` : "",
+            end_date:   (exp0.endMonth   && exp0.endYear)   ? `${String(exp0.endMonth).padStart(2,"0")}/${exp0.endYear}`   : "",
+          };
+
+          // cache flattened as fallback
+          await chrome.storage.local.set({ userData: data });
+          sendResponse({ success: true, userData: data });
+          return;
+        }
+
+        // Fallback to cached flattened copy (if any)
+        const { userData } = await chrome.storage.local.get("userData");
+        sendResponse({ success: true, userData: userData || {} });
+      } catch (e) {
+        const { userData } = await chrome.storage.local.get("userData");
+        sendResponse({ success: true, userData: userData || {} });
+      }
       return;
     }
 
     if (msg?.action === "predictLabels") {
+      const labels = Array.isArray(msg.labels) ? msg.labels : [];
+      let data = null;
+
       try {
-        const labels = Array.isArray(msg.labels) ? msg.labels : [];
-        const data = await callPredictAPI(labels);
-        sendResponse({ success: true, results: data });
+        const r = await fetch(`${API_BASE}/predict_batch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ labels })
+        });
+        if (r.ok) data = await r.json();
       } catch (e) {
-        sendResponse({ success: false, error: String(e) });
+        data = null;
       }
+
+      // Normalize to an array of results aligned to `labels`
+      // Accept either {results:[...]} or a raw array
+      let results = [];
+      if (Array.isArray(data)) {
+        results = data;
+      } else if (data && Array.isArray(data.results)) {
+        results = data.results;
+      } else {
+        // Fallback: assume all nulls so UI still renders
+        results = labels.map(() => ({ label: null, prediction: null, confidence: 0 }));
+      }
+
+      sendResponse({ success: true, results });
       return;
     }
 
@@ -246,3 +387,4 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })().catch(e => sendResponse({ error: String(e) }));
   return true; // keep async channel open
 });
+

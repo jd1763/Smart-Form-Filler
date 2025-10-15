@@ -10,6 +10,7 @@
   "address": {
     "street": "598 Elizabeth St",
     "city": "Perth Amboy",
+    "county": "Middlesex",
     "state": "NJ",
     "zip": "08861",
     "country": "United States"
@@ -27,7 +28,9 @@
     "disability": "No",
     "lgbtq": "No",
     "veteran": "No",
-    "ethnicity": "Hispanic/Latinx"
+    "ethnicity": "Hispanic/Latinx",
+    "race": "Black",
+    "hispanicLatinx": "Yes"
   },
   "education": [
     {
@@ -57,7 +60,7 @@
     {
       "company": "Target",
       "jobTitle": "Team Member Trainer",
-      "description": "▪ Delivered training programs for new hires, accelerating onboarding and improving team performance.\n▪ Used in-store systems to schedule shipments, track trailer arrivals, and manage inventory operations.\n▪ Maintained communication with leadership teams to support logistics and resolve operational issues.\n▪ Supported daily warehouse operations by assisting with inventory movement, equipment handling, and task\ncoordination to ensure smooth workflows.",
+      "description": "▪ Delivered training programs for new hires, accelerating onboarding and improving team performance.\n▪ Used in-store systems to schedule shipments, track trailer arrivals, and manage inventory operations.\n▪ Maintained communication with leadership teams to support logistics and resolve operational issues.\n▪ Supported daily warehouse operations by assisting with inventory movement, equipment handling, and task coordination to ensure smooth workflows.",
       "startMonth": "2",
       "startYear": "2021",
       "endMonth": "6",

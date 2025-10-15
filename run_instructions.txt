@@ -16,6 +16,12 @@ rm -rf .venv
 source .venv/bin/activate
 python3 -m backend.api
 
+please add some errors that are thrown when they arent filled or something. When fields arent being detected etc something we can get some type of input from and see how kinda is working, how the page is being read/scan for label, how those labels are sent then to be predicted, then how we get a prediction from the api, then how those predictions are checked and then get a final answer to input into the page. I need a way to see the process because if not we are just guessing and constantly guessing and wasting time
+detector → predictor → filler + a diagnostics report
+1) Lets work on detecting all the fields from the page, next to the dropdown with the detected fields it should show the name and how they were detected in the page just for debug for now
+2) then show each detected field and the predictor's output for that set field
+3) Finally after the predictor is working correctly, lets work on putting the correct values on those fields
+
 # 4) Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
