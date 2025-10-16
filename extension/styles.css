@@ -208,3 +208,131 @@ select:focus {
 .elig-row { display: flex; gap: 12px; align-items: center; }
 .elig-row label { display: flex; align-items: center; gap: 6px; margin: 0; }
 .elig-row input[type="radio"] { margin: 0; transform: translateY(0.5px); }
+
+/* ===== Tabs ===== */
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 10px;
+  border-bottom: 1px solid var(--bd);
+}
+.tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab.active {
+  color: #111827;
+  border-bottom-color: #111827;
+}
+
+/* ===== Debug layout polish ===== */
+.debug-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+.debug-box {
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 8px;
+  background: #fff;
+}
+
+.pretty-pre {
+  background: #0b1020;
+  color: #d7e1ff;
+  border-radius: 8px;
+  border: 1px solid #0f1735;
+  padding: 8px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  overflow: auto;
+}
+
+/* Detected uses the same card layout, but without chip/meter/badges */
+#detectedFields .chip,
+#detectedFields .meter,
+#detectedFields .badge {
+  display: none !important;
+}
+
+/* Optional: slightly tighter card spacing for Detected, to match your dropdown look */
+#detectedFields .field-item {
+  margin: 6px 0;
+}
+
+/* Non-Filled badge should be red */
+#notFilledFields .badge {
+  background: #fee2e2;      /* light red */
+  color: #991b1b;           /* dark red text */
+  border: 1px solid #fecaca;
+}
+
+/* If your badge variants exist, keep them red here too */
+#notFilledFields .badge.low,
+#notFilledFields .badge.na {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+/* ===== Debug unified box ===== */
+.debug-toolbar {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 8px;
+  flex-wrap: wrap;
+}
+
+.debug-output {
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: #0b1020;
+  color: #d7e1ff;
+  padding: 10px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.debug-output h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #a5b4fc;
+}
+
+.debug-output .kv {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 6px 10px;
+  margin: 8px 0;
+}
+.debug-output .kv div.key { color: #7dd3fc; }
+.debug-output .kv div.val { color: #d1fae5; }
+
+.debug-output .list {
+  margin: 6px 0 0;
+  padding-left: 14px;
+}
+.debug-output .list li {
+  margin: 2px 0;
+}
+
+.debug-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  color: #fca5a5;
+  background: #1f2937;
+  margin-left: 6px;
+}
+.debug-badge.good { color: #86efac; }
+.debug-badge.na   { color: #fca5a5; }

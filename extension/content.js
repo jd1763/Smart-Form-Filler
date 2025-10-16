@@ -207,6 +207,64 @@
     return best.slice(0, 200000);
   }
 
+// Find a button by visible text (for dynamic adders)
+function findButtonByText(regex) {
+  const cand = Array.from(document.querySelectorAll(
+    'button, [role="button"], input[type="button"], input[type="submit"]'
+  ));
+  return cand.find(el => regex.test((el.textContent || el.value || "").trim().toLowerCase())) || null;
+}
+
+// Parse month/year string -> {month, year}
+function _parseMY(raw) {
+  const s = (raw || "").toString().trim();
+  let m;
+  if ((m = s.match(/^(\d{1,2})[\/\-](\d{4})$/)))      return { month: +m[1], year: +m[2] };           // 02/2021
+  if ((m = s.match(/^(\d{4})-(\d{2})$/)))             return { month: +m[2], year: +m[1] };           // 2021-02
+  if ((m = s.match(/^([A-Za-z]+)\s+(\d{4})$/))) {                                               // February 2021
+    const months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+    const idx = months.indexOf(m[1].toLowerCase());
+    if (idx >= 0) return { month: idx+1, year: +m[2] };
+  }
+  return null;
+}
+
+// Best-effort fuzzy set for month/year SELECTs
+function setMonthSelect(el, my) {
+  if (!el || el.tagName?.toLowerCase() !== "select" || !my) return false;
+  const want = String(my.month);
+  const want2 = want.padStart(2, "0");
+  const monthName = ["January","February","March","April","May","June","July","August","September","October","November","December"][my.month-1] || "";
+
+  const opts = Array.from(el.options || []).map((o,i)=>({
+    i,
+    text: (o.textContent || "").trim(),
+    value: (o.value || "").trim()
+  }));
+
+  const tests = [
+    o => o.value === want || o.value === want2,
+    o => o.text === want || o.text === want2,
+    o => o.text.toLowerCase() === monthName.toLowerCase(),
+    o => o.text.toLowerCase().startsWith(monthName.slice(0,3).toLowerCase())
+  ];
+
+  for (const t of tests) {
+    const hit = opts.find(t);
+    if (hit) { el.selectedIndex = hit.i; el.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+  }
+  return false;
+}
+
+function setYearSelect(el, my) {
+  if (!el || el.tagName?.toLowerCase() !== "select" || !my) return false;
+  const want = String(my.year);
+  const opts = Array.from(el.options || []).map((o,i)=>({i, text:(o.textContent||"").trim(), value:(o.value||"").trim()}));
+  const hit = opts.find(o => o.value === want) || opts.find(o => o.text === want);
+  if (hit) { el.selectedIndex = hit.i; el.dispatchEvent(new Event("change",{bubbles:true})); return true; }
+  return false;
+}
+
   // ====== STEP 1 DETECTOR (content.js) ======
 (function(){
   const SFF_NS = "SFF";
@@ -915,47 +973,74 @@ function setFileInputWithFile(el, file) {
     return false;
   }
 
-  function setSelectValueSmart(sel, value, labelHint="") {
-    const H = window.H || window.SFFHelpers;
-    if (!sel || sel.tagName !== "SELECT") return false;
-    if (value == null || value === "") return false; // honor "no default" policy
+  function setSelectValueSmart(selectEl, rawVal, labelHint = "") {
+    if (!selectEl) return false;
+    const label = (labelHint || "").toLowerCase();
+    const val = (rawVal ?? "").toString().trim();
+    if (!val) return false;
   
-    let candidates = [String(value)];
+    let candidates = [val];
+
+    // Month/Year dropdowns fed with a combined "MM/YYYY" or similar
+    if (/\bmonth\b/.test(label) || /\b(start|begin).*month\b/.test(label) || /\bend.*month\b/.test(label)) {
+      const my = _parseMY(val);
+      if (my) return setMonthSelect(selectEl, my);
+    }
+    if (/\byear\b/.test(label) || /\b(start|begin).*year\b/.test(label) || /\bend.*year\b/.test(label)) {
+      const my = _parseMY(val);
+      if (my) return setYearSelect(selectEl, my);
+    }
+
+    // Years-of-Experience select like: 0 / 1 / 2 / 3+
+    if (/years? of (professional )?experience|^\s*yoe\s*$/.test(label)) {
+      const n = parseInt(val, 10);
+      if (!isNaN(n)) {
+        candidates = [String(n)];
+        if (n >= 3) candidates.unshift("3+");  // helps match "3+"
+      }
+    }
+
   
-    // State & Country by label hint or select id/name
-    const l = (labelHint || "").toLowerCase() + " " + (sel.id||"") + " " + (sel.name||"");
-    if (/\b(state|province|region)\b/.test(l)) {
-      candidates = H.buildStateCandidates ? H.buildStateCandidates(value) : [value];
-    } else if (/\bcountry|nation\b/.test(l)) {
-      candidates = H.buildCountryCandidates ? H.buildCountryCandidates(value) : [value];
-    } else if (/\bdegree|highest\b/.test(l)) {
-      candidates = H.buildDegreeCandidates ? H.buildDegreeCandidates(value) : [value];
+    if (/\b(state|province|region)\b/.test(label)) {
+      candidates = (window.H && H.buildStateCandidates) ? H.buildStateCandidates(val) : [val];
+    } else if (/\b(ethnicity|race)\b/.test(label)) {
+      candidates = (window.H && H.buildEthnicityCandidates) ? H.buildEthnicityCandidates(val) : [val];
+    } else if (/veteran/.test(label)) {
+      candidates = (window.H && H.buildVeteranCandidates) ? H.buildVeteranCandidates(val) : [val];
+    } else if (/background|consent|terms|agree/.test(label)) {
+      candidates = (window.H && H.buildYesNoCandidates) ? H.buildYesNoCandidates(val) : [val];
+    } else if (/\bdegree\b/.test(label)) {
+      candidates = (window.H && H.buildDegreeCandidates) ? H.buildDegreeCandidates(val) : [val];
     }
   
-    // Ethnicity
-    if (/\bethnicity\b/.test(l)) {
-      candidates = H.buildEthnicityCandidates ? H.buildEthnicityCandidates(value) : [value];
-    }
+    const idx = (window.H && H.matchOptionIndex) ? H.matchOptionIndex(selectEl, candidates) : -1;
+    if (idx < 0) return false;
   
-    // Veteran
-    if (/\bveteran\b/.test(l)) {
-      candidates = H.buildVeteranCandidates ? H.buildVeteranCandidates(value) : [value];
-    }
+    // try to set it
+    selectEl.selectedIndex = idx;
+    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
   
-    // Terms/Consent/Background → checkbox selects appear sometimes as <select>
-    if (/\b(terms|privacy|consent|background)\b/.test(l)) {
-      candidates = ["Yes", "I Agree", "Agree", "I Consent", "Consented", "Accept"];
-    }
+    // verify we actually landed on a candidate
+    const opt = selectEl.options[selectEl.selectedIndex];
+    const chosenText = (opt?.textContent || "").trim();
+    const chosenValue = (opt?.value || "").trim();
+    const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const candsN = candidates.map(norm);
+    const ok =
+      candsN.includes(norm(chosenText)) ||
+      candsN.includes(norm(chosenValue));
   
-    const idx = H.matchOptionIndex ? H.matchOptionIndex(sel, candidates) : -1;
-    if (idx >= 0) {
-      sel.selectedIndex = idx;
-      sel.dispatchEvent(new Event("change", { bubbles: true }));
-      sel.dispatchEvent(new Event("input",  { bubbles: true }));
-      return true;
+    if (!ok) {
+      // undo: leave selection unchanged if mismatch
+      return false;
     }
-    return false;
+    return true;
   }
+  
+  // expose for bottom-of-file helpers that live outside the IIFE
+  window.setSelectValueSmart = setSelectValueSmart;
+  window.SFFDom = Object.assign(window.SFFDom || {}, { setSelectValueSmart });
+
 
   // ---------- Labels + DOM traversal ----------
   function labelTextFor(el){
@@ -1036,49 +1121,53 @@ function setFileInputWithFile(el, file) {
     return null;
   }
 
-  // ---------- Value setter (DOM) ----------
-  function setNodeValue(el, val){
-    const tag = (el.tagName||"").toLowerCase();
-    const itype = (el.type || "").toLowerCase();
+// ---------- Value setter (DOM) ----------
+function setNodeValue(el, val, labelText = ""){
+  const tag = (el.tagName||"").toLowerCase();
+  const itype = (el.type || "").toLowerCase();
 
-    try {
-      if (tag === "select") {
-        if (!setSelectValueSmart(el, val)) { el.value = String(scalarize(val)); fireAll(el); }
-        return true;
-      }
-      if (itype === "file") return false;
+  try {
+    if (tag === "select") {
+      // Only report success if a real option was matched & selected
+      const ok = setSelectValueSmart(el, val, labelText || "");
+      return !!ok;  // <- no fallback write; let the caller mark it as [skipped]
+    }
 
-      if (itype === "checkbox") {
-        const want = (val === true || String(val).toLowerCase() === "true" || String(val).toLowerCase() === "yes");
-        if (el.checked !== want) { el.checked = want; fireAll(el); }
-        return true;
-      }
-      if (itype === "radio") {
-        const ok = setRadioGroupByValue(el, val);
-        if (ok) return true;
-        if (!el.checked) { el.checked = true; fireAll(el); }
-        return true;
-      }
-      if (el.isContentEditable || el.getAttribute("contenteditable") === "" || el.getAttribute("contenteditable") === "true") {
-        el.innerText = scalarize(val);
-        fireAll(el);
-        return true;
-      }
+    if (itype === "file") return false;
 
-      let out = scalarize(val);
-      if (itype === "date") out = toISODate(out);
-      else if (itype === "month") {
-        const iso = toISODate(out);
-        out = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.slice(0,7) : toISOMonth(out);
-      }
-      el.value = String(out);
+    if (itype === "checkbox") {
+      const want = (val === true || String(val).toLowerCase() === "true" || String(val).toLowerCase() === "yes");
+      if (el.checked !== want) { el.checked = want; fireAll(el); }
+      return true;
+    }
+
+    if (itype === "radio") {
+      const ok = setRadioGroupByValue(el, val);
+      if (ok) return true;
+      if (!el.checked) { el.checked = true; fireAll(el); }
+      return true;
+    }
+
+    if (el.isContentEditable || el.getAttribute("contenteditable") === "" || el.getAttribute("contenteditable") === "true") {
+      el.innerText = scalarize(val);
       fireAll(el);
       return true;
-    } catch (e) {
-      console.error("[content] setNodeValue error:", e);
-      return false;
     }
+
+    let out = scalarize(val);
+    if (itype === "date") out = toISODate(out);
+    else if (itype === "month") {
+      const iso = toISODate(out);
+      out = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.slice(0,7) : toISOMonth(out);
+    }
+    el.value = String(out);
+    fireAll(el);
+    return true;
+  } catch (e) {
+    console.error("[content] setNodeValue error:", e);
+    return false;
   }
+}
 
   // ---------- Detect-only ----------
   function detectKeyByAttrs(inputEl) {
@@ -1320,7 +1409,7 @@ async function getPredictions(labels) {
       if (creditKey === "zip"  && !/^\d{3,10}(-\d{4})?$/.test(val)) return;
 
       try {
-        const did = setNodeValue(inputEl, val);
+        const did = setNodeValue(inputEl, val, labelText || "");
         if (did) {
           filled.push({
             key: creditKey,
@@ -1379,7 +1468,43 @@ async function getPredictions(labels) {
         const catalog = Object.entries(ALL_FIELDS).map(([key, label]) => ({ key, label }));
         sendResponse({ ok: true, catalog, v: CONTENT_VERSION }); return;
       }
-      if (req.action === "EXT_DETECT_FIELDS") { sendResponse(detectFields()); return; }
+      // === Add these cases in content.js message handler ===
+      if (req.action === "EXT_DETECT_FIELDS_SIMPLE") {
+        try {
+          // Uses the built-in detectFieldsOnPage(), which already returns N/A confidence
+          const r = detectFieldsOnPage(); // { ok, inputs, detected:[{key,label,confidence:"N/A"}] }
+          sendResponse(r);
+        } catch (e) {
+          sendResponse({ ok:false, error:String(e), detected:[] });
+        }
+        return; // no async
+      }
+
+      if (req.action === "EXT_CHECK_FORM_EMPTY") {
+        try {
+          const inputs = collectFields(document);
+          const isEmpty = inputs.every(el => {
+            const tag = (el.tagName || "").toLowerCase();
+            const type = (el.type || "").toLowerCase();
+            if (tag === "select") {
+              // empty when no value or selectedIndex <= 0 on typical placeholder selects
+              return !el.value || el.selectedIndex <= 0;
+            }
+            if (type === "checkbox" || type === "radio") return !el.checked;
+            const v = (el.value ?? "").toString().trim();
+            if (!v && el.isContentEditable) {
+              return !(el.textContent || "").trim();
+            }
+            return !v;
+          });
+          sendResponse({ ok:true, empty:isEmpty });
+        } catch (e) {
+          sendResponse({ ok:false, error:String(e), empty:true });
+        }
+        return; // no async
+      }
+      // renamed to avoid clobbering the rich detector above
+      if (req.action === "EXT_DETECT_FIELDS_KEYS") { sendResponse(detectFields()); return; }
       if (req.action === "fillFormSmart") { genericScanAndFill().then(sendResponse); return true; }
       if (req.action === "EXT_GET_JOB_DESC") { sendResponse({ ok: true, jd: extractJD() }); return; }
       if (req.action === "EXT_GET_FILLER_SUMMARY") { getFillerRunSummary().then((summary)=>sendResponse({ ok:true, summary })); return true; }
@@ -1389,86 +1514,6 @@ async function getPredictions(labels) {
     }
   });
 })();
-
-// ===== FILLER =====
-function setSelectValueSmart(selectEl, rawVal) {
-  if (!selectEl) return false;
-  const _nz  = (v) => (v ?? "").toString().trim();
-  const _nrm = (v) => _nz(v).toLowerCase().replace(/[^a-z0-9]/g, "");
-
-  const val = _nz(rawVal);
-  if (!val) return false;
-
-  // Build candidates (raw + case variants)
-  const candidates = [val, val.toUpperCase(), val.toLowerCase()];
-
-  // Degree aliases
-  const valN = _nrm(val);
-  if (typeof DEGREE_ALIASES === "object" && DEGREE_ALIASES[valN]) {
-    candidates.push(...DEGREE_ALIASES[valN]);
-  }
-
-  // Heuristics based on the select's name/id
-  const nameId   = _nrm(`${selectEl.name} ${selectEl.id}`);
-  const isStatey = /state|province|region/.test(nameId);
-  const isCountry= /country|nation/.test(nameId);
-
-  // Use helpers if present
-  const H = window.H || window.SFFHelpers || {};
-  const toAbbr       = H.toAbbr       || ((s)=>s);
-  const ABBR_TO_STATE= H.ABBR_TO_STATE|| {};
-  const normCountry  = H.normCountry  || ((s)=>s);
-
-  // State: add abbr↔full variants
-  if (isStatey) {
-    // If a full name was provided, add its abbreviation
-    const tryAbbr = toAbbr(val);
-    if (tryAbbr && tryAbbr !== val) candidates.push(tryAbbr);
-
-    // If a two-letter abbr was provided, add the full state name
-    if (/^[A-Z]{2}$/i.test(val)) {
-      const full = ABBR_TO_STATE[val.toUpperCase()];
-      if (full) candidates.push(full);
-    }
-  }
-
-  // Country: normalize common variants
-  if (isCountry) {
-    const nc = normCountry(val);
-    if (nc && nc !== val) candidates.push(nc);
-    // Add a couple of frequent spellings just in case
-    if (/^us$/i.test(val)) candidates.push("United States", "USA", "U.S.");
-    if (/^u\.?s\.?a\.?$/i.test(val)) candidates.push("United States");
-  }
-
-  // Prepare options snapshot
-  const opts = Array.from(selectEl.options || []).map((o, idx) => ({
-    idx,
-    text:  _nz(o.textContent),
-    value: _nz(o.value),
-    textN: _nrm(o.textContent),
-    valueN: _nrm(o.value)
-  }));
-
-  // 1) direct case-insensitive exact
-  for (const c of candidates) {
-    const cL = c.toLowerCase();
-    const hit = opts.find(o => o.text.toLowerCase() === cL || o.value.toLowerCase() === cL);
-    if (hit) { selectEl.selectedIndex = hit.idx; selectEl.dispatchEvent(new Event("change", {bubbles:true})); return true; }
-  }
-  // 2) normalized exact
-  for (const c of candidates.map(_nrm)) {
-    const hit = opts.find(o => o.textN === c || o.valueN === c);
-    if (hit) { selectEl.selectedIndex = hit.idx; selectEl.dispatchEvent(new Event("change", {bubbles:true})); return true; }
-  }
-  // 3) normalized “contains” (covers things like “United States (US)”)
-  for (const c of candidates.map(_nrm)) {
-    const hit = opts.find(o => o.textN.includes(c) || o.valueN.includes(c));
-    if (hit) { selectEl.selectedIndex = hit.idx; selectEl.dispatchEvent(new Event("change", {bubbles:true})); return true; }
-  }
-
-  return false;
-}
 
 function parseMonthYear(raw) {
   const s = (raw || "").toString().trim();
@@ -1525,15 +1570,15 @@ function findPeerMonthYearSelects(anchor) {
   return { monthSel, yearSel };
 }
 
-function trySetMonthYearGroup(selectEl, rawVal) {
+function trySetMonthYearGroup(selectEl, rawVal, labelText = "") {
   const my = parseMonthYear(rawVal);
   if (!my) return false;
   const { monthSel, yearSel } = findPeerMonthYearSelects(selectEl);
   if (!monthSel && !yearSel) return false;
 
   let ok = false;
-  if (monthSel) ok = setSelectValueSmart(monthSel, String(my.month)) || ok;
-  if (yearSel)  ok = setSelectValueSmart(yearSel,  String(my.year))  || ok;
+  if (monthSel) ok = setSelectValueSmart(monthSel, String(my.month), labelText || "") || ok;
+  if (yearSel)  ok = setSelectValueSmart(yearSel,  String(my.year),  labelText || "") || ok;
   return ok;
 }
 
@@ -1578,22 +1623,19 @@ function pickValueForFeature(feature, profile) {
   return null;
 }
 
-function setInputValue(el, value) {
+function setInputValue(el, value, labelText = "") {
   if (!el) return false;
-  const tag = (el.tagName || "").toLowerCase();
+  const tag  = (el.tagName || "").toLowerCase();
   const type = (el.type || "").toLowerCase();
 
-  if (tag === "select") return setSelectValueSmart(el, value);
+  if (tag === "select")   return setSelectValueSmart(el, value, labelText || "");
   if (tag === "textarea") return setTextLike(el, value);
 
   if (tag === "input") {
-    if (type === "radio")   return setRadioByValue(el.ownerDocument || document, el.name, value);
-    if (type === "checkbox")return setCheckbox(el, !!value && `${value}`.toLowerCase() !== "unchecked");
-
-    if (type === "date")    return setDateLike(el, value);
-    if (type === "month")   return setMonthLike(el, value);
-
-    // text-like
+    if (type === "radio")    return setRadioByValue(el.ownerDocument || document, el.name, value);
+    if (type === "checkbox") return setCheckbox(el, !!value && `${value}`.toLowerCase() !== "unchecked");
+    if (type === "date")     return setDateLike(el, value);
+    if (type === "month")    return setMonthLike(el, value);
     return setTextLike(el, value);
   }
   return false;
@@ -1659,133 +1701,143 @@ function valueFromProfile(row, profile) {
   const label = (row.labelText || "").toLowerCase();
   const pred  = row.prediction;
 
+  // tolerate both root-level and nested shapes
   const p  = profile.personal || {};
   const l  = profile.links || {};
   const a  = profile.address || {};
-  const ed = (profile.education || [])[0] || {};
+  const ed = (profile.education  || [])[0] || {};
   const ex = (profile.experience || [])[0] || {};
-  const d  = profile?.demographics || {};
 
+  // Merge eligibility + root-style fallbacks
+  const el = Object.assign(
+    {},
+    profile.eligibility || {},
+    {
+      authUS:           profile?.eligibility?.authUS           ?? profile.authUS,
+      sponsorship:      profile?.eligibility?.sponsorship      ?? profile.sponsorship,
+      background_check: profile?.eligibility?.background_check ?? profile.background_check,
+      terms_consent:    profile?.eligibility?.terms_consent    ?? profile.terms_consent,
+      veteran_status:   profile?.eligibility?.veteran_status   ?? profile.veteran ?? profile?.eligibility?.veteran,
+      ethnicity:        profile?.eligibility?.ethnicity        ?? profile.ethnicity
+    }
+  );
 
+  const d  = Object.assign({}, profile.demographics || {}, {
+    ethnicity:     el.ethnicity,
+    veteranStatus: el.veteran_status
+  });
+
+  // robust Yes/No normalizer
+  const yn = (v) => {
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    const s = String(v ?? "").trim();
+    if (!s) return null;
+    if (/^(y|yes|true|1)$/i.test(s)) return "Yes";
+    if (/^(n|no|false|0)$/i.test(s)) return "No";
+    return s; // pass-through pre-phrased values
+  };
+
+  // ---- Name / contact
   if (pred === "name") {
     if (/first/.test(label)) return p.firstName || null;
     if (/(last|surname|family)/.test(label)) return p.lastName || null;
     return `${p.firstName || ""} ${p.lastName || ""}`.trim() || null;
   }
-  if (pred === "email") return p.email || null;
-  if (pred === "phone") return p.phoneNumber || null;
+  if (pred === "email")      return p.email || null;
+  if (pred === "phone")      return p.phoneNumber || null;
   if (pred === "birth_date") return p.dob || null;
 
-  // Social / LinkedIn / Portfolio / GitHub — choose the *right* link per field
-  if (pred === "linkedin" || /linkedin/.test(label)) {
-    const l = profile?.links || {};
-    return l.linkedin || null;
-  }
-  if (pred === "github" || /github/.test(label)) {
-    const l = profile?.links || {};
-    return l.github || l.website || null;
-  }
-  // Generic "social" or Portfolio/Website buckets → prefer portfolio/website first, then GitHub, then LinkedIn
+  // ---- Social / websites
+  if (pred === "linkedin" || /linkedin/.test(label)) return l.linkedin || null;
+  if (pred === "github"   || /github/.test(label))   return l.github || l.website || null;
   if (pred === "social" || /portfolio|website|personal website|personal site/.test(label)) {
-    const l = profile?.links || {};
     return l.website || l.portfolio || l.github || l.linkedin || null;
   }
 
-  if (pred === "company") return ex.company || null;
-  if (pred === "job_title") return ex.jobTitle || null;
+  // ---- Employment / education
+  if (pred === "company")          return ex.company || null;
+  if (pred === "job_title")        return ex.jobTitle || null;
   if (pred === "role_description") return ex.description || ex.roleDescription || null;
 
+  const fmtMMYYYY = (m, y) => (m && y) ? `${String(m).padStart(2,"0")}/${y}` : null;
+  if (pred === "start_date") return fmtMMYYYY(ex.startMonth, ex.startYear) || fmtMMYYYY(ed.startMonth, ed.startYear);
+  if (pred === "end_date")   return fmtMMYYYY(ex.endMonth,   ex.endYear)   || fmtMMYYYY(ed.endMonth,   ed.endYear);
+
+  // ---- Education details (degree / school / major / graduation year)
   if (pred === "education") {
-    if (/degree/.test(label)) {
-      const raw = ed.degreeLong || ed.degreeShort || null;
-      if (!raw) return null;
-      return (window.H?.normalizeDegreeLabel ? window.H.normalizeDegreeLabel(raw) : raw);
+    // Highest Degree (supports selects and text)
+    if (/\bdegree\b/.test(label)) {
+      const deg = ed.degreeLong || ed.degreeShort || "";
+      if (!deg) return null;
+      return (window.H && H.normalizeDegreeLabel) ? H.normalizeDegreeLabel(deg) : deg;
     }
-    if (/school|university|college|institute/.test(label)) return ed.school || null;
-    if (/field|major|concentration/.test(label)) return ed.field || null;
-    if (/gpa/.test(label)) return ed.gpa || null;
-    if (/graduation|year/.test(label)) return ed.endYear || null;
+    // University / College / Institute / School
+    if (/\b(university|college|institute|school)\b/.test(label)) {
+      return ed.school || null;
+    }
+    // Field of Study / Major / Discipline / Concentration
+    if (/\b(field|major|study|discipline|concentration)\b/.test(label)) {
+      return ed.field || null;
+    }
+    // Year of Graduation / Graduation Year
+    if (/\b(grad|graduation|year)\b/.test(label)) {
+      return ed.endYear || ed.graduationYear || null;
+    }
     return null;
   }
-
+  
+  // ---- Address routing (label FIRST, then street fallback)
   if (pred === "address") {
-    if (/mailing address/.test(label)) return a.street || null;
-    if (/permanent address/.test(label)) return a.street || null;
-    if (/street|address line/.test(label)) return a.street || null;
-    if (/city|town|municipality|locality|suburb/.test(label)) return a.city || null;
-    if (/state|province|region|prefecture|canton|shire|ward|tehsil|taluk/.test(label)) return a.state || null;
-    if (/zip|postal|postcode/.test(label)) return a.zip || null;
+    if (/\bcity\b|\btown\b|\bmunicipality\b|\blocality\b|\bsuburb\b/.test(label)) return a.city || null;
+    if (/\bstate\b|\bprovince\b|\bregion\b|\bprefecture\b|\bcanton\b|\bshire\b|\bward\b|\btehsil\b|\btaluk\b/.test(label)) return a.state || null;
+    if (/\bzip\b|\bpostal\b|\bpostcode\b/.test(label)) return a.zip || null;
+    if (/\bcountry\b|\bnation\b/.test(label)) return a.country || null;
     if (/\bcounty\b/.test(label)) return a.county || null;
-    if (/country|nation/.test(label)) return a.country || null;
-    return null; // county not in profile by default
+    if (/street|address line|permanent address|mailing address|^address\b/.test(label)) return a.street || null;
+    return null;
   }
+  if (pred === "city")    return a.city || null;
+  if (pred === "state")   return a.state || null;
+  if (pred === "zip")     return a.zip || null;
+  if (pred === "country") return a.country || null;
 
-  // Demographics group (no defaults — skip if unknown)
-  if (pred === "demographics") {
-    if (/gender identity|gender/.test(label)) return d.genderIdentity || p.gender || null;
-    if (/ethnicity|race/.test(label))         return d.ethnicity || null;
-    if (/veteran/.test(label))                return d.veteranStatus || null;
+  // ===== Eligibility / consents / demographics =====
+  if (pred === "work_auth") {
+    // disambiguate by label
+    if (/sponsor|sponsorship/.test(label))                            return yn(el.sponsorship); // "Will you require sponsorship?"
+    if (/authorized|authorised|work in the (u\.?s\.?|united states)/i.test(label)) return yn(el.authUS);     // "Are you authorized to work in the US?"
     return null;
   }
 
-  if (pred === "start_date") {
-    const scope = row.scope || row.context || "";
-    if (scope === "education") return fmtMMYYYY(ed.startMonth, ed.startYear);
-    return fmtMMYYYY(ex.startMonth, ex.startYear) || fmtMMYYYY(ed.startMonth, ed.startYear);
-  }
-  if (pred === "end_date") {
-    const scope = row.scope || row.context || "";
-    if (scope === "education") return fmtMMYYYY(ed.endMonth, ed.endYear);
-    return fmtMMYYYY(ex.endMonth, ex.endYear) || fmtMMYYYY(ed.endMonth, ed.endYear);
-  }
+  if (pred === "background_check" || /background.*check/.test(label)) return yn(el.background_check ?? "Yes"); // default agree if missing
+  if (pred === "terms_consent"    || /terms|privacy|consent/.test(label)) return yn(el.terms_consent ?? "Yes"); // default agree if missing
 
-  // ===== Eligibility & Compliance values (NO DEFAULTS) =====
-
-  // Work authorization ("Are you authorized to work in the US?")
-  if (pred === "work_auth" && /authorized|work in the (us|united states)/i.test(label)) {
-    const v = profile?.eligibility?.authUS ?? profile?.personal?.workAuth ?? null; // boolean or "Yes"/"No"
+  if (pred === "demographics" && /veteran/.test(label)) {
+    const v = d.veteranStatus ?? el.veteran ?? null;
     if (v == null) return null;
-    return (typeof v === "boolean") ? (v ? "Yes" : "No") : v;
+    const s = String(v).toLowerCase();
+    if (/^(y|yes|true|1)|\bveteran\b/.test(s)) return "Veteran";
+    if (/^(n|no|false|0)|\bnot\b/.test(s))     return "Not a Veteran";
+    if (/prefer|decline/.test(s))              return "Prefer not to say";
+    return v;
   }
 
-  // Sponsorship ("Will you now or in the future require sponsorship?")
-  if (pred === "work_auth" && /sponsor|sponsorship/i.test(label)) {
-    const v = profile?.eligibility?.needSponsorship ?? profile?.personal?.needSponsorship ?? null;
-    if (v == null) return null;
-    return (typeof v === "boolean") ? (v ? "Yes" : "No") : v;
+  if (pred === "demographics" && /\b(ethnicity|race)\b/.test(label)) {
+    const e = d.ethnicity;
+    if (!e) return null;
+    const s = String(e).toLowerCase();
+    if (/hispanic|latinx|latino|latina/.test(s)) return "Hispanic or Latino";
+    if (/not.*hispanic/.test(s))                 return "Not Hispanic or Latino";
+    if (/prefer.*not.*say|decline/.test(s))      return "Prefer not to say";
+    return e;
   }
 
-  // Background check consent
-  if (pred === "background_check") {
-    const v = profile?.eligibility?.backgroundCheck ?? null; // boolean or "Yes"/"No"
-    return v ?? null;
-  }
+  if (pred === "demographics" && /gender identity/.test(label)) return d.genderIdentity || p.gender || null;
+  if (pred === "demographics" && /\bgender\b/.test(label))      return d.gender || p.gender || null;
 
-  // Terms consent
-  if (pred === "terms_consent") {
-    const v = profile?.eligibility?.termsConsent ?? null; // boolean or "Yes"/"No"
-    return v ?? null;
-  }
+  // Intentionally manual
+  if (pred === "referral_source") return null;
 
-  // Ethnicity (string; e.g., "Hispanic or Latino", "White", "Prefer not to say")
-  if (pred === "demographics" && /ethnicity/i.test(label)) {
-    return profile?.demographics?.ethnicity ?? null;
-  }
-
-  // Gender Identity (already working; keep)
-  if (pred === "demographics" && /gender identity|gender\b/i.test(label)) {
-    return profile?.demographics?.genderIdentity ?? profile?.personal?.gender ?? null;
-  }
-
-  // Veteran Status (string or yes/no phrasing)
-  if (pred === "demographics" && /veteran/i.test(label)) {
-    return profile?.demographics?.veteranStatus ?? null; // e.g., "I am not a veteran"
-  }
-
-  // Referral — ALWAYS skip (user chooses)
-  if (pred === "referral_source") {
-    return null;
-  }
   return null;
 }
 
@@ -1871,7 +1923,7 @@ async function fillDetected(items, profile, resumeId) {
       report.push({ label, prediction: pred, confidence: row.confidence, status:"skipped", reason:"no profile value" });
       continue;
     }
-    const ok = setInputValue(el, String(value));
+    const ok = setInputValue(el, String(value), label || "");
     report.push({ label, prediction: pred, confidence: row.confidence, status: ok?"filled":"skipped", reason: ok?"":"set value failed", valuePreview: String(value) });
   }
   return report;
@@ -1891,3 +1943,106 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })();
   return true;
 });
+
+// --- Simple, real detector for popup's Detected Fields ---
+(function(){
+  function isFillCandidate(el){
+    if (!el || el.disabled) return false;
+    const tag = (el.tagName || "").toLowerCase();
+    if (!["input","select","textarea"].includes(tag)) return false;
+    if (tag === "input") {
+      const t = (el.type || "").toLowerCase();
+      if (["hidden","submit","button","reset","image","file"].includes(t)) return false;
+    }
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    return true;
+  }
+
+  function labelFor(el){
+    // <label for="">
+    if (el.labels && el.labels.length) {
+      const s = (el.labels[0].innerText || el.labels[0].textContent || "").trim();
+      if (s) return s;
+    }
+    // aria-label
+    const aria = (el.getAttribute("aria-label") || "").trim();
+    if (aria) return aria;
+    // placeholder
+    const ph = (el.getAttribute("placeholder") || "").trim();
+    if (ph) return ph;
+    // nearest text before it
+    let n = el;
+    for (let i=0;i<4 && n;i++){
+      n = n.previousElementSibling;
+      if (!n) break;
+      const txt = (n.innerText || n.textContent || "").trim();
+      if (txt) return txt;
+    }
+    // fallback name/id
+    return el.name || el.id || "(unlabeled)";
+  }
+
+  function cssPath(el){
+    try {
+      if (!(el instanceof Element)) return "";
+      const parts = [];
+      while (el && el.nodeType === 1 && parts.length < 6) {
+        let sel = el.nodeName.toLowerCase();
+        if (el.id) { sel += `#${el.id}`; parts.unshift(sel); break; }
+        let sib = el, i = 1;
+        while (sib = sib.previousElementSibling) if (sib.nodeName === el.nodeName) i++;
+        sel += `:nth-of-type(${i})`;
+        parts.unshift(sel);
+        el = el.parentElement;
+      }
+      return parts.join(" > ");
+    } catch { return ""; }
+  }
+
+  function collect(){
+    const out = [];
+    document.querySelectorAll("input, select, textarea").forEach(el => {
+      if (!isFillCandidate(el)) return;
+      out.push({
+        label: labelFor(el),
+        name: el.name || null,
+        id: el.id || null,
+        selector: cssPath(el)
+      });
+    });
+    return out;
+  }
+
+  // probe + empty-check for popup's restore logic
+  function isFormEmpty(){
+    const els = Array.from(document.querySelectorAll("input, select, textarea")).filter(isFillCandidate);
+    return els.every(el => {
+      const tag = el.tagName.toLowerCase();
+      if (tag === "select") return !el.value;
+      if (tag === "textarea") return !el.value?.trim();
+      if (tag === "input") {
+        const t = (el.type || "").toLowerCase();
+        if (t === "checkbox" || t === "radio") return !el.checked;
+        return !el.value?.trim();
+      }
+      return true;
+    });
+  }
+
+  // only add listeners if not already wired elsewhere
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.action === "EXT_DETECT_FIELDS_SIMPLE") {
+      try { sendResponse({ ok:true, detected: collect() }); } catch (e) { sendResponse({ ok:false, error:String(e) }); }
+      return true;
+    }
+    if (msg?.action === "EXT_CHECK_FORM_EMPTY") {
+      try { sendResponse({ ok:true, empty: isFormEmpty() }); } catch (e) { sendResponse({ ok:false, error:String(e) }); }
+      return true;
+    }
+    if (msg?.action === "probe") {
+      try { sendResponse({ ok:true, inputs: collect().length }); } catch { sendResponse({ ok:false, inputs:0 }); }
+      return true;
+    }
+  });
+})();

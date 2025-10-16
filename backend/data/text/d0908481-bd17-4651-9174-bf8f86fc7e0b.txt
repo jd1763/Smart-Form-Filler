@@ -1,0 +1,25 @@
+Avery Chen 
+
+ Software Engineer
+
+Email: avery.chen@example.com   |   Location: New York, NY
+
+SUMMARY
+Early-career software engineer with solid foundations in programming, databases, and testing.
+
+SKILLS (Required only)
+Python · Java · SQL · data modeling
+Linux · Git · unit testing (pytest, JUnit)
+
+EXPERIENCE
+Software Engineer Intern   AnalyticsCo
+- Implemented Python/Java services with clean architecture and unit testing.
+- Authored SQL for analytics and applied data modeling for warehouse tables.
+- Worked in Linux environments with Git-based workflows.
+
+EDUCATION
+BS in Computer Science
+
+Page 1
+
+

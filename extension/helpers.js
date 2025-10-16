@@ -1,5 +1,8 @@
 // helpers.js — Smart Form Filler shared, pure helpers (no DOM here)
 (function(){
+    window.SFFHelpers = window.SFFHelpers || {};
+    window.H = window.H || window.SFFHelpers;
+
     const HVER = "1.0.0";
   
     // ----- string utils -----
@@ -185,6 +188,25 @@
       }
       return "";
     }
+
+    H.buildRaceCandidates = function(val){
+      const v = (val||"").toLowerCase();
+      const map = {
+        "white": ["white", "caucasian"],
+        "black or african american": ["black", "african american"],
+        "asian": ["asian"],
+        "native hawaiian or other pacific islander": ["pacific islander","native hawaiian"],
+        "american indian or alaska native": ["american indian","alaska native","native american"],
+        "two or more races": ["two or more","multiracial","mixed"],
+        "other": ["other"]
+      };
+      // flatten the values as candidates
+      return Object.keys(map).reduce((arr,k)=>{
+        const syns = map[k];
+        if (syns.some(s=>v.includes(s))) arr.push(k);
+        return arr.length ? arr : arr.concat([val]);
+      }, []);
+    };    
   
     // ----- token / radio normalization (pure) -----
     function normalizeToken(s) {
@@ -617,3 +639,134 @@ window.SFFHelpers = window.SFFHelpers || {};
     return -1;
   };
 })();
+
+/* ===================== SELECT MATCH HELPERS ===================== */
+// === Normalizer used by matchers ===
+function _sffNorm(s) {
+  return (s ?? "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+// Already added earlier, but safe if not present:
+H.matchOptionIndex = H.matchOptionIndex || function matchOptionIndex(selectEl, candidates) {
+  if (!selectEl) return -1;
+  const opts = Array.from(selectEl.options || []).map((o, i) => ({
+    i,
+    text: (o.textContent ?? "").trim(),
+    value: (o.value ?? "").trim(),
+    textN: _sffNorm(o.textContent),
+    valueN: _sffNorm(o.value)
+  }));
+  const candList = (candidates || []).map(String);
+  const candN = candList.map(_sffNorm);
+
+  for (const c of candList) {
+    const cLow = c.toLowerCase();
+    const hit = opts.find(o => o.text.toLowerCase() === cLow || o.value.toLowerCase() === cLow);
+    if (hit) return hit.i;
+  }
+  for (const c of candN) {
+    const hit = opts.find(o => o.textN === c || o.valueN === c);
+    if (hit) return hit.i;
+  }
+  for (const c of candN) {
+    const hit = opts.find(o => o.textN.includes(c) || o.valueN.includes(c));
+    if (hit) return hit.i;
+  }
+  return -1;
+};
+
+// Build Yes/No variants for consent selects/radios
+H.buildYesNoCandidates = function buildYesNoCandidates(v) {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return [];
+  if (/^(y|yes|true|1)$/i.test(s)) {
+    return ["Yes", "I agree", "I consent", "Agree", "Accept", "True"];
+  }
+  if (/^(n|no|false|0)$/i.test(s)) {
+    return ["No", "I do not agree", "Do not agree", "Decline", "False"];
+  }
+  // pass-through for already-phrased answers
+  return [String(v)];
+};
+
+// Ethnicity variants (normalize common forms)
+H.buildEthnicityCandidates = function buildEthnicityCandidates(raw) {
+  const s = (raw ?? "").toString().trim().toLowerCase();
+  if (!s) return [];
+  const variants = new Set([raw]);
+  const add = (arr) => arr.forEach(x => variants.add(x));
+
+  if (/hispanic|latinx|latino|latina/.test(s)) {
+    add(["Hispanic or Latino", "Hispanic/Latino", "Hispanic/Latinx", "Latino", "Latina"]);
+  } else if (/white|caucasian/.test(s)) {
+    add(["White", "Caucasian"]);
+  } else if (/(black|african)/.test(s)) {
+    add(["Black or African American"]);
+  } else if (/asian/.test(s)) {
+    add(["Asian"]);
+  } else if (/native|american indian|alaska/.test(s)) {
+    add(["American Indian or Alaska Native"]);
+  } else if (/pacific|hawaiian/.test(s)) {
+    add(["Native Hawaiian or Other Pacific Islander"]);
+  } else if (/two|multiple|more than one/.test(s)) {
+    add(["Two or More Races"]);
+  } else if (/prefer.*not.*say|decline/.test(s)) {
+    add(["Prefer not to say"]);
+  }
+
+  // common punctuation variants
+  const base = Array.from(variants);
+  base.forEach(v => {
+    if (v.includes(" or ")) variants.add(v.replace(" or ", "/"));
+    if (v.includes("/")) variants.add(v.replace("/", " or "));
+  });
+
+  return Array.from(variants);
+};
+
+// Veteran variants: map "No" → explicit not-a-veteran labels, etc.
+H.buildVeteranCandidates = function buildVeteranCandidates(raw) {
+  const s = (raw ?? "").toString().trim().toLowerCase();
+  if (!s) return [];
+  const v = new Set([raw]);
+
+  if (/^(n|no|false|0)$/.test(s) || /not.*veteran/.test(s)) {
+    [
+      "Not a veteran",
+      "I am not a veteran",
+      "No military service",
+      "Non-veteran",
+      "No"
+    ].forEach(x => v.add(x));
+  } else if (/^(y|yes|true|1)$/.test(s) || /veteran/.test(s)) {
+    [
+      "Veteran",
+      "I am a veteran",
+      "Yes"
+    ].forEach(x => v.add(x));
+  } else if (/prefer.*not.*say|decline/.test(s)) {
+    [
+      "Prefer not to say",
+      "Decline to self-identify"
+    ].forEach(x => v.add(x));
+  }
+
+  return Array.from(v);
+};
+
+// Already added earlier in your work:
+H.buildStateCandidates = H.buildStateCandidates || function buildStateCandidates(input) {
+  const raw = (input ?? "").toString().trim();
+  if (!raw) return [];
+  const abbr = /^[A-Z]{2}$/.test(raw) ? raw.toUpperCase()
+              : (H.toAbbr ? H.toAbbr(raw) : raw.toUpperCase());
+  const full = (H.ABBR_TO_STATE && H.ABBR_TO_STATE[abbr]) || raw;
+
+  return Array.from(new Set([
+    abbr, full,
+    `${abbr} - ${full}`, `${full} - ${abbr}`,
+    `${full} (${abbr})`, `${abbr} (${full})`,
+    `${full}, ${abbr}`,
+    raw
+  ])).filter(Boolean);
+};

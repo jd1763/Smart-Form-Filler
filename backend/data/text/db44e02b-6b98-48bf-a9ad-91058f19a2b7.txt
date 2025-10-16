@@ -1,0 +1,27 @@
+Riley Morgan 
+
+ Data Platform Engineer
+
+Email: riley.morgan@example.com   |   Location: Austin, TX
+
+SUMMARY
+Data platform engineer spanning services, pipelines, and cloud infra.
+
+SKILLS (all required + all preferred)
+Required: Python · Java · SQL · data modeling · Linux · Git · unit testing
+Preferred: Kafka · Spark · Airflow · AWS · S3 · IAM · ECS · EKS · React · TypeScript · GraphQL
+
+EXPERIENCE
+Data Platform Engineer   ProductLabs
+- Built and tested Python/Java services with comprehensive unit testing.
+- Authored SQL and data modeling for analytics and feature stores.
+- Operated Kafka, Spark, and Airflow for ingestion and orchestration.
+- Managed AWS accounts and services (S3, IAM) and container runtimes (ECS/EKS).
+- Built internal tools with React + TypeScript, GraphQL for developer workflows.
+
+EDUCATION
+BS in Computer Science
+
+Page 1
+
+

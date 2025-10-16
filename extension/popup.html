@@ -44,138 +44,156 @@
 </head>
 <body>
   <h1>Smart Form Filler</h1>
-  <!-- ===== Card 0: No Resumes Notice ===== -->
-  <div class="card" id="noResumesCard" style="display:none;">
-    <strong>No resumes on file</strong>
-    <p class="muted" style="margin:6px 0 10px;">
-      Upload a resume to see your match score and get a suggested resume.
-    </p>
-    <button id="uploadResumeCTA" class="btn btn-primary">Upload resume</button>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="main">Main</button>
+    <button class="tab" data-tab="debug">Debug</button>
   </div>
 
-  <!-- ===== Card 1: Job Match ===== -->
-  <div class="card" id="matchCard">
-    <div class="row">
-      <strong>Job Match</strong>
-      <span class="muted" id="jdHint2">auto-detected from page</span>
+  <!-- ====================== MAIN TAB ====================== -->
+  <div id="tab-main">
+    <!-- ===== Card 0: No Resumes Notice ===== -->
+    <div class="card" id="noResumesCard" style="display:none;">
+      <strong>No resumes on file</strong>
+      <p class="muted" style="margin:6px 0 10px;">
+        Upload a resume to see your match score and get a suggested resume.
+      </p>
+      <button id="uploadResumeCTA" class="btn btn-primary">Upload resume</button>
     </div>
 
-    <div class="score">
-      <svg viewBox="0 0 36 36">
-        <circle cx="18" cy="18" r="16" fill="none" stroke="#e5e7eb" stroke-width="4" />
-        <path id="arc" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round"
-              d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
-              stroke-dasharray="0,100" />
-      </svg>
-      <div>
-        <div><strong id="scoreNum">—</strong></div>
-        <div class="muted">Match score</div>
+    <!-- ===== Card 1: Job Match ===== -->
+    <div class="card" id="matchCard">
+      <div class="row">
+        <strong>Job Match</strong>
+        <span class="muted" id="jdHint2">auto-detected from page</span>
       </div>
+
+      <div class="score">
+        <svg viewBox="0 0 36 36">
+          <circle cx="18" cy="18" r="16" fill="none" stroke="#e5e7eb" stroke-width="4" />
+          <path id="arc" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round"
+                d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
+                stroke-dasharray="0,100" />
+        </svg>
+        <div>
+          <div><strong id="scoreNum">—</strong></div>
+          <div class="muted">Match score</div>
+        </div>
+      </div>
+
+      <div style="margin-top:8px;" class="muted"><strong>Matched skills</strong></div>
+      <div class="row">
+        <div class="skillBox">
+          <span class="muted">Required</span>
+          <div class="chips" id="matchedReq"></div>
+        </div>
+        <div class="skillBox">
+          <span class="muted">Preferred</span>
+          <div class="chips" id="matchedPref"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:8px;" class="muted"><strong>Missing skills</strong></div>
+      <div class="row">
+        <div class="skillBox">
+          <span class="muted">Required</span>
+          <div class="chips" id="missingReq"></div>
+        </div>
+        <div class="skillBox">
+          <span class="muted">Preferred</span>
+          <div class="chips" id="missingPref"></div>
+        </div>
+      </div>
+
+      <div class="muted mono" id="matchStatus" style="margin-top:6px;"></div>
     </div>
 
-    <!-- Matched (side by side Required & Preferred) -->
-    <div style="margin-top:8px;" class="muted"><strong>Matched skills</strong></div>
-    <div class="row">
-      <div class="skillBox">
-        <span class="muted">Required</span>
-        <div class="chips" id="matchedReq"></div>
+    <!-- ===== Card 2: Resume Suggestor ===== -->
+    <div class="card" id="resumeSuggestorCard">
+      <div class="row" style="margin-top:4px;">
+        <strong>Resume Suggestor</strong>
+        <span class="muted" id="jdHint">auto-detected from page</span>
       </div>
-      <div class="skillBox">
-        <span class="muted">Preferred</span>
-        <div class="chips" id="matchedPref"></div>
+
+      <div class="row" style="margin-bottom:4px;">
+        <div class="muted">Suggested resume - <div class="muted mono" id="chosenResume">—</div></div>
+        <div class="muted" id="chosenScore">Match: —</div>
       </div>
+
+      <div style="height:6px"></div>
+      <label for="resumeSelect" class="muted">Select resume for comparison</label>
+      <select id="resumeSelect"></select>
+
+      <div class="muted mono" id="resumeStatus" style="margin-top:6px;">—</div>
     </div>
 
-    <!-- Missing (side by side Required & Preferred) -->
-    <div style="margin-top:8px;" class="muted"><strong>Missing skills</strong></div>
-    <div class="row">
-      <div class="skillBox">
-        <span class="muted">Required</span>
-        <div class="chips" id="missingReq"></div>
+    <!-- ===== Card 3: Apply Helper (Fill Form) ===== -->
+    <div class="card" id="applyCard">
+      <div class="row">
+        <strong>Apply Helper</strong>
+        <span class="muted">pick resume & fill</span>
       </div>
-      <div class="skillBox">
-        <span class="muted">Preferred</span>
-        <div class="chips" id="missingPref"></div>
-      </div>
-    </div>
 
-    <div class="muted mono" id="matchStatus" style="margin-top:6px;"></div>
+      <div id="controls" style="display:flex; gap:8px; margin-top:6px;">
+        <button id="fillForm" class="btn btn-primary">Fill Form</button>
+        <button id="tryAgain" class="btn" style="display:none;">Try Again</button>
+        <button id="manageProfileBtn" class="btn">Edit My Answers</button>
+        <button id="manageResumesBtn" class="btn">Manage Resumes</button>
+      </div>
+
+      <div id="status">Ready…</div>
+    </div>
+    
+    <!-- Field Buckets / Reports -->
+    <div class="card">
+      <div id="detectedToggle" class="section-header">▶ Detected Fields</div>
+      <div id="detectedFields" class="field-list" style="display:none;">
+        <div class="muted" id="detectedHint">Scanning page for fields…</div>
+        <div id="detectedList"></div>
+      </div>
+
+      <div id="filledToggle" class="section-header">▶ Filled Fields</div>
+      <div id="filledFields" class="field-list" style="display:none;"></div>
+
+      <div id="notFilledToggle" class="section-header">▶ Non-Filled Fields</div>
+      <div id="notFilledFields" class="field-list" style="display: none;"></div>
+    </div>
+  </div>
   </div>
 
-  <!-- ===== Card 2: Resume Suggestor ===== -->
-  <div class="card" id="resumeSuggestorCard">
-    <div class="row" style="margin-top:4px;">
-      <strong>Resume Suggestor</strong>
-      <span class="muted" id="jdHint">auto-detected from page</span>
-    </div>
-  
-    <div class="row" style="margin-bottom:4px;">
-      <div class="muted">Suggested resume - <div class="muted mono" id="chosenResume">—</div></div>
-      <div class="muted" id="chosenScore">Match: —</div>
-    </div>
-  
-    <div style="height:6px"></div>
-    <label for="resumeSelect" class="muted">Select resume for comparison</label>
-    <select id="resumeSelect"></select>
-  
-    <div class="muted mono" id="resumeStatus" style="margin-top:6px;">—</div>
-  </div>  
-
-  <!-- ===== Card 3: Apply Helper (Fill Form) ===== -->
-  <div class="card" id="applyCard">
-    <div class="row">
-      <strong>Apply Helper</strong>
-      <span class="muted">pick resume & fill</span>
-    </div>
-
-    <div id="controls" style="display:flex; gap:8px; margin-top:6px;">
-      <button id="fillForm" class="btn">Fill Form</button>
-      <button id="tryAgain" class="btn" style="display:none;">Try Again</button>
-      <button id="manageProfileBtn" class="btn">Edit My Answers</button>
-      <button id="manageResumesBtn" class="btn">Manage Resumes</button>
-    </div>
-
-    <div id="status">Ready…</div>
-
-    <!-- Debug -->
-    <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
-      <button id="btnFill" type="button">🪄 Fill Form</button>
-      <span id="fillSummary" style="font-size:12px;color:#6b7280;"></span>
-    </div>
-    <pre id="fillReport" style="max-height:160px;overflow:auto;background:#0b1020;color:#d7e1ff;padding:8px;border-radius:6px;font-size:12px;"></pre>
-    
-    <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
-      <button id="btnPredict" type="button">▶️ Predict</button>
-      <span id="predictCount" style="font-size:12px;color:#6b7280;"></span>
-    </div>
-    
-    <section id="detectorPanel" style="margin-top:8px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-        <button id="btnDetect" type="button">🔎 Detect Fields</button>
-        <span id="detectCount" style="font-size:12px;color:#6b7280;">(none)</span>
+  <!-- ====================== DEBUG TAB ====================== -->
+  <div id="tab-debug" style="display:none;">
+    <div class="card">
+      <div class="row">
+        <strong>Debug</strong>
+        <span class="muted">detector · predictor · filler</span>
       </div>
-    
-      <div style="display:grid;grid-template-columns: 1fr; gap:6px;">
-        <select id="detectedSelect" size="8" style="width:100%;max-height:160px;"></select>
-        <pre id="detectedDetails" style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px;max-height:160px;overflow:auto;margin:0;"></pre>
+
+      <div class="debug-toolbar">
+        <button id="btnDetect" type="button" class="btn">🔎 Detect Fields</button>
+        <button id="btnPredict" type="button" class="btn">▶️ Predict</button>
+        <button id="btnFill" type="button" class="btn btn-primary">🪄 Fill Form (Debug)</button>
       </div>
-    </section>    
 
-    <!-- Detected fields (pre-fill) -->
-    <div id="detectedToggle" class="section-header">▶ Detected Fields</div>
-    <div id="detectedFields" class="field-list" style="display:none;">
-      <div class="muted" id="detectedHint">Scanning page for fields…</div>
-      <div id="detectedList"></div>
+      <div class="muted" style="margin-top:6px;">
+        <span>Detected: <span id="detectCount">0</span></span>
+        · <span>Predicted: <span id="predictCount">0</span></span>
+      </div>
+      
+      <select id="detectedSelect" size="6" style="width:100%; margin-top:6px;"></select>
+      
+      <pre id="detectedDetails"
+           class="mono"
+           style="white-space:pre-wrap; margin-top:6px; max-height:120px; overflow:auto; background:#fafafa; padding:6px; border-radius:6px; border:1px solid #eee;"></pre>
+      
+      <hr style="margin:8px 0;">
+      
+      <div class="muted" id="fillSummary">—</div>
+      <pre id="fillReport"
+           class="mono"
+           style="white-space:pre-wrap; max-height:140px; overflow:auto; background:#fafafa; padding:6px; border-radius:6px; border:1px solid #eee;"></pre>      
     </div>
-
-    <!-- Filled / Non-Filled sections -->
-    <div id="filledToggle" class="section-header">▶ Filled Fields</div>
-    <div id="filledFields" class="field-list" style="display:none;"></div>
-
-    <div id="notFilledToggle" class="section-header">▶ Non-Filled Fields</div>
-    <div id="notFilledFields" class="field-list"></div>
   </div>
-
   <script src="popup.js"></script>
 </body>
-</html>

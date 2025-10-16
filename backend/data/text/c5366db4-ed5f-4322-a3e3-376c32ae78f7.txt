@@ -1,0 +1,25 @@
+Jordan Patel 
+
+ Data Software Engineer
+
+Email: jordan.patel@example.com   |   Location: Boston, MA
+
+SUMMARY
+Builds data features across batch and streaming, with a focus on reliable services.
+
+SKILLS (mix of required + preferred)
+Python · SQL · Git
+Kafka · AWS
+
+EXPERIENCE
+Data Engineer   MetricHub
+- Authored Python micro-services; wrote SQL for metrics pipelines.
+- Introduced Kafka for event streaming on selected services.
+- Source control with Git and feature-branch workflows on Linux systems.
+
+EDUCATION
+BS, Computer Engineering
+
+Page 1
+
+

@@ -30,6 +30,27 @@ function ensureDiagPanel() {
   return DIAG;
 }
 
+function initTabs() {
+  const tabs = Array.from(document.querySelectorAll(".tab"));
+  const panels = {
+    main:  document.getElementById("tab-main"),
+    debug: document.getElementById("tab-debug"),
+  };
+  const show = (key) => {
+    panels.main.style.display  = key === "main"  ? "" : "none";
+    panels.debug.style.display = key === "debug" ? "" : "none";
+  };
+  tabs.forEach(btn => {
+    btn.addEventListener("click", () => {
+      tabs.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      show(btn.dataset.tab);
+    });
+  });
+  // default
+  show("main");
+}
+
 function showDiag(obj){
   ensureDiagPanel();
   const pre = document.getElementById("sffDiagPre");
@@ -60,7 +81,9 @@ const SKILL_WORDS = new Set([
   "spark","hadoop","airflow","pandas","numpy","scikit-learn","sklearn",
   "react","node","javascript","typescript","graphql","rest","grpc",
   "kafka","snowflake","databricks","tableau","git","ci","cd","tomcat",
-  "android","gradle","junit","eclipse","intellij","vscode","jsp","html","css"
+  "android","gradle","junit","eclipse","intellij","vscode","jsp","html","css",
+  "unit_testing","unittest","pytest","data_modeling",
+  "s3","iam","eks","ecs","cloud","unix","bash","shell","unit testing", "unit test"
 ]);
 
 // === skill aliases (keep minimal) ===
@@ -93,6 +116,300 @@ function sffCollectSkills(text) {
   }
   return out; // Set of canonical skill tokens present in text
 }
+
+// ================= BUCKETS / RENDERING =================
+(async function BucketUI() {
+  // --- DOM refs
+  const detectedToggle   = document.getElementById("detectedToggle");
+  const detectedFieldsEl = document.getElementById("detectedFields");
+  const detectedListEl   = document.getElementById("detectedList");
+  const detectedHintEl   = document.getElementById("detectedHint");
+
+  const filledToggle     = document.getElementById("filledToggle");
+  const filledFieldsEl   = document.getElementById("filledFields");
+
+  const notFilledToggle  = document.getElementById("notFilledToggle");
+  const notFilledFieldsEl= document.getElementById("notFilledFields");
+
+  const statusEl         = document.getElementById("status");
+  const btnFill          = document.getElementById("fillForm");
+  const btnTryAgain      = document.getElementById("tryAgain");
+
+  // ---------- header helpers (no auto-open; just reflect current state) ----------
+  function setHeaderWithCount(hdrEl, panelEl, base, count) {
+    hdrEl.dataset.base  = base;
+    hdrEl.dataset.count = String(count);
+    const open = panelEl.style.display !== "none";
+    hdrEl.textContent = `${open ? "▼" : "▶"} ${base}${Number.isFinite(count) ? ` (${count})` : ""}`;
+  }
+  function refreshAllCounts({ detectedCount, filledCount, nonFilledCount }) {
+    setHeaderWithCount(detectedToggle,  detectedFieldsEl,  "Detected Fields",    detectedCount);
+    setHeaderWithCount(filledToggle,    filledFieldsEl,    "Filled Fields",      filledCount);
+    setHeaderWithCount(notFilledToggle, notFilledFieldsEl, "Non-Filled Fields",  nonFilledCount);
+  }
+
+// ---------- tiny render helpers ----------
+const $item = (label, meta) => {
+  const row = document.createElement("div");
+  row.className = "row";               // same row style as the dropdowns
+
+  const name = document.createElement("span");
+  name.className = "field-name";       // bullet + ellipsis handled in CSS
+  const text = label || "(unknown)";
+  name.textContent = text;
+  name.title = text;
+  row.appendChild(name);
+
+  if (meta) {
+    const m = document.createElement("span");
+    m.className = "field-meta";        // right-side compact meta (used for Non-Filled)
+    m.textContent = meta;
+    row.appendChild(m);
+  }
+  return row;
+};
+
+function renderSimpleList(container, items, metaForItem = () => "") {
+  container.innerHTML = "";
+  (items || []).forEach(it =>
+    container.appendChild($item(it.label || it.key || "(unknown)", metaForItem(it)))
+  );
+  if (!items || !items.length) container.appendChild($item("— none —"));
+}
+
+// Accept both shapes, map to {key?,label,confidence}
+function normalizeDetectedShape(resp) {
+  const arr = Array.isArray(resp?.detected) ? resp.detected : [];
+  return arr.map(x => ({
+    key:   x.key || x.prediction || x.name || null,
+    label: x.label || x.labelText || x.placeholder || x.name || x.id || "(Unknown)",
+    confidence: "N/A"  // not shown in Detected; only for Non-Filled meta
+  }));
+}
+
+  // ---------- tab + messaging helpers ----------
+  async function getActiveTab() {
+    const [tab] = await chrome.tabs.query({ active:true, currentWindow:true });
+    return tab;
+  }
+  async function ask(tabId, payload) {
+    try { return await chrome.tabs.sendMessage(tabId, payload); }
+    catch { return null; }
+  }
+
+// --------- detection + seeding ----------
+async function detectAndSeed() {
+  const tab = await getActiveTab();
+  if (!tab?.id) return { detected: [], pageKey: "" };
+
+  detectedHintEl.textContent = "Scanning page for fields…";
+
+  // Ensure content scripts are injected BEFORE we ask the page (fixes first-open issue)
+  // Uses helpers already defined elsewhere in this file.
+  if (!await ensureContent(tab.id)) {
+    detectedHintEl.textContent = "Couldn’t reach the page. Try again on a form.";
+    renderSimpleList(detectedListEl, []);
+    refreshAllCounts({ detectedCount: 0, filledCount: 0, nonFilledCount: 0 });
+    return { detected: [], pageKey: "" };
+  }
+
+  const frameId = await getBestFrame(tab.id);       // pick frame with most inputs
+  let resp = await sendToFrame(tab.id, frameId, { action: "EXT_DETECT_FIELDS" });
+  if (!resp || !resp.ok) {
+    resp = await sendToFrame(tab.id, frameId, { action: "EXT_DETECT_FIELDS_SIMPLE" });
+  }
+
+  const detected = normalizeDetectedShape(resp || { detected: [] });
+
+  // Detected = label-only cards (no chip/meter)
+  renderDetected(detectedListEl, detected);
+
+  // Filled = empty, but keep the same card style
+  renderFieldList(filledFieldsEl, [], { title: "Filled", mode: "filled" });
+
+  // Non-Filled = same card layout as Filled, with N/A confidence and 0% meter
+  const nonFilledInit = detected.map(d => ({
+    key: d.key || null,
+    label: d.label,
+    confidence: "N/A"
+  }));
+  renderFieldList(notFilledFieldsEl, nonFilledInit, { title: "Non-Filled", mode: "nonfilled" });
+  forceNonFilledBadges(notFilledFieldsEl);
+  
+  // counts
+  refreshAllCounts({
+    detectedCount: detected.length,
+    filledCount:   0,
+    nonFilledCount: detected.length
+  });
+
+  detectedHintEl.textContent = `${detected.length} fields found`;
+
+  return { detected};
+}
+
+// Ensure Non-Filled cards show the same layout as Filled:
+// - red "Not filled" badge next to label
+// - chip text "Confidence N/A"
+// - meter at 0%
+function ensureNotFilledBadges(container){
+  if (!container) return;
+
+  container.querySelectorAll('.field-item').forEach(card => {
+    // 1) Badge next to label
+    const labelEl = card.querySelector('.label');
+    let badge = card.querySelector('.badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge badge-red';
+      if (labelEl) labelEl.insertAdjacentElement('afterend', badge);
+      else card.insertAdjacentElement('afterbegin', badge);
+    }
+    badge.textContent = 'Not filled';
+    badge.classList.add('badge-red');
+
+    // 2) Confidence chip text
+    const chip = card.querySelector('.chip');
+    if (chip) chip.textContent = 'Confidence N/A';
+
+    // 3) Meter width → 0%
+    const meterFill =
+      card.querySelector('.meter > span') ||
+      card.querySelector('.meter .bar') ||
+      card.querySelector('.meter .fill');
+    if (meterFill) meterFill.style.width = '0%';
+  });
+}
+
+  function splitBucketsByReport(detected, report) {
+    const filled = Array.isArray(report?.filled) ? report.filled.map(f => ({
+      key: f.key || null,
+      label: f.label || "(Unknown)",
+      confidence: (f.confidence ?? "—"),
+      value: f.value
+    })) : [];
+    const filledKeys = new Set(filled.map(f => f.key || f.label));
+    const nonFilled = detected.filter(d => !filledKeys.has(d.key || d.label));
+    return { filled, nonFilled };
+  }
+
+  function renderBuckets(detected, reportOrNull) {
+    if (!reportOrNull) {
+      renderFieldList(filledFieldsEl, [], { title: "Filled", mode: "filled" });
+      const nonFilledInit = detected.map(d => ({ key: d.key || null, label: d.label, confidence: "N/A" }));
+      renderFieldList(notFilledFieldsEl, nonFilledInit, { title: "Non-Filled", mode: "nonfilled" });
+      forceNonFilledBadges(notFilledFieldsEl);
+      refreshAllCounts({ detectedCount: detected.length, filledCount: 0, nonFilledCount: detected.length });
+      return;
+    }
+  
+    // Merge confidences we may have for nonfilled
+    const confMap = new Map();
+    if (Array.isArray(reportOrNull.notFilled)) {
+      for (const nf of reportOrNull.notFilled) {
+        const k = nf?.key || nf?.label;
+        if (k != null && "confidence" in nf) confMap.set(k, nf.confidence);
+      }
+    }
+  
+    const rawFilled = Array.isArray(reportOrNull.filled) ? reportOrNull.filled.map(f => ({
+      key: f.key || null,
+      label: f.label || "(Unknown)",
+      confidence: (parseConfidence(f.confidence) ?? "N/A"), // preserve numeric if present
+      value: f.value,
+      inputType: f.inputType,
+      type: f.type,
+      kind: f.kind,
+      status: f.status,
+      changed: f.changed,
+      didSet: f.didSet
+    })) : [];    
+  
+    const filled = rawFilled.filter(isTrulyFilled);
+    const movedBack = rawFilled.filter(f => !isTrulyFilled(f)).map(f => ({
+      key: f.key || null,
+      label: f.label || "(Unknown)",
+      confidence: (parseConfidence(f.confidence) ?? "N/A")
+    }));    
+  
+    const filledKeys = new Set(filled.map(f => f.key || f.label));
+    const nonFilled = detected
+      .filter(d => !filledKeys.has(d.key || d.label))
+      .map(d => {
+        const c = confMap.get(d.key || d.label);
+        return {
+          key: d.key || null,
+          label: d.label,
+          confidence: (parseConfidence(c) ?? "N/A")
+        };
+      })      
+      .concat(movedBack);
+  
+    renderFieldList(filledFieldsEl, filled,     { title: "Filled",     mode: "filled" });
+    renderFieldList(notFilledFieldsEl, nonFilled, { title: "Non-Filled", mode: "nonfilled" });
+    forceNonFilledBadges(notFilledFieldsEl);
+    
+    refreshAllCounts({    
+      detectedCount: detected.length,
+      filledCount:   filled.length,
+      nonFilledCount: nonFilled.length
+    });
+  }  
+
+  // ---------- toggles (click only; no persist, no auto-open) ----------
+  function wireToggles() {
+    const makeToggle = (hdrEl, panelEl) => {
+      hdrEl.addEventListener("click", () => {
+        const open = panelEl.style.display !== "none";
+        panelEl.style.display = open ? "none" : "block";
+        const base  = hdrEl.dataset.base  || hdrEl.textContent.replace(/^[▶▼]\s*/, "");
+        const count = hdrEl.dataset.count || "";
+        hdrEl.textContent = `${open ? "▶" : "▼"} ${base}${count ? ` (${count})` : ""}`;
+      });
+    };
+    makeToggle(detectedToggle,  detectedFieldsEl);
+    makeToggle(filledToggle,    filledFieldsEl);
+    makeToggle(notFilledToggle, notFilledFieldsEl);
+  }
+  wireToggles();
+
+  // ---------- INIT (fresh every open; no cache restore) ----------
+  const { detected } = await detectAndSeed();
+  statusEl.textContent = "Ready…";
+  btnTryAgain.style.display = "none";
+
+  // ---------- fill button ----------
+  btnFill?.addEventListener("click", async () => {
+    const tab = await getActiveTab();
+    if (!tab?.id) return;
+    statusEl.textContent = "Filling…";
+  
+    const r = await ask(tab.id, { action: "fillFormSmart" });
+  
+    if (!r?.ok) {
+      statusEl.textContent = r?.error ? `❌ Fill failed — ${r.error}` : "❌ Fill failed.";
+      return;
+    }
+  
+    // 🚫 No form found → do nothing else
+    const inputs = Number(r.inputs || 0);
+    if (!inputs) {
+      statusEl.textContent = "❌ No form detected on this page.";
+      btnTryAgain.style.display = "none";
+      return;
+    }
+  
+    // Proceed as usual
+    renderBuckets(detected, r);
+    const summary = `🪄 Form already filled`;
+  
+    btnTryAgain.style.display = "inline-block";
+    statusEl.textContent = summary + " — Run again?";
+  });  
+
+  btnTryAgain?.addEventListener("click", async () => { btnFill?.click(); });
+})();
+
 
 /* ===================== UI HANDLES (Matcher) ===================== */
 const elsM = { arc:null, scoreNum:null, hint:null, status:null };
@@ -187,13 +504,26 @@ function extractImportance(jdText) {
 
   // Canonical skill collector
   function sffCollectSkills(text) {
-    const toks = (String(text || "").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || [])
-      .map(sffNormSkillToken);
+    const T = String(text || "").toLowerCase();
+  
+    // Token hits → canonical
+    const toks = (T.match(/[a-z][a-z0-9+./-]{1,}/g) || []).map(sffNormSkillToken);
     const out = new Set();
     for (const tk of toks) if (tk && SKILL_WORDS.has(tk)) out.add(tk);
+  
+    // Phrase hits → add canonical tokens
+    if (/\bunit[\s-]?testing\b/.test(T)) out.add("unit_testing");
+    if (/\bdata[\s-]?model(ing|s)\b/.test(T)) out.add("data_modeling");
+  
+    // Common AWS subservices explicitly
+    if (/\bamazon s3\b|\bs3\b/.test(T)) out.add("s3");
+    if (/\biam\b/.test(T)) out.add("iam");
+    if (/\beks\b/.test(T)) out.add("eks");
+    if (/\becs\b/.test(T)) out.add("ecs");
+  
     return out;
-  }
-
+  }  
+  
   // 1) All skills anywhere → base Required candidates
   const allSkills = sffCollectSkills(jd);
 
@@ -251,6 +581,63 @@ function normalizeMatchResponse(res, jdText){
   return { scorePct, missingClean };
 }
 
+function extractImportanceFromSections(jdText) {
+  const jd = String(jdText || "");
+  const lines = jd.split(/\r?\n/);
+
+  // Headings + synonyms
+  const REQ_HDRS  = [
+    /basic qualifications/i, /minimum qualifications/i,
+    /requirements?\b/i, /required qualifications/i,
+    /must[-\s]?have/i, /required skills?\b/i, /^required\b/i
+  ];
+  const PREF_HDRS = [
+    /preferred qualifications/i, /nice[-\s]?to[-\s]?have/i,
+    /\bbonus\b/i, /\bplus\b/i, /preferred skills?\b/i, /^preferred\b/i
+  ];
+
+  let mode = null; // "req" | "pref" | null
+  const reqBuf = [];
+  const prefBuf = [];
+
+  for (const raw of lines) {
+    const line = String(raw || "").trim();
+    if (!line) continue;
+
+    // Handle inline labels on the same line, e.g.
+    // "Required skills: Python, Java. Preferred: AWS, Docker."
+    if (/(required[^:]*:)|(preferred[^:]*:)/i.test(line)) {
+      const reqMatch  = line.match(/required[^:]*:\s*([^.;]+)/i);
+      const prefMatch = line.match(/preferred[^:]*:\s*([^.;]+)/i);
+      if (reqMatch)  reqBuf.push(reqMatch[1]);
+      if (prefMatch) prefBuf.push(prefMatch[1]);
+      continue;
+    }
+
+    // Switch mode when we hit a heading
+    if (REQ_HDRS.some(rx => rx.test(line)))  { mode = "req";  continue; }
+    if (PREF_HDRS.some(rx => rx.test(line))) { mode = "pref"; continue; }
+
+    // New generic heading → stop capturing
+    if (/^\s*[A-Z][A-Za-z0-9\s]{0,40}:?\s*$/.test(line)
+        && !REQ_HDRS.concat(PREF_HDRS).some(rx => rx.test(line))) {
+      mode = null;
+      continue;
+    }
+
+    if (mode === "req")  reqBuf.push(line);
+    if (mode === "pref") prefBuf.push(line);
+  }
+
+  const reqText  = reqBuf.join("\n");
+  const prefText = prefBuf.join("\n");
+
+  const requiredKeys  = sffCollectSkills(reqText);
+  const preferredKeys = sffCollectSkills(prefText);
+
+  return { requiredKeys, preferredKeys, found: (reqText.length + prefText.length) > 0 };
+}
+
 function computeBucketsFromJDAndMissing(jdText, missingClean){
   // Canonical JD skill set
   const jdCanonSet = new Set(
@@ -259,8 +646,11 @@ function computeBucketsFromJDAndMissing(jdText, missingClean){
       .filter(t => t && SKILL_WORDS.has(t))
   );
 
-  // Get extractor buckets, then canonize them too
-  let { requiredKeys, preferredKeys } = extractImportance(jdText||"");
+  // Prefer strict section-based parsing; fallback to sentence-scoped if not found
+  let { requiredKeys, preferredKeys, found } = extractImportanceFromSections(jdText || "");
+  if (!found) {
+    ({ requiredKeys, preferredKeys } = extractImportance(jdText || ""));
+  }
 
   const reqCanon = new Set(
     Array.from(requiredKeys || [])
@@ -289,43 +679,32 @@ function computeBucketsFromJDAndMissing(jdText, missingClean){
   return { matchedReq, matchedPref, missReq, missPref };
 }
 
-/* ================= DISPLAY SCORE (uses the same buckets the UI shows) =================
-   Rules:
-   - If ANY required missing: score = 90 * (matchedReq / (matchedReq + missReq))  -> 0..90
-   - If NO required missing:
-       - If there are preferred:
-           - If ALL preferred matched -> 100
-           - Else (some preferred missing) -> 90
-       - If no preferred present in JD -> 90
-*/
-function computeDisplayScore({ apiBasePct, jdText, missing }) {
-  // 'missing' here is the normalized list we already built (e.g., missingUnion).
-  // Build the same buckets the UI uses so math matches what user sees.
-  const buckets = computeBucketsFromJDAndMissing(jdText || "", missing || []);
+// ================= DISPLAY SCORE (uses the same buckets the UI shows) =================
+function computeDisplayScore({ jdText, missing }) {
+  const buckets = computeBucketsFromJDAndMissing(jdText || "", (missing || []));
 
-  const reqMatched = (buckets.matchedReq || []).length;
-  const reqMissing = (buckets.missReq    || []).length;
+  const reqMatched  = (buckets.matchedReq  || []).length;
+  const reqMissing  = (buckets.missReq     || []).length;
   const prefMatched = (buckets.matchedPref || []).length;
   const prefMissing = (buckets.missPref    || []).length;
 
   const reqTotal  = reqMatched + reqMissing;
   const prefTotal = prefMatched + prefMissing;
 
-  // Case A: some Required missing → 0..90 proportional to coverage
-  if (reqMissing > 0 && reqTotal > 0) {
-    const coverage = reqMatched / reqTotal;      // 0..1
-    const score = 90 * coverage;                 // 0..90
-    return Number(score.toFixed(2));
+  if (reqTotal <= 0) return 0; // nothing to score
+
+  const reqFrac = reqMatched / reqTotal;
+
+  // If no preferred in JD → full 100 goes to requirements
+  if (prefTotal === 0) {
+    return Math.round(100 * reqFrac);
   }
 
-  // Case B: all Required met
-  if (prefTotal > 0) {
-    // If ALL preferred matched → 100, else → 90
-    return (prefMissing === 0) ? 100 : 90;
-  }
+  const prefFrac = prefMatched / prefTotal;
 
-  // Case C: no Preferred listed in JD; cap is 90 when all Required met
-  return 90;
+  // 90/10 split
+  const score = (90 * reqFrac) + (10 * prefFrac);
+  return Math.round(score);
 }
 
 /* ===================== API CALLS ===================== */
@@ -460,6 +839,21 @@ function fmtDateTime(ts) {
     return "unknown date";
   }
 }
+
+// helpers to set month/year pairs
+function setMonthYearPair(label, monthStr, yearStr, root=document) {
+  const monthEl = [...root.querySelectorAll('select, input')].find(e => /start\s*month/i.test(getLabelText(e)));
+  const yearEl  = [...root.querySelectorAll('select, input')].find(e => /start\s*year/i.test(getLabelText(e)));
+  if (monthEl && monthStr) setSelectValueSmart(monthEl, monthStr);      // accepts 2, 02, Feb, February
+  if (yearEl  && yearStr)  setSelectValueSmart(yearEl,  yearStr);
+}
+function setEndMonthYearPair(monthStr, yearStr, root=document) {
+  const monthEl = [...root.querySelectorAll('select, input')].find(e => /end\s*month/i.test(getLabelText(e)));
+  const yearEl  = [...root.querySelectorAll('select, input')].find(e => /end\s*year/i.test(getLabelText(e)));
+  if (monthEl && monthStr) setSelectValueSmart(monthEl, monthStr);
+  if (yearEl  && yearStr)  setSelectValueSmart(yearEl,  yearStr);
+}
+
 
 /* ============= INLINE RESUME PICKER IN FILLER CARD (always visible) ============= */
 function ensureInlineResumePicker(resumes){
@@ -716,142 +1110,204 @@ function installToggle(headerEl, contentEl, initiallyOpen, onChange){
 
 // Confidence helpers
 const CONF_THRESH={ good:0.8, ok:0.5 };
-const fmtPct = (x)=> (typeof x==="number"? Math.round(x*100) : null);
+function parseConfidence(c){
+  // Returns a 0..1 number or null
+  if (c == null || c === "N/A") return null;
+  if (typeof c === "number") return c;                 // assume 0..1 or 0..100? handled below
+  const s = String(c).trim();
+  if (s.endsWith("%")) {                               // "14%" -> 0.14
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? (n/100) : null;
+  }
+  const n = parseFloat(s);                              // "0.14" or "14"
+  if (!Number.isFinite(n)) return null;
+  return n > 1 ? (n/100) : n;                           // 14 -> 0.14 ; 0.14 -> 0.14
+}
+function fmtPct(x){
+  const n = parseConfidence(x);
+  return n == null ? null : Math.round(n * 100);        // -> integer percent or null
+}
 function confClass(conf){ if(conf==null||conf==="N/A") return "na"; if(conf>=CONF_THRESH.good) return "good"; if(conf>=CONF_THRESH.ok) return "ok"; return "low"; }
 
-// Render field cards
-function renderFieldList(container, items, { title="", showSummary=true } = {}){
-  container.innerHTML="";
-  if(showSummary){
-    const n=items?.length||0;
-    let avg=null,count=0;
-    (items||[]).forEach(it=>{ if(typeof it.confidence==="number"){ avg=(avg||0)+it.confidence; count++; } });
-    if(count>0) avg=Math.round((avg/count)*100);
-    const summary=document.createElement("div");
-    summary.className="list-summary";
-    summary.innerHTML=`<div>${title}</div><div>${n} item${n!==1?"s":""}${avg!=null?` · avg ${avg}%`:""}</div>`;
+// --- helper: only count items that were actually set/checked as "filled"
+function isTrulyFilled(f) {
+  if (!f) return false;
+
+  const hasExplicitFillFlag =
+    f.status === "filled" || f.changed === true || f.didSet === true;
+
+  const val = (f.value == null) ? "" : String(f.value).trim();
+  const hasMeaningfulValue = !!val && val.toLowerCase() !== "unchecked";
+
+  const t = (f.inputType || f.type || f.kind || "").toLowerCase();
+  const isCheckboxLike = /checkbox|radio/.test(t) || f.kind === "checkbox";
+
+  // checkboxes/radios must have been toggled; text-like fields can pass with a value
+  return isCheckboxLike ? hasExplicitFillFlag : (hasExplicitFillFlag || hasMeaningfulValue);
+}
+
+// Render field cards (shared by Filled + Non-Filled)
+function renderFieldList(container, items, { title = "", showSummary = true, mode } = {}) {
+  container.innerHTML = "";
+
+  // Summary row with average (numbers only)
+  if (showSummary) {
+    const n = items?.length || 0;
+    let avg = null, count = 0;
+    (items || []).forEach(it => {
+      if (typeof it.confidence === "number") { avg = (avg || 0) + it.confidence; count++; }
+    });
+    if (count > 0) avg = Math.round((avg / count) * 100);
+    const summary = document.createElement("div");
+    summary.className = "list-summary";
+    summary.innerHTML = `<div>${title}</div><div>${n} item${n!==1?"s":""}${avg!=null ? ` · avg ${avg}%` : ""}</div>`;
     container.appendChild(summary);
   }
+
   (items||[]).forEach((f)=>{
-    const confPct=f.confidence==="N/A"? null : fmtPct(f.confidence);
-    const cls=confClass(f.confidence);
-    const isFilled = confPct!=null && confPct>0;
+    const confNorm = parseConfidence(f.confidence);               // 0..1 or null
+    const confPct  = fmtPct(f.confidence);                        // 0..100 int or null
+    const cls      = confClass(confNorm != null ? confNorm : "N/A");
+    const isFilled = confPct != null && confPct > 0;              // renderer-only; we will override the badge for Non-Filled
+
     const card=document.createElement("div"); card.className="field-item";
     const label=document.createElement("div"); label.className="label"; label.textContent=f.label;
-    const badge=document.createElement("span"); badge.className="badge"+(isFilled?"":" na"); badge.textContent=isFilled?"Filled":"N/A"; label.appendChild(badge);
-    const chipEl=document.createElement("div"); chipEl.className="chip"; chipEl.textContent=confPct!=null?`Confidence ${confPct}%`:"Confidence N/A";
-    const meter=document.createElement("div"); meter.className="meter"; const bar=document.createElement("span"); bar.className=cls; bar.style.width=(confPct!=null?confPct:0)+"%"; meter.appendChild(bar);
-    card.appendChild(label); card.appendChild(chipEl); card.appendChild(meter);
-    if(f.value){ const val=document.createElement("div"); val.className="value"; val.textContent=String(f.value); card.appendChild(val); }
+
+    const badge=document.createElement("span"); 
+    badge.className = "badge" + (isFilled ? "" : " na");
+    badge.textContent = isFilled ? "Filled" : "N/A";               // for Non-Filled we’ll fix this text after render
+    label.appendChild(badge);
+
+    const chipEl=document.createElement("div"); 
+    chipEl.className="chip"; 
+    chipEl.textContent = confPct != null ? `Confidence ${confPct}%` : "Confidence N/A";
+
+    const meter=document.createElement("div"); 
+    meter.className="meter"; 
+    const bar=document.createElement("span"); 
+    bar.className=cls; 
+    bar.style.width = (confPct != null ? confPct : 0) + "%";       // keep real % if present
+    meter.appendChild(bar);
+
+    card.appendChild(label); 
+    card.appendChild(chipEl); 
+    card.appendChild(meter);
+
+    if(f.value){ 
+      const val=document.createElement("div"); 
+      val.className="value"; 
+      val.textContent=String(f.value); 
+      card.appendChild(val); 
+    }
     container.appendChild(card);
   });
 }
 
-function renderDetected(arr){
-  if (!detectedList) return;
+function forceNonFilledBadges(container){
+  if (!container) return;
+  container.querySelectorAll('.field-item .label .badge').forEach(badge=>{
+    badge.textContent = 'Not filled';
+    badge.classList.add('na');
+    badge.classList.remove('good','ok','low');
+  });
+}
+
+function renderDetected(container, arr){
+  if (!container) return;
   if (!Array.isArray(arr) || arr.length === 0) {
-    detectedList.innerHTML = `<div class="muted">None.</div>`;
+    container.innerHTML = `<div class="muted">None.</div>`;
     return;
   }
-  detectedList.innerHTML = arr.map(it => {
-    const k = it.key || it.name || "";
-    const label = it.label || k;
-    return `<div class="row">
-      <div><strong>${label}</strong><span class="muted"> (${k})</span></div>
-    </div>`;
+  container.innerHTML = arr.map(it => {
+    const label = (it.label || it.key || "(unknown)").trim();
+    // Same card shell as others, but label only (no chip/meter for Detected)
+    return `
+      <div class="field-item">
+        <div class="label">${label}</div>
+      </div>
+    `;
   }).join("");
 }
 
-
 async function preloadAndRestore(){
   const tab = await getActiveTab();
-  if(!tab){ setStatus("❌ No active tab."); return; }
-  const url = tab.url||"";
+  if (!tab) { setStatus("❌ No active tab."); return; }
 
-  // Resume picker as-is
+  // Keep inline resume picker available
   const resumes = await loadAllResumesFromBackend();
   ensureInlineResumePicker(resumes);
 
-  // Toggles
-  let filledOpen=false, notFilledOpen=false;
-  const { last, toggles } = await loadState(url);
-  if(toggles){ filledOpen=!!toggles.filledOpen; notFilledOpen=!!toggles.notFilledOpen; }
-  installToggle(filledToggle, filledBox, filledOpen, (open)=>{ saveToggles(url,{filledOpen:open, notFilledOpen}).catch(()=>{}); });
-  installToggle(notFilledToggle, notFilledBox, notFilledOpen, (open)=>{ saveToggles(url,{filledOpen, notFilledOpen:open}).catch(()=>{}); });
-  // NEW: detected toggle
-  if (detectedToggle && detectedBox) installToggle(detectedToggle, detectedBox, false);
-  // keep header arrow and count synced when toggling
-  if (detectedToggle) {
-    detectedToggle.addEventListener("click", () => {
-      const txt = detectedToggle.textContent.replace(/^[▶▼]\s*/, "");
-      const isOpen = detectedBox && detectedBox.style.display !== "none";
-      detectedToggle.textContent = `${isOpen ? "▼ " : "▶ "}${txt}`;
-    });
-  }
+  // Always fresh on popup open (BucketUI handles detection + seeding)
+  setStatus("Ready.");
+  const tryBtn = document.getElementById("tryAgain");
+  if (tryBtn) tryBtn.style.display = "none";
 
-  // If we have a last run, render it; else keep the hint
-  if(last){
-    const when = new Date(last.ts).toLocaleString();
-    renderFieldList(filledBox, last.filled||[], { title:"Filled" });
-    renderFieldList(notFilledBox, last.nonFilled||[], { title:"Non-Filled" });
-    setStatus(last.status? `${last.status} (last: ${when})` : `Last run: ${when}`);
-  }else{
-    filledBox.innerHTML    = `<div class="muted">Fill Form to populate.</div>`;
-    notFilledBox.innerHTML = `<div class="muted">Fill Form to populate.</div>`;    
-    setStatus("Ready.");
-  }
-
-  // Detect actual fields on the page (no filling)
-  if(isSupportedUrl(url) && await ensureContent(tab.id)){
-    const frameId = await getBestFrame(tab.id);
-    const resp = await sendToFrame(tab.id, frameId, { action:"EXT_DETECT_FIELDS" });
-    if (!resp) {
-      if (detectedHint) detectedHint.textContent = "Could not reach page.";
-    } else if (resp.ok) {
-      // after we receive resp from EXT_DETECT_FIELDS
-      const n = resp.detected?.length || 0;
-      if (detectedToggle) {
-        const base = "Detected Fields";
-        const isOpen = detectedBox && detectedBox.style.display !== "none";
-        detectedToggle.textContent = `${isOpen ? "▼" : "▶"} ${base} — ${n}`;
-      }
-      detectedList.innerHTML = (resp.detected || [])
-        .map(({key,label}) => `<div class="row"><div><strong>${label||key}</strong><span class="muted"> (${key})</span></div></div>`)
-        .join("") || `<div class="muted">None.</div>`;
-
-      if (resp.inputs === 0 || n === 0) {
-        if (detectedHint) detectedHint.textContent = "No fields detected.";
-        renderDetected([]);
-      } else {
-        if (detectedHint) detectedHint.textContent = ""; // no body hint; header shows count
-        renderDetected(resp.detected || []);
-      }
-    } else {
-      if (detectedHint) detectedHint.textContent = "Detection failed (see console).";
-    }
-  } else {
-    if (detectedHint) detectedHint.textContent = "No access to this page.";
-  }
+  // IMPORTANT: Do NOT touch Detected/Filled/Non-Filled lists or their headers here.
+  // BucketUI (the IIFE at the top) handles detection, seeding, and counts.
 }
 
 function renderResultsAndRemember(url, resp, statusText){
-  const filled = Array.isArray(resp.filled)? resp.filled.slice() : [];
-  const nonFilled = Array.isArray(resp.notFilled)
-    ? resp.notFilled.map(({key,label})=>({key,label,confidence:"N/A"}))
-    : [];
+  const rawFilled   = Array.isArray(resp.filled) ? resp.filled.slice() : [];
+  const trulyFilled = rawFilled.filter(isTrulyFilled);
+  
+  // Move-back items: keep their confidence (parse if string)
+  const movedBack = rawFilled
+    .filter(f => !isTrulyFilled(f))
+    .map(f => ({
+      key:   f.key || null,
+      label: f.label || "(Unknown)",
+      confidence: parseConfidence(f.confidence) ?? "N/A"   // preserve numeric if present
+    }));
+  
+  const nonFilledBase = Array.isArray(resp.notFilled)
+    ? resp.notFilled.map(({key,label,confidence}) => ({
+        key, label,
+        confidence: parseConfidence(confidence) ?? "N/A"    // preserve numeric if present
+      }))
+    : [];  
 
-  filled.sort((a,b)=>(Number(a.confidence)||0)-(Number(b.confidence)||0));
-  renderFieldList(filledBox, filled, { title:"Filled" });
-  renderFieldList(notFilledBox, nonFilled, { title:"Non-Filled" });
+  const nonFilled = nonFilledBase.concat(movedBack);
+
+  // Render
+  trulyFilled.sort((a,b)=>(Number(a.confidence)||0)-(Number(b.confidence)||0));
+  renderFieldList(filledBox,    trulyFilled, { title:"Filled",     mode:"filled"    });
+  renderFieldList(notFilledBox, nonFilled,   { title:"Non-Filled", mode:"nonfilled" });
+  forceNonFilledBadges(notFilledBox);
   setStatus(statusText);
 
+  // Update headers (counts)
   try{
-    const low = (Array.isArray(filled)? filled.filter(f=> typeof f.confidence==="number" && f.confidence<0.5).length : 0);
-    const summary = { timestamp:Date.now(), filledCount:filled.length||0, totalDetected:(resp?.inputs??0), lowConfidence:low };
-    chrome.storage.local.set({ fillerRun: summary });
+    const detectedCount =
+      (Array.isArray(window.SFF_DETECTED) && window.SFF_DETECTED.length) ||
+      (detectedList?.children?.length || 0) ||
+      Number(resp?.inputs) ||
+      (trulyFilled.length + nonFilled.length);
+
+    if (detectedToggle && detectedBox) {
+      const open = detectedBox.style.display !== "none";
+      detectedToggle.dataset.base = "Detected Fields";
+      detectedToggle.dataset.count = String(detectedCount);
+      detectedToggle.textContent = `${open ? "▼" : "▶"} Detected Fields (${detectedCount})`;
+    }
+    if (filledToggle && filledBox) {
+      const openF = filledBox.style.display !== "none";
+      filledToggle.dataset.base = "Filled Fields";
+      filledToggle.dataset.count = String(trulyFilled.length);
+      filledToggle.textContent = `${openF ? "▼" : "▶"} Filled Fields (${trulyFilled.length})`;
+    }
+    if (notFilledToggle && notFilledBox) {
+      const openNF = notFilledBox.style.display !== "none";
+      notFilledToggle.dataset.base = "Non-Filled Fields";
+      notFilledToggle.dataset.count = String(nonFilled.length);
+      notFilledToggle.textContent = `${openNF ? "▼" : "▶"} Non-Filled Fields (${nonFilled.length})`;
+    }
   }catch{}
 
-  saveLast(url, { ts:Date.now(), status:statusText, filled, nonFilled }).catch(()=>{});
+  try{
+    const low = trulyFilled.filter(f => typeof f.confidence==="number" && f.confidence<0.5).length;
+    const summary = { timestamp:Date.now(), filledCount:trulyFilled.length||0, totalDetected:(resp?.inputs??0), lowConfidence:low };
+    chrome.storage.local.set({ fillerRun: summary });
+  }catch{}
 }
 
 async function runFill(){
@@ -888,13 +1344,20 @@ async function runFill(){
 
 /* ===================== INIT ===================== */
 document.addEventListener("DOMContentLoaded", async () => {
+  initTabs();
   try { await preloadAndRestore(); } catch(e){ err(e); }
   autoMatch(); // run matcher immediately
 });
 
 // Buttons
-document.getElementById("fillForm")?.addEventListener("click", runFill);
-document.getElementById("tryAgain")?.addEventListener("click", runFill);
+document.getElementById("fillForm")?.addEventListener("click", async () => {
+  try { await fillUsingPredictPipeline({ silent: true }); }
+  catch (e) { setStatus("❌ " + (e.message || e)); }
+});
+document.getElementById("tryAgain")?.addEventListener("click", async () => {
+  try { await fillUsingPredictPipeline({ silent: true }); }
+  catch (e) { setStatus("❌ " + (e.message || e)); }
+});
 document.getElementById("manageProfileBtn")?.addEventListener("click", () => {
   // open the profile editor page
   const url = chrome.runtime.getURL("profile.html");
@@ -908,6 +1371,20 @@ document.getElementById("uploadResumeCTA")?.addEventListener("click", () => {
   if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
   else window.open(chrome.runtime.getURL("resumes.html"));
 });
+
+/* ========== Unified Debug Output helpers (one-box) ========== */
+function _dbgBox(){ return document.getElementById("debugOutput"); }
+function _esc(s){ return String(s ?? "").replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+function _kv(pairs){
+  return `<div class="kv">${
+    pairs.map(([k,v])=>`<div class="key">${_esc(k)}</div><div class="val">${v}</div>`).join("")
+  }</div>`;
+}
+function showDebug(title, html){
+  const box = _dbgBox();
+  if (!box) return;
+  box.innerHTML = `<h4>${_esc(title)}</h4>${html || ""}`;
+}
 
 // ====== STEP 1 DETECTOR UI (popup.js) ======
 function popupLog(...a){ console.log("[popup][detect]", ...a); }
@@ -923,68 +1400,123 @@ async function sendToFrameSimple(tabId, action){
   return await chrome.tabs.sendMessage(tabId, { action });
 }
 
-
-function renderDetected(list){
+// Debug-only renderer (renamed to avoid shadowing main)
+function renderDetectedDebug(list, withPred = false) {
   const sel = document.getElementById("detectedSelect");
   const det = document.getElementById("detectedDetails");
   const count = document.getElementById("detectCount");
+  if (!sel || !det || !count) return;
+
   sel.innerHTML = "";
   det.textContent = "";
 
   (list || []).forEach((d, i) => {
+    // robust fallbacks for label/how
+    const label = d.label || d.labelText || d.placeholder || d.name || d.id || "(no label)";
+    const how   = d.detectedBy || "derived";
+    const suffix = (withPred && d.prediction)
+      ? ` → ${d.prediction} (${(d.confidence ?? 0).toFixed(3)})`
+      : "";
     const opt = document.createElement("option");
-    const label = d.labelText || "(no label)";
     opt.value = String(i);
-    opt.textContent = `${label}  —  [${d.detectedBy}]`;
+    opt.textContent = `${label}  —  [${how}]${suffix}`;
     sel.appendChild(opt);
   });
 
-  count.textContent = `${list.length} detected`;
+  count.textContent = `${(list || []).length} detected`;
 
   sel.onchange = () => {
     const idx = Number(sel.value);
-    const d = list[idx];
+    const d = (list || [])[idx];
     if (!d) { det.textContent = ""; return; }
-    det.textContent = JSON.stringify(d, null, 2);
+    const details = {
+      labelText: d.label || d.labelText || d.placeholder || d.name || d.id || null,
+      detectedBy: d.detectedBy,
+      tagName: d.tagName,
+      inputType: d.inputType,
+      id: d.id,
+      name: d.name,
+      placeholder: d.placeholder,
+      selector: d.selector,
+      prediction: d.prediction ?? null,
+      confidence: d.confidence ?? null
+    };
+    det.textContent = JSON.stringify(details, null, 2);
   };
 
-  // autoselect first item to show details immediately
-  if (list.length) {
+  if ((list || []).length) {
     sel.selectedIndex = 0;
     sel.onchange();
   }
 }
 
-async function runDetector(){
+// Debug-only detector (renamed to avoid shadowing main)
+async function runDetectorDebug() {
   const tab = await getActiveTab();
   if (!tab) throw new Error("No active tab");
-  // Light probe
-  const probe = await chrome.tabs.sendMessage(tab.id, { action: "probe" }).catch(()=>null);
+
+  const probe = await chrome.tabs.sendMessage(tab.id, { action: "probe" }).catch(() => null);
   if (!probe || !probe.ok) throw new Error("Content script not reachable. Make sure helpers/content are injected.");
 
-  // Detect
-  const resp = await sendToFrameSimple(tab.id, "EXT_DETECT_FIELDS").catch(()=>null);
-  if (!resp || !resp.ok) throw new Error("Detector failed in content script");
-  if (!Array.isArray(resp.detected)) throw new Error("Detector returned unexpected shape");
+  const resp = await chrome.tabs.sendMessage(tab.id, { action: "EXT_DETECT_FIELDS" }).catch(() => null);
+  if (!resp || !resp.ok || !Array.isArray(resp.detected)) throw new Error("Detector failed in content script");
 
-  renderDetected(resp.detected);
-  popupLog("Detected", resp.detected.length, "fields", resp.detected);
-  return resp.detected;
+  SFF_DETECTED = resp.detected.slice(); // cache
+  renderDetectedDebug(SFF_DETECTED);
+  console.log("[popup][predict] Detected", SFF_DETECTED.length, "fields");
+  return SFF_DETECTED;
 }
 
-// Bootstrap the button
+// DEBUG: Detect → populate select + details + detectCount
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("btnDetect");
-  if (btn) {
-    btn.addEventListener("click", async () => {
-      try {
-        await runDetector();
-      } catch (e) {
-        popupErr(e);
-        const det = document.getElementById("detectedDetails");
-        if (det) det.textContent = `Error: ${e.message || e}`;
-      }
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    try {
+      await runDetectorDebug(); // this renders into #detectedSelect/#detectedDetails and updates #detectCount
+    } catch (e) {
+      const det = document.getElementById("detectedDetails");
+      if (det) det.textContent = `Error: ${e.message || e}`;
+    }
+  });
+});
+
+
+// DEBUG: Predict → annotate options with predictions and update #predictCount
+document.getElementById("btnPredict")?.addEventListener("click", async () => {
+  try {
+    if (!SFF_DETECTED?.length) await runDetectorDebug();
+    await predictForDetected(); // updates #predictCount and augments the select text with predictions
+  } catch (e) {
+    const det = document.getElementById("detectedDetails");
+    if (det) det.textContent = `Prediction Error: ${e.message || e}`;
+  }
+});
+
+// DEBUG: Fill (original outputs) → uses background fillDetected and prints summary/report
+document.getElementById("btnFill")?.addEventListener("click", async () => {
+  try {
+    if (!SFF_DETECTED?.length) await runDetectorDebug();
+    if (!SFF_DETECTED[0]?.prediction) await predictForDetected();
+
+    const profile = await getProfileFromBackend();
+    const { lastResumeId } = await chrome.storage.local.get("lastResumeId");
+
+    const resp = await new Promise(res => {
+      chrome.runtime.sendMessage(
+        { action:"fillDetected", items:SFF_DETECTED, profile, resumeId: lastResumeId || null },
+        r => res(r)
+      );
     });
+    if (!resp?.success) throw new Error(resp?.error || "Fill failed");
+    // Render into #fillSummary and #fillReport (already defined in file)
+    renderFillReport(resp.report || []);
+  } catch (e) {
+    const pre = document.getElementById("fillReport");
+    const sum = document.getElementById("fillSummary");
+    if (sum) sum.textContent = "fill failed";
+    if (pre) pre.textContent = String(e);
+    console.error("[popup][fill] error:", e);
   }
 });
 
@@ -1004,14 +1536,14 @@ async function runDetector(){
   if (!resp || !resp.ok || !Array.isArray(resp.detected)) throw new Error("Detector failed in content script");
 
   SFF_DETECTED = resp.detected.slice(); // cache
-  renderDetected(SFF_DETECTED);
+  renderDetectedDebug(SFF_DETECTED);    // ← use the debug renderer  
   console.log("[popup][predict] Detected", SFF_DETECTED.length, "fields");
   return SFF_DETECTED;
 }
 
 // Call background → /predict
 async function predictForDetected(){
-  const labels = SFF_DETECTED.map(d => (d.labelText || "").trim());
+  const labels = SFF_DETECTED.map(d => (d.labelText || d.label || "").toString().trim());
   const resp = await new Promise((resolve) => {
     chrome.runtime.sendMessage({ action: "predictLabels", labels }, (r) => resolve(r));
   });
@@ -1026,57 +1558,69 @@ async function predictForDetected(){
     d.confidence = typeof r.confidence === "number" ? r.confidence : null;
   });
 
-  renderDetected(SFF_DETECTED, /*withPred*/ true);
+  renderDetectedDebug(SFF_DETECTED, /*withPred*/ true);
   const pc = document.getElementById("predictCount");
   if (pc) pc.textContent = `${results.filter(r => r && r.prediction).length}/${results.length} predicted`;
   console.log("[popup][predict] Predictions", results);
   return SFF_DETECTED;
 }
 
-// Enhanced renderer: show prediction when present
-function renderDetected(list, withPred=false){
-  const sel = document.getElementById("detectedSelect");
-  const det = document.getElementById("detectedDetails");
-  const count = document.getElementById("detectCount");
-  sel.innerHTML = "";
-  det.textContent = "";
+// Unified filler used by both tabs.
+// silent=true  → updates status + the Filled / Non-Filled lists only
+// silent=false → also prints the detailed debug report
+async function fillUsingPredictPipeline({ silent = true } = {}) {
+  // detect + predict if not done
+  if (!SFF_DETECTED?.length) await runDetectorDebug();
+  if (!SFF_DETECTED[0]?.prediction) await predictForDetected();  
 
-  (list || []).forEach((d, i) => {
-    const opt = document.createElement("option");
-    const label = d.labelText || "(no label)";
-    const how = d.detectedBy || "unknown";
-    const suffix = (withPred && d.prediction) ? ` → ${d.prediction} (${(d.confidence ?? 0).toFixed(3)})` : "";
-    opt.value = String(i);
-    opt.textContent = `${label}  —  [${how}]${suffix}`;
-    sel.appendChild(opt);
+  const profile = await getProfileFromBackend();
+  const { lastResumeId } = await chrome.storage.local.get("lastResumeId");
+  const resp = await new Promise(res => {
+    chrome.runtime.sendMessage(
+      { action: "fillDetected", items: SFF_DETECTED, profile, resumeId: lastResumeId || null },
+      r => res(r)
+    );
   });
+  if (!resp?.success) throw new Error(resp?.error || "Fill failed");
 
-  count.textContent = `${list.length} detected`;
-
-  sel.onchange = () => {
-    const idx = Number(sel.value);
-    const d = list[idx];
-    if (!d) { det.textContent = ""; return; }
-    // Include prediction in the details object for clarity
-    const details = {
-      labelText: d.labelText,
-      detectedBy: d.detectedBy,
-      tagName: d.tagName,
-      inputType: d.inputType,
-      id: d.id,
-      name: d.name,
-      placeholder: d.placeholder,
-      selector: d.selector,
-      prediction: d.prediction ?? null,
-      confidence: d.confidence ?? null
-    };
-    det.textContent = JSON.stringify(details, null, 2);
-  };
-
-  if (list.length) {
-    sel.selectedIndex = 0;
-    sel.onchange();
+  // Debug detailed report if requested
+  if (!silent) {
+    renderFillReport(resp.report || []);
   }
+
+  // Build the summary shape expected by renderResultsAndRemember()
+  const filled = (resp.report || [])
+    .filter(r => r.status === "filled")
+    .map(r => ({
+      label: r.label,
+      value: r.valuePreview || r.value || "",
+      confidence: typeof r.confidence === "number" ? r.confidence : 1
+    }));
+
+  const nonFilled = (resp.report || [])
+    .filter(r => r.status !== "filled")
+    .map(r => ({
+      key: r.prediction || r.label,
+      label: r.label,
+      confidence: parseConfidence(r.confidence) ?? "N/A"
+    }));  
+
+  const tab = await getActiveTab();
+  const url = tab?.url || "";
+  const totalInputs = (resp.inputs ?? SFF_DETECTED.length) || 0;
+
+  renderResultsAndRemember(url, { filled, notFilled: nonFilled, inputs: totalInputs, ok: true }, "✅ Form filled! You can try again.");
+
+  // Toggle Main buttons appropriately
+  const fillBtn = document.getElementById("fillForm");
+  const tryBtn = document.getElementById("tryAgain");
+  if (fillBtn && tryBtn) {
+    const hasAny = filled.length > 0;
+    fillBtn.style.display = hasAny ? "none" : "inline-block";
+    tryBtn.style.display  = hasAny ? "inline-block" : "none";
+  }
+
+  return resp;
 }
 
 async function getProfileFromBackend() {
@@ -1085,20 +1629,51 @@ async function getProfileFromBackend() {
   return resp.profile || {};
 }
 
+// Treat unchecked/empty boxes as skipped for the debug report
+function _deriveReportStatus(r){
+  const t = String(r?.inputType || r?.type || r?.kind || "").toLowerCase();
+  const isBox = /checkbox|radio/.test(t) || r?.kind === "checkbox";
+  const vraw = r?.valuePreview ?? r?.value ?? "";
+  const v = String(vraw).trim().toLowerCase();
+
+  const looksUnchecked = (v === "" || v === "unchecked" || v === "false" || v === "off" || v === "0" || v === "no");
+
+  // For boxes/radios, if we didn’t toggle them on, call it skipped.
+  if (isBox && looksUnchecked) return "skipped";
+
+  // Defensive: if backend said "filled" but value is clearly unchecked/empty, show "skipped".
+  if ((r?.status === "filled") && looksUnchecked) return "skipped";
+
+  return r?.status || "skipped";
+}
+
 function renderFillReport(report) {
   const pre = document.getElementById("fillReport");
   const sum = document.getElementById("fillSummary");
   if (!pre || !sum) return;
-  const ok = report.filter(r => r.status === "filled").length;
-  sum.textContent = `${ok} filled, ${report.length - ok} skipped`;
-  pre.textContent = report.map(r => {
-    const conf = typeof r.confidence === "number" ? ` @${r.confidence.toFixed(3)}` : "";
-    const val  = r.valuePreview ? ` = "${r.valuePreview}"` : "";
-    const why  = r.reason ? ` — ${r.reason}` : "";
-    return `• ${r.label} → ${r.prediction}${conf}${val} [${r.status}]${why}`;
-  }).join("\n");
+
+  // derive status per row so "unchecked" never counts as filled
+  const rows = (report || []).map(r => {
+    const status = _deriveReportStatus(r);
+    const conf   = (typeof r.confidence === "number") ? ` @${r.confidence.toFixed(3)}` : "";
+    const val    = (r.valuePreview != null) ? ` = "${r.valuePreview}"` : (r.value != null ? ` = "${r.value}"` : "");
+    const why    = r.reason ? ` — ${r.reason}` : "";
+    return { status, line: `• ${r.label} → ${r.prediction}${conf}${val} [${status}]${why}` };
+  });
+
+  const filledCount  = rows.filter(x => x.status === "filled").length;
+  const skippedCount = rows.length - filledCount;
+
+  sum.textContent = `${filledCount} filled, ${skippedCount} skipped`;
+  pre.textContent = rows.map(x => x.line).join("\n");
 }
 
+// popup.js — add at bottom (after function definitions)
+document.addEventListener("DOMContentLoaded", () => {
+  try { initTabs(); } catch {}
+  try { /* seeds lists + buttons */ preloadAndRestore(); } catch {}
+  try { /* runs JD detection + scoring + suggestor */ autoMatch(); } catch (e) { console.error(e); }
+});
 
 // Wire the new button
 document.addEventListener("DOMContentLoaded", () => {
@@ -1106,7 +1681,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btn) {
     btn.addEventListener("click", async () => {
       try {
-        if (!SFF_DETECTED.length) await runDetector(); // auto-detect if not done
+        if (!SFF_DETECTED.length) await runDetectorDebug();
         await predictForDetected();
       } catch (e) {
         console.error("[popup][predict] error:", e);
@@ -1122,18 +1697,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!btn) return;
   btn.addEventListener("click", async () => {
     try {
-      if (!SFF_DETECTED?.length) await runDetector();
-      if (!SFF_DETECTED[0]?.prediction) await predictForDetected();
-      const profile = await getProfileFromBackend();
-      const { lastResumeId } = await chrome.storage.local.get("lastResumeId");
-      const resp = await new Promise(res => {
-        chrome.runtime.sendMessage(
-          { action:"fillDetected", items:SFF_DETECTED, profile, resumeId: lastResumeId || null },
-          r => res(r)
-        );
-      });
+      const resp = await fillUsingPredictPipeline({ silent: false }); // also renders the debug report
       if (!resp?.success) throw new Error(resp?.error || "Fill failed");
-      renderFillReport(resp.report || []);
     } catch (e) {
       const pre = document.getElementById("fillReport");
       const sum = document.getElementById("fillSummary");

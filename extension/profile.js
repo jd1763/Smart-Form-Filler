@@ -205,6 +205,7 @@ async function load(){
     $("ethnicity").value  = data?.eligibility?.ethnicity || "";
     $("race").value           = data?.eligibility?.race || "";
     $("hispanicLatinx").value = data?.eligibility?.hispanicLatinx || "";
+    $("yearsOfExperience").value = (data?.yearsOfExperience || data?.meta?.yearsOfExperience || "");
   
     window._edu = Array.isArray(data.education) ? data.education.slice() : [];
     window._exp = Array.isArray(data.experience) ? data.experience.slice() : [];
@@ -306,6 +307,7 @@ $("save").addEventListener("click", async ()=>{
         const k = inp.getAttribute("data-k");
         g[k] = (inp.value || "").trim();
     });
+    out.yearsOfExperience = ($("yearsOfExperience").value || "").trim();
     out.experience.push(g);
     });
 

@@ -213,16 +213,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     // 1) Full profile fetch (nested JSON)
     if (msg?.action === "getProfile") {
-      try {
-        const r = await fetch(`${API_BASE}/profile`, { credentials: "include" });
-        if (!r.ok) throw new Error(`Profile HTTP ${r.status}`);
-        const data = await r.json();
-        sendResponse({ success:true, profile:data || {} });
-      } catch (e) {
-        sendResponse({ success:false, error:String(e) });
-      }
-      return;
-    }
+      (async () => {
+        try {
+          // Prefer the local packaged profile.json
+          const url = chrome.runtime.getURL("backend/data/profile.json");
+          const r = await fetch(url);
+          if (!r.ok) throw new Error(`profile.json HTTP ${r.status}`);
+          const data = await r.json();
+          sendResponse({ success: true, profile: data || {} });
+        } catch (e) {
+          // Optional: fallback to API if local read fails
+          try {
+            const r = await fetch(`${API_BASE}/profile`, { credentials: "include" });
+            if (!r.ok) throw new Error(`Profile HTTP ${r.status}`);
+            const data = await r.json();
+            sendResponse({ success:true, profile:data || {} });
+          } catch (e2) {
+            sendResponse({ success:false, error:String(e2) });
+          }
+        }
+      })();
+      return true; // async
+    }    
 
     // 2) Resume file fetch as base64 (by id)
     if (msg?.action === "getResumeFile") {
@@ -289,35 +301,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           // Optional: first education/experience
           const edu0 = Array.isArray(p.education)  && p.education[0]  ? p.education[0]  : {};
           const exp0 = Array.isArray(p.experience) && p.experience[0] ? p.experience[0] : {};
-
-          data = {
-            // core identity
-            firstName:   personal.firstName || "",
-            lastName:    personal.lastName  || "",
-            fullName:    [personal.firstName, personal.lastName].filter(Boolean).join(" "),
-            email:       personal.email     || "",
-            phoneNumber: personal.phoneNumber || "",
-            dob:         personal.dob       || "",
-            gender:      personal.gender    || "",
-
-            // address
-            street:  address.street  || "",
-            city:    address.city    || "",
-            state:   address.state   || "",
-            zip:     address.zip     || "",
-            country: address.country || "",
-
-            // links
-            linkedin: links.linkedin || "",
-            github:   links.github   || "",
-            website:  links.website  || "",
-
-            // simple employment/education fallbacks (many forms ask these)
-            company:   exp0.company   || "",
-            jobTitle:  exp0.jobTitle  || "",
-            start_date: (exp0.startMonth && exp0.startYear) ? `${String(exp0.startMonth).padStart(2,"0")}/${exp0.startYear}` : "",
-            end_date:   (exp0.endMonth   && exp0.endYear)   ? `${String(exp0.endMonth).padStart(2,"0")}/${exp0.endYear}`   : "",
-          };
 
           // cache flattened as fallback
           await chrome.storage.local.set({ userData: data });
