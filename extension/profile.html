@@ -24,7 +24,26 @@
 </head>
 <body>
     <h1>Edit My Answers</h1>
-  
+
+    <!-- Application Resume -->
+    <div class="card">
+      <div class="grid">
+        <div class="full"><strong>Application Resume</strong></div>
+
+        <div class="full">
+          <label for="profileResumeSelect">Resume used when applying</label>
+          <select id="profileResumeSelect">
+            <option value="">—</option>
+          </select>
+
+          <div class="row" style="margin-top:8px">
+            <small id="profileResumeMeta" class="muted" style="flex:1"></small>
+            <a href="resumes.html" class="btn" target="_blank" rel="noopener">Manage resumes ↗</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Personal -->
     <div class="card">
       <div class="grid">
@@ -127,6 +146,21 @@
         </div>
       </div>
     </div>
+
+    <div>
+      <label>Highest Education</label>
+      <select id="highestEducation">
+        <option value="">—</option>
+        <option>High School</option>
+        <option>Certificate</option>
+        <option>Diploma</option>
+        <option>Associate's</option>
+        <option>Bachelor's</option>
+        <option>Master's</option>
+        <option>MBA</option>
+        <option>Doctorate</option>
+      </select>
+    </div>    
   
     <!-- Education -->
     <div class="card">
@@ -251,7 +285,7 @@
         </div>
       </div>
     </div>
-  
+
     <div class="row">
       <button id="save" class="btn">Save</button>
       <span id="status" class="muted"></span>

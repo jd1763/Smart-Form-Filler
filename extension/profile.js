@@ -1,6 +1,143 @@
 const BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
+// Use a single base everywhere to avoid drift
+const API_BASE = BACKEND_BASE;
+
+// light canonicalization + whitelist (keep in sync with popup/content)
+const _ALIASES = { "c++":"cpp","c#":"csharp",".net":"dotnet","node.js":"nodejs","react.js":"react","next.js":"nextjs","express.js":"express","k8s":"kubernetes","js":"javascript","ts":"typescript" };
+const _WHITELIST = new Set([
+  "python","java","c","cpp","csharp","go","golang","rust","kotlin","swift",
+  "javascript","typescript","html","css","sql","mysql","postgres","postgresql","sqlite","oracle","mongodb","redis",
+  "react","nextjs","angular","vue","node","nodejs","express","django","flask","fastapi","spring","springboot","aspnet","dotnet","rails","laravel",
+  "pandas","numpy","scikit-learn","sklearn","tensorflow","pytorch","keras","xgboost","spark","hadoop","kafka","airflow",
+  "aws","azure","gcp","docker","kubernetes","terraform","ansible","jenkins","github","gitlab","cicd","rest","graphql","grpc","linux","bash","powershell",
+  "bigquery","snowflake","databricks","tableau","postman","jira","confluence","s3","iam","eks","ecs"
+]);
+function _normTok(s){
+  let t = String(s||"").toLowerCase().trim().replace(/(^[^a-z0-9]+|[^a-z0-9]+$)/g,"");
+  return _ALIASES[t] || t;
+}
+function _extractSkillsFromText(text){
+  const toks = (String(text||"").toLowerCase().match(/[a-z][a-z0-9+.#/-]{1,}/g) || []).map(_normTok);
+  const out = new Set();
+  for (const tk of toks) if (tk && _WHITELIST.has(tk)) out.add(tk);
+  return Array.from(out).sort();
+}
+async function _getProfile(){
+  try { const r = await fetch(`${API_BASE}/profile`); return r.ok ? await r.json() : {}; } catch { return {}; }
+}
+async function _saveProfileSelected({ id, name, skills }){
+  // merge into existing profile; NOTE: selectedResumeSkills is a plain array
+  const current = await _getProfile();
+  const payload = { ...(current||{}), selectedResumeId: String(id||""), selectedResumeName: String(name||""), selectedResumeSkills: Array.from(new Set(skills||[])).sort() };
+  try {
+    await fetch(`${API_BASE}/profile`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+  } catch (e) {
+    console.warn("[profile] POST /profile failed", e);
+  }
+  // mirror to local storage so popup/content can read instantly (optional)
+  try { await chrome.storage.local.set({ selectedResume: { id, name, skills: payload.selectedResumeSkills } }); } catch {}
+}
+async function _listResumes(){
+  try {
+    const r = await fetch(`${API_BASE}/resumes`);
+    const js = r.ok ? await r.json() : {};
+    const items = Array.isArray(js.items) ? js.items : [];
+    return items.map(it => ({ id: String(it.id), name: it.original_name || it.name || it.filename || String(it.id) }));
+  } catch (e) {
+    console.warn("[profile] GET /resumes failed:", e); return [];
+  }
+}
+// Replace the old _getResumeText with this robust, no-/resumes/:id version
+async function _getResumeText(id){
+  const safePick = (obj) => (obj?.plain_text || obj?.text || obj?.content || "");
+  const tryJson = async (url, pickFn) => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return "";
+      const js = await r.json();
+      return pickFn(js) || "";
+    } catch {
+      return "";
+    }
+  };
+
+  // 1) Try a common single-item endpoint shape
+  let text = await tryJson(`${API_BASE}/resume?id=${encodeURIComponent(id)}`, safePick);
+  if (text) return text;
+
+  // 2) Another common name
+  text = await tryJson(`${API_BASE}/resume_text?id=${encodeURIComponent(id)}`, (js)=> js?.text || js?.plain_text || js?.content || "");
+  if (text) return text;
+
+  // 3) Some backends expose POST /resume_text { id }
+  try {
+    const r = await fetch(`${API_BASE}/resume_text`, {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ id })
+    });
+    if (r.ok) {
+      const js = await r.json();
+      text = js?.text || js?.plain_text || js?.content || "";
+      if (text) return text;
+    }
+  } catch { /* ignore */ }
+
+  // 4) Fallback: GET /resumes (list) and find the matching item by id
+  const items = await tryJson(`${API_BASE}/resumes`, (js) => Array.isArray(js?.items) ? js.items : []);
+  if (Array.isArray(items) && items.length) {
+    const it = items.find(x => String(x.id) === String(id));
+    if (it) {
+      text = it.plain_text || it.text || it.content || "";
+      if (text) return text;
+    }
+  }
+
+  // Nothing worked
+  return "";
+}
+
+async function initProfileResumeDropdown(profileData = {}) {
+  const sel  = document.getElementById("profileResumeSelect");
+  const meta = document.getElementById("profileResumeMeta");
+  if (!sel) return;
+
+  const items = await _listResumes();  // /resumes
+  sel.innerHTML = `<option value="">—</option>` + items.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+
+  // Prefer what's in profile.json; if empty, use popup’s last selection
+  let savedId = profileData?.selectedResumeId ? String(profileData.selectedResumeId) : "";
+  try {
+    const { lastResumeId, selectedResume } = await chrome.storage.local.get(["lastResumeId", "selectedResume"]);
+    if (!savedId) savedId = lastResumeId || selectedResume?.id || "";
+  } catch {}
+
+  if (savedId && items.some(r => r.id === savedId)) sel.value = savedId;
+
+  const applyMeta = () => {
+    const opt = items.find(r => r.id === sel.value);
+    if (meta) meta.textContent = opt ? opt.name : "";
+  };
+  applyMeta();
+
+  // Only prepare a pending selection; actual save happens on Save button
+  sel.addEventListener("change", async () => {
+    const id = sel.value;
+    const name = sel.options[sel.selectedIndex]?.textContent || id || "";
+    if (!id) {
+      window._pendingResume = { id:"", name:"", skills:[] };
+      applyMeta();
+      return;
+    }
+    const text = await _getResumeText(id);
+    const skills = _extractSkillsFromText(text); // same extractor you already use【turn2file3†L21-L26】
+    window._pendingResume = { id, name, skills };
+    if (meta) meta.textContent = `${name} (pending — click Save)`;
+  });
+}
+
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const YEARS = (()=>{ const y=[]; const now=new Date().getFullYear()+1; for(let k=now;k>=1970;k--) y.push(k); return y; })();
 // Degree catalog used by the dropdown (value = short code)
@@ -15,7 +152,137 @@ const DEGREE_OPTIONS = [
     { short: "PhD", long: "Doctor of Philosophy",           label: "Ph.D. — Doctor of Philosophy" }
   ];
   const DEGREE_MAP = Object.fromEntries(DEGREE_OPTIONS.map(d => [d.short, d.long]));
-  
+  // Rank degrees so we can infer "highest"
+  const DEGREE_RANK = {
+    "High School": 0, "Certificate": 1, "Diploma": 1,
+    "Associate's": 2, "Bachelor's": 3, "Master's": 4, "MBA": 4, "Doctorate": 5
+  };
+
+  /* ==== Selected Resume → Skills (helpers) ==== */
+  function _normSkillToken(s){
+    let t = String(s||"").toLowerCase().trim();
+    t = t.replace(/\s+/g,"");
+    t = t
+      .replace(/^c\+\+$/,"cpp")
+      .replace(/^c#$/,"csharp")
+      .replace(/^\.net$/,"dotnet")
+      .replace(/^node\.?js$/,"nodejs")
+      .replace(/^react\.?js$/,"react")
+      .replace(/^next\.?js$/,"nextjs")
+      .replace(/^express\.?js$/,"express")
+      .replace(/^k8s$/,"kubernetes");
+    return t.replace(/[^a-z0-9]/g,"");
+  }
+  // very light extractor of "all skills" from resume text; whitelist helps avoid junk tokens
+function _extractAllSkillsFromText(text){
+  const raw = String(text||"");
+  const tokens = raw.match(/[A-Za-z][A-Za-z0-9+.#/-]{1,}/g) || [];
+  const WHITELIST = new Set([
+    // langs
+    "python","java","c","cpp","csharp","go","golang","rust","kotlin","swift",
+    "typescript","javascript","ts","js","sql","mysql","postgres","postgresql","sqlite","oracle",
+    // web
+    "html","css","react","reactjs","nextjs","angular","vue","node","nodejs","express",
+    // backends
+    "django","flask","fastapi","spring","springboot","aspnet","dotnet","rails","laravel",
+    // data/ml
+    "pandas","numpy","scikit-learn","sklearn","tensorflow","pytorch","keras","xgboost","spark","hadoop","kafka","airflow",
+    // devops/cloud
+    "aws","azure","gcp","docker","kubernetes","k8s","terraform","ansible","jenkins","github","gitlab","cicd",
+    // api/arch/tools
+    "rest","graphql","grpc","microservices","linux","bash","powershell","jira","confluence","postman","redis","mongodb","bigquery"
+  ]);
+  const out = new Set();
+  for (const tok of tokens) {
+    const n = _normSkillToken(tok);
+    if (n && WHITELIST.has(n)) out.add(n);
+  }
+  // expand common aliases to canonical forms
+  if (out.has("ts")) { out.delete("ts"); out.add("typescript"); }
+  if (out.has("js")) { out.delete("js"); out.add("javascript"); }
+  return Array.from(out).sort();
+}
+
+  function _tokenizeSkills(text){
+    const toks = (String(text||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []);
+    // a light vocab to avoid collecting random words (keep in sync with popup’s list as needed)
+    const WHITELIST = new Set([
+      "python","java","c","c++","c#","go","golang","rust","kotlin","swift",
+      "javascript","typescript","html","css","sql","mysql","postgresql","postgres","sqlite","oracle",
+      "mongodb","redis","kafka","spark","airflow","hadoop",
+      "pandas","numpy","scikit-learn","sklearn","tensorflow","pytorch","keras","xgboost",
+      "react","react.js","next.js","angular","vue","node","node.js","express","express.js",
+      "django","flask","fastapi","spring","springboot","asp.net",".net",".netcore","rails","laravel",
+      "docker","kubernetes","k8s","terraform","ansible","jenkins","github","gitlab","git","cicd","ci/cd",
+      "graphql","grpc","rest","microservices","linux","bash","powershell","jira","confluence","postman",
+      "aws","azure","gcp","s3","ec2","lambda","rds","eks","ecs","cloudformation","cdk","cloudwatch",
+      "bigquery","firebase","vercel","netlify","heroku","nginx","apache","redux","rxjs","vite","webpack"
+    ]);
+    const out = new Set();
+    for (const raw of toks){
+      const canon = _normSkillToken(raw);
+      if (!canon) continue;
+      // accept plain “ts” → “typescript” and “js” → “javascript”
+      const alias = canon === "ts" ? "typescript" : (canon === "js" ? "javascript" : canon);
+      if (WHITELIST.has(alias)) out.add(alias);
+    }
+    return Array.from(out).sort();
+  }
+
+  /* ==== Selected Resume → Skills (UI wiring) ==== */
+  const profileMatched = { required: [], preferred: [] };
+
+  function renderProfileSkillChips(){
+    const mkChip = (txt, bad=false) => {
+      const s = document.createElement("span");
+      s.className = "chip";
+      if (bad) s.classList.add("bad");
+      s.textContent = txt;
+      return s;
+    };
+    const reqBox  = document.getElementById("profileMatchedReq");
+    const prefBox = document.getElementById("profileMatchedPref");
+    if (reqBox){ reqBox.innerHTML=""; (profileMatched.required.length? profileMatched.required:["None"]).forEach(s => reqBox.appendChild(mkChip(s))); }
+    if (prefBox){ prefBox.innerHTML=""; (profileMatched.preferred.length? profileMatched.preferred:["None"]).forEach(s => prefBox.appendChild(mkChip(s))); }
+  }
+
+  document.getElementById("profileExtractSkills")?.addEventListener("click", ()=>{
+    const status = document.getElementById("profileSkillsStatus");
+    const txt = document.getElementById("profileResumeText")?.value || "";
+    const skills = _tokenizeSkills(txt);
+    // Put them in both buckets (your content script unions them)
+    profileMatched.required  = skills.slice();
+    profileMatched.preferred = skills.slice();
+    renderProfileSkillChips();
+    status.textContent = `Found ${skills.length} skills`;
+    // mirror into chrome.storage for the content-script checker
+    chrome.storage.local.set({ matchedSkills: { required: profileMatched.required, preferred: profileMatched.preferred } }, ()=>{});
+  });
+
+  // Normalize "BS", "BSc", "Bachelor of Science" → "Bachelor's", etc.
+  function normalizeDegreeLabel(x){
+    const s = String(x || "").toLowerCase();
+    if (!s) return "";
+    if (/high\s*school/.test(s)) return "High School";
+    if (/certificate|cert\b/.test(s)) return "Certificate";
+    if (/diploma/.test(s)) return "Diploma";
+    if (/associate|^as$|^aa$/.test(s)) return "Associate's";
+    if (/bachelor|^bs$|^ba$|b\.?s\.?|b\.?a\.?/.test(s)) return "Bachelor's";
+    if (/master|^ms$|^ma$|m\.?s\.?|m\.?a\.?/.test(s)) return "Master's";
+    if (/mba/.test(s)) return "MBA";
+    if (/phd|doctor|d\.?phil/.test(s)) return "Doctorate";
+    return "";
+  }
+
+  // Highest from education[] using local normalizer
+  function highestFromEducation(arr = []) {
+    const labels = arr
+      .map(e => normalizeDegreeLabel(e.degreeLong || e.degreeShort || e.degree || ""))
+      .filter(Boolean);
+    return labels.sort((a,b) => (DEGREE_RANK[b]||0) - (DEGREE_RANK[a]||0))[0] || "";
+  }
+
+
   // Helper: pick dropdown value from existing item
   function resolveDegreeValue(item = {}) {
     // Prefer explicit short
@@ -155,25 +422,6 @@ async function load(){
       console.warn("[profile] backend /profile error:", e);
     }
   
-    // Seed from packaged JSON only if backend returned empty
-    if (!data || Object.keys(data).length === 0) {
-      try {
-        const url = chrome.runtime.getURL("data/userData.json"); // extension/data/userData.json (read-only)
-        const resp = await fetch(url);
-        data = await resp.json();
-        // seed backend so next loads are from server
-        await fetch(`${BACKEND_BASE}/profile`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data)
-        });
-        console.log("[profile] Seeded backend /profile from packaged JSON.");
-      } catch (e) {
-        console.warn("[profile] Could not seed default profile:", e);
-        data = {};
-      }
-    }
-  
     // ---- render into the form (unchanged) ----
     $("firstName").value = data?.personal?.firstName || "";
     $("lastName").value  = data?.personal?.lastName  || "";
@@ -193,7 +441,14 @@ async function load(){
     $("github").value   = data?.links?.github   || "";
     $("website").value  = data?.links?.website  || "";
   
-    const radioCheck = (name, val) => val && document.querySelector(`input[name="${name}"][value="${val}"]`)?.setAttribute("checked","checked");
+    const radioCheck = (name, val) => {
+      if (!val) return;
+      const el = document.querySelector(`input[name="${name}"][value="${val}"]`);
+      if (el) {
+        el.checked = true;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    };
     radioCheck("authUS", data?.eligibility?.authUS);
     radioCheck("authCA", data?.eligibility?.authCA);
     radioCheck("authUK", data?.eligibility?.authUK);
@@ -206,14 +461,22 @@ async function load(){
     $("race").value           = data?.eligibility?.race || "";
     $("hispanicLatinx").value = data?.eligibility?.hispanicLatinx || "";
     $("yearsOfExperience").value = (data?.yearsOfExperience || data?.meta?.yearsOfExperience || "");
-  
+    // Highest Education (prefer saved, otherwise infer from education[])
+    const he = data?.highestEducation || highestFromEducation(Array.isArray(data?.education) ? data.education : []);
+    const heSel = document.getElementById("highestEducation");
+    if (heSel) heSel.value = he;
+
     window._edu = Array.isArray(data.education) ? data.education.slice() : [];
     window._exp = Array.isArray(data.experience) ? data.experience.slice() : [];
     renderArray($("eduList"), window._edu, eduItemView);
     renderArray($("expList"), window._exp, expItemView);
-  
+
     setStatus("Loaded from backend.");
+    await initProfileResumeDropdown(data);
+    window._loadedProfile = data;
   }  
+  
+  
 
 function collectMain(){
   const radioVal = name => (document.querySelector(`input[name="${name}"]:checked`)?.value || "");
@@ -250,7 +513,9 @@ function collectMain(){
       ethnicity: $("ethnicity").value.trim(),
       race: $("race").value.trim(),                       
       hispanicLatinx: $("hispanicLatinx").value.trim()    
-    }    
+    },
+    highestEducation: (document.getElementById("highestEducation")?.value || "").trim(),
+    yearsOfExperience: (document.getElementById("yearsOfExperience")?.value || "").trim(),
   };
 }
 
@@ -273,7 +538,10 @@ $("addExp").addEventListener("click", ()=>{
 
 $("save").addEventListener("click", async ()=>{
     const out = collectMain();
-  
+    // Ensure these exist at the top level (used by filler)
+    out.yearsOfExperience = (document.getElementById("yearsOfExperience")?.value || "").trim();
+    out.highestEducation  = (document.getElementById("highestEducation")?.value || "").trim();
+
     // education array
     out.education = [];
     $("eduList").querySelectorAll(".item").forEach(item => {
@@ -307,23 +575,69 @@ $("save").addEventListener("click", async ()=>{
         const k = inp.getAttribute("data-k");
         g[k] = (inp.value || "").trim();
     });
-    out.yearsOfExperience = ($("yearsOfExperience").value || "").trim();
     out.experience.push(g);
     });
 
-    try{
-      const r = await fetch(`${BACKEND_BASE}/profile`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify(out)
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setStatus("Saved to backend!");
-    }catch(e){
-      console.error(e);
-      setStatus("Save failed (backend).");
-    }
-  });  
+  // Selected Resume (commit if user changed it; otherwise keep what's loaded)
+  const sel = document.getElementById("profileResumeSelect");
+  const loaded = (window._loadedProfile || {});
+  let sr = window._pendingResume;
 
-// boot
-load().catch(e=> setStatus("Load error: "+e));
+  if (!sr && sel && sel.value) {
+    // no pending change but a selection exists in the UI: use it with a reasonable fallback for skills
+    const name = sel.options[sel.selectedIndex]?.textContent || sel.value;
+    const fallbackSkills = Array.isArray(loaded?.selectedResumeSkills) ? loaded.selectedResumeSkills : [];
+    sr = { id: sel.value, name, skills: fallbackSkills };
+  }
+  if (!sr && loaded?.selectedResumeId) {
+    // nothing chosen now; stick with what the profile already had
+    sr = {
+      id:    String(loaded.selectedResumeId),
+      name:  loaded.selectedResumeName || "",
+      skills: Array.isArray(loaded.selectedResumeSkills) ? loaded.selectedResumeSkills : []
+    };
+  }
+
+  if (sr) {
+    out.selectedResumeId      = String(sr.id || "");
+    out.selectedResumeName    = String(sr.name || "");
+    out.selectedResumeSkills  = Array.from(new Set(sr.skills || [])).sort();
+    try {
+      await chrome.storage.local.set({
+        lastResumeId: out.selectedResumeId,
+        selectedResume: { id: out.selectedResumeId, name: out.selectedResumeName, skills: out.selectedResumeSkills }
+      });
+    } catch {}
+  } else {
+    // Explicitly clear if nothing is selected
+    out.selectedResumeId = "";
+    out.selectedResumeName = "";
+    out.selectedResumeSkills = [];
+    try { await chrome.storage.local.set({ lastResumeId: "", selectedResume: { id:"", name:"", skills:[] } }); } catch {}
+  }
+
+  // Keep your existing matchedSkills mirror (for EXT_CHECK_KEY_SKILLS)
+  out.matchedSkills = {
+    required:  profileMatched.required,
+    preferred: profileMatched.preferred
+  };
+  chrome.storage.local.set({ matchedSkills: out.matchedSkills }, ()=>{});
+
+  // Save to backend (/profile) — this is what writes profile.json on your server
+  try{
+    const r = await fetch(`${BACKEND_BASE}/profile`, {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify(out)
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    setStatus("Saved to backend!");
+  }catch(e){
+    console.error(e);
+    setStatus("Save failed (backend).");
+  }
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  load().catch(err => console.warn("[profile] load() failed:", err));
+});

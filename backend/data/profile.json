@@ -32,6 +32,8 @@
     "race": "Black",
     "hispanicLatinx": "Yes"
   },
+  "highestEducation": "Bachelor's",
+  "yearsOfExperience": "4",
   "education": [
     {
       "school": "Rutgers University",
@@ -65,7 +67,22 @@
       "startYear": "2021",
       "endMonth": "6",
       "endYear": "2024"
+    },
+    {
+      "company": "Example",
+      "jobTitle": "Example",
+      "description": "Example",
+      "startMonth": "1",
+      "startYear": "2024",
+      "endMonth": "7",
+      "endYear": "2025"
     }
   ],
-  "yearsOfExperience": "0"
+  "selectedResumeId": "c5366db4-ed5f-4322-a3e3-376c32ae78f7",
+  "selectedResumeName": "mixed_some.pdf",
+  "selectedResumeSkills": [],
+  "matchedSkills": {
+    "required": [],
+    "preferred": []
+  }
 }

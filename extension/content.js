@@ -28,7 +28,7 @@
   };
   const _nz   = v => (v ?? "").toString().trim();
   const _norm = s => _nz(s).toLowerCase().replace(/[^a-z0-9]+/g, "");
-  
+
   function chooseSelectOption(el, desired, extraSynonyms = []) {
     if (!el || el.tagName?.toLowerCase() !== "select") return false;
     const want = _norm(desired);
@@ -463,13 +463,80 @@ function setYearSelect(el, my) {
     return inferContextFromHeadings(el) || inferContextFromSiblings(el) || null;
   }  
 
+  // make these available to code outside the IIFE
+  window.SFF_inferContext = inferContext;
+  window.SFF_getEducationIndexForElement = getEducationIndexForElement;
+
+// Return a UNIQUE list of education row elements.
+// Prefer #eduList .item (your test page), then fall back to generic detection.
+function getEducationRows(root = document) {
+  const out = [];
+  const seen = new Set();
+  const add = (el) => { if (el && !seen.has(el)) { seen.add(el); out.push(el); } };
+
+  // 1) Ultimate test explicit container
+  const listEl = root.querySelector('#eduList');
+  if (listEl) {
+    listEl.querySelectorAll('.item').forEach(add);
+    return out;
+  }
+
+  // 2) Common section ids
+  root.querySelectorAll('section#education .item, section#school .item').forEach(add);
+
+  // 3) Other explicit markers
+  root.querySelectorAll('[data-edu-item], .education-item, .edu-block').forEach(add);
+
+  // 4) Heuristic: any container that has school/degree/field inputs
+  root.querySelectorAll(
+    '[data-k="school"], [name*="school"], [data-k="degreeShort"], [data-k="field"], [name*="field"]'
+  ).forEach((el) => {
+    const row =
+      el.closest('.item, .row, .education, .fieldset, li, .grid, fieldset, section, .card') ||
+      el.parentElement;
+    add(row);
+  });
+
+  return out;
+}
+
+  // Determine which education entry this field belongs to (0-based)
+  function getEducationIndexForElement(el) {
+    try {
+      if (!el || !document) return 0;
+      const rows = detectAllFields(); // already defined above
+      const schools = (rows || []).filter(r =>
+        r && r.context === "education" &&
+        /\b(university|college|institute|school)\b/i.test(r.labelText || "")
+      );
+      let idx = 0;
+      for (const r of schools) {
+        const n = r.selector ? document.querySelector(r.selector) : null;
+        if (!n) continue;
+        // count all school inputs that appear before (or are) this element
+        const before = n.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING;
+        if (before || n === el) idx++;
+      }
+      return Math.max(0, idx - 1);
+    } catch (_) {
+      return 0;
+    }
+  }
+
   function findGroupQuestion(el) {
-    // 1) If inside a <fieldset>, prefer its <legend>
+    // 1) If inside a <fieldset>, prefer its <legend> — but ignore section-y legends
     const fs = el.closest('fieldset');
     if (fs) {
       const lg = fs.querySelector(':scope > legend');
       const legendText = lg && lg.textContent ? lg.textContent.trim() : '';
-      if (legendText) return { text: legendText, reason: 'fieldset>legend' };
+
+      // Suppress section headers like “Skills”, “Key Skills”, “Skills & Highest Education”
+      const lt = legendText.toLowerCase();
+      const isSectionyLegend = /\bskills?\b/.test(lt); // add more phrases here if needed
+
+      if (legendText && !isSectionyLegend) {
+        return { text: legendText, reason: 'fieldset>legend' };
+      }
     }
   
     // 2) Look upwards for a heading or strong label immediately above the group
@@ -844,6 +911,84 @@ function setYearSelect(el, my) {
     el.blur?.();
     return true;
   }
+
+  // --- helpers for selects + month parsing ---
+function toMonthNumber(m) {
+  if (m == null) return "";
+  if (/^\d+$/.test(String(m))) {
+    const n = parseInt(m, 10);
+    return (n >= 1 && n <= 12) ? String(n) : "";
+  }
+  const s = String(m).trim().toLowerCase();
+  const names = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+  const idx = names.findIndex(n => n.startsWith(s) || s.startsWith(n.slice(0,3)));
+  return idx >= 0 ? String(idx + 1) : "";
+}
+
+function setSelectValueLoose(sel, val) {
+  if (!sel) return false;
+  const wanted = String(val ?? "").trim();
+  if (!wanted) return false;
+
+  const commit = (opt) => {
+    const idx = Array.prototype.indexOf.call(sel.options, opt);
+    if (idx >= 0) sel.selectedIndex = idx;
+    opt.selected = true;
+    // keep value in sync for listeners that read .value directly
+    try { sel.value = opt.value; } catch {}
+    sel.dispatchEvent(new Event("input",  { bubbles: true }));
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  };
+
+  // try by exact value
+  for (const opt of sel.options) {
+    if (String(opt.value) === wanted) return commit(opt);
+  }
+  // try by exact visible text
+  for (const opt of sel.options) {
+    const t = String(opt.textContent || "").trim();
+    if (t.toLowerCase() === wanted.toLowerCase()) return commit(opt);
+  }
+  // try by startsWith on visible text
+  for (const opt of sel.options) {
+    const t = String(opt.textContent || "").trim().toLowerCase();
+    if (t.startsWith(wanted.toLowerCase())) return commit(opt);
+  }
+  return false;
+}
+
+// find by [data-k], then name, then label text
+function pickField(row, key, nameHints = [], labelHints = []) {
+  // 1) data-k
+  let el = row.querySelector(`[data-k="${key}"]`);
+  if (el) return el;
+
+  // 2) name contains any hint
+  for (const h of nameHints) {
+    el = row.querySelector(`[name*="${h}"], input[name*="${h}"], select[name*="${h}"], textarea[name*="${h}"]`);
+    if (el) return el;
+  }
+
+  // 3) label text
+  const labels = Array.from(row.querySelectorAll("label"));
+  for (const lbl of labels) {
+    const txt = (lbl.textContent || "").trim().toLowerCase();
+    if (labelHints.some(h => txt.includes(h))) {
+      // for/aria-labelledby
+      const forId = lbl.getAttribute("for");
+      if (forId) {
+        const byFor = row.querySelector(`#${CSS.escape(forId)}`);
+        if (byFor) return byFor;
+      }
+      // or the next control
+      const ctl = lbl.parentElement?.querySelector("input,select,textarea");
+      if (ctl) return ctl;
+    }
+  }
+
+  return null;
+}
   
   function setDateLike(el, value) {
     const H = window.H || window.SFFHelpers || {};
@@ -893,6 +1038,74 @@ function setYearSelect(el, my) {
     fire(el, "change");
     if (typeof el.blur === "function") { try { el.blur(); } catch {} }
   }
+
+  // --- robust user-like click (makes stubborn buttons respond) ---
+  async function userLikeClick(el) {
+    if (!el) return false;
+    try { el.scrollIntoView({ block: "center", inline: "center" }); } catch {}
+    try { el.removeAttribute?.("disabled"); } catch {}
+    try {
+      const r = el.getBoundingClientRect();
+      const x = r.left + Math.min(Math.max(1, r.width / 2), r.width - 1);
+      const y = r.top  + Math.min(Math.max(1, r.height / 2), r.height - 1);
+      const types = ["pointerover","pointerenter","mouseenter","mouseover","pointerdown","mousedown","focus","pointerup","mouseup","click"];
+      for (const t of types) {
+        el.dispatchEvent(new MouseEvent(t, { bubbles:true, cancelable:true, composed:true, view:window, clientX:x, clientY:y, button:0 }));
+      }
+      if (typeof el.click === "function") el.click(); // final nudge
+      return true;
+    } catch {
+      try { if (typeof el.click === "function") { el.click(); return true; } } catch {}
+    }
+    return false;
+  }
+
+  // --- fallback DOM creators (used only if clicks don't add rows) ---
+function createSimpleEduItem(idx = 0) {
+  const wrap = document.createElement("div");
+  wrap.className = "item";
+  wrap.innerHTML = `
+    <div class="grid">
+      <div><label>School / University</label><input data-k="school" name="school" placeholder="University"></div>
+      <div>
+        <label>Degree</label>
+        <select data-k="degreeShort" name="degree">
+          <option value="">—</option>
+          <option value="AS">A.S. — Associate of Science</option>
+          <option value="AA">A.A. — Associate of Arts</option>
+          <option value="BS">B.S. — Bachelor of Science</option>
+          <option value="BA">B.A. — Bachelor of Arts</option>
+          <option value="MS">M.S. — Master of Science</option>
+          <option value="MA">M.A. — Master of Arts</option>
+          <option value="MBA">MBA — Master of Business Administration</option>
+          <option value="PhD">Ph.D. — Doctor of Philosophy</option>
+        </select>
+      </div>
+      <div><label>Field of Study</label><input data-k="field" name="field_of_study" placeholder="Computer Science"></div>
+      <div><label>GPA</label><input data-k="gpa" name="gpa" placeholder="3.8"></div>
+    </div>
+    <div class="grid">
+      <div>
+        <label>Start Month</label>
+        <select data-k="startMonth"><option value="">—</option>${[..."JanFebMarAprMayJunJulAugSepOctNovDec".match(/.{1,3}/g)].map((m,i)=>`<option value="${i+1}">${["January","February","March","April","May","June","July","August","September","October","November","December"][i]}</option>`).join("")}</select>
+      </div>
+      <div>
+        <label>Start Year</label>
+        <select data-k="startYear"><option value="">—</option>${(() => { const ys=[]; const now=new Date().getFullYear()+1; for(let y=now;y>=1970;y--) ys.push(`<option>${y}</option>`); return ys.join(""); })()}</select>
+      </div>
+      <div>
+        <label>End Month</label>
+        <select data-k="endMonth"><option value="">—</option>${[..."JanFebMarAprMayJunJulAugSepOctNovDec".match(/.{1,3}/g)].map((m,i)=>`<option value="${i+1}">${["January","February","March","April","May","June","July","August","September","October","November","December"][i]}</option>`).join("")}</select>
+      </div>
+      <div>
+        <label>End Year</label>
+        <select data-k="endYear"><option value="">—</option>${(() => { const ys=[]; const now=new Date().getFullYear()+1; for(let y=now;y>=1970;y--) ys.push(`<option>${y}</option>`); return ys.join(""); })()}</select>
+      </div>
+    </div>
+    <div class="actions"><button type="button" class="btn" data-del>Delete</button><span class="muted">Education #${idx+1}</span></div>
+  `;
+  return wrap;
+}
 
   // ---------- File upload helpers ----------
 async function fetchResumeFileAsFile(resumeId) {
@@ -1041,6 +1254,92 @@ function setFileInputWithFile(el, file) {
   window.setSelectValueSmart = setSelectValueSmart;
   window.SFFDom = Object.assign(window.SFFDom || {}, { setSelectValueSmart });
 
+// === Years-of-Experience select setter (handles "3", "3+ yrs", "3–5 years", etc.)
+function setYearsExperienceSelect(select, raw) {
+  if (!select) return false;
+  const s = String(raw ?? "").trim();
+  if (!s) return false;
+
+  const n = parseInt(s, 10);
+  const opts = Array.from(select.options).map(o => ({
+    el: o,
+    v: (o.value || "").toLowerCase().trim(),
+    t: (o.textContent || "").toLowerCase().trim()
+  }));
+
+  const cands = [];
+  if (!isNaN(n)) {
+    cands.push(
+      String(n), `${n}+`, `${n} years`, `${n}+ years`, `${n} year`,
+      `${n}yrs`, `${n}+ yrs`, `${n} - ${n+1} years`, `${n}-${n+1}`, `${n}–${n+1}`
+    );
+  }
+  cands.push(s.toLowerCase());
+
+  for (const c of cands) {
+    const hit = opts.find(o => o.v === c) || opts.find(o => o.t === c);
+    if (hit) { select.value = hit.el.value; select.dispatchEvent(new Event("change", {bubbles:true})); return true; }
+  }
+  if (!isNaN(n)) {
+    const hit2 = opts.find(o => /\d/.test(o.t) && o.t.includes(String(n)));
+    if (hit2) { select.value = hit2.el.value; select.dispatchEvent(new Event("change", {bubbles:true})); return true; }
+  }
+  return setSelectValueSmart(select, isNaN(n) ? s : String(n));
+}
+
+  // Accepts 2, "02", "Feb", "February" and matches by option value OR text.
+  function setMonthValueSmart(select, raw) {
+    if (!select) return false;
+    const s = String(raw ?? "").trim();
+    if (!s) return false;
+
+    const months = [
+      "january","february","march","april","may","june",
+      "july","august","september","october","november","december"
+    ];
+
+    const candidates = [];
+
+    // numeric forms: 2, "2", "02"
+    if (/^\d{1,2}$/.test(s)) {
+      const n = String(parseInt(s, 10));             // "2"
+      const n2 = n.padStart(2, "0");                  // "02"
+      const idx = Math.max(1, Math.min(12, parseInt(n,10)));
+      candidates.push(n, n2, months[idx-1]);          // "2", "02", "february"
+    } else {
+      // text forms: "Feb", "February"
+      const lo = s.toLowerCase();
+      const fullIdx = months.indexOf(lo);
+      const abbrIdx = fullIdx >= 0 ? fullIdx : months.findIndex(m => m.startsWith(lo.slice(0,3)));
+      if (abbrIdx >= 0) {
+        const n = String(abbrIdx + 1);
+        candidates.push(months[abbrIdx], n, n.padStart(2, "0")); // "february", "2", "02"
+      } else {
+        candidates.push(lo);
+      }
+    }
+
+    // Try value exact, text exact, then startsWith on text
+    const opts = Array.from(select.options).map(o => ({
+      el: o,
+      v: (o.value || "").toLowerCase().trim(),
+      t: (o.textContent || "").toLowerCase().trim()
+    }));
+
+    for (const c of candidates) {
+      const cc = String(c).toLowerCase();
+      let hit = opts.find(o => o.v === cc) ||
+                opts.find(o => o.t === cc) ||
+                opts.find(o => o.t.startsWith(cc));
+      if (hit) {
+        select.value = hit.el.value;
+        select.selectedIndex = Array.from(select.options).indexOf(hit.el);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }
 
   // ---------- Labels + DOM traversal ----------
   function labelTextFor(el){
@@ -1067,6 +1366,711 @@ function setFileInputWithFile(el, file) {
       || ""
     ).trim();
   }
+
+// normalize for skill matching: lowercase + strip non-alphanumerics
+function normSkill(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+// label fallback for checkboxes
+function labelForCheckbox(box) {
+  if (!box) return "";
+  const id = box.getAttribute("id");
+  if (id) {
+    const lab = document.querySelector(`label[for="${id}"]`);
+    if (lab && lab.textContent) return lab.textContent.trim();
+  }
+  const aria = box.getAttribute("aria-label");
+  if (aria) return aria.trim();
+  const sib = (box.nextSibling && box.nextSibling.textContent || "").trim();
+  if (sib) return sib;
+  const wrap = box.closest(".field, .row, .item, .form-group, div");
+  const guess = wrap?.querySelector("label")?.textContent?.trim();
+  return guess || "";
+}
+
+// === Voluntary Self-ID / Demographics filler (reads profile.eligibility) ===
+async function fillVoluntarySelfID(profile, root = document) {
+  try {
+    const H = window.SFFHelpers || {};
+    const selects = Array.from(root.querySelectorAll("select"));
+
+    // Pull from eligibility; keep graceful fallbacks
+    const eg = profile?.eligibility || {};
+    const disability     = eg.disability     ?? profile?.disability     ?? "";
+    const lgbtq          = eg.lgbtq          ?? profile?.lgbtq          ?? "";
+    const veteran        = eg.veteran        ?? profile?.veteran        ?? "";
+    const ethnicity      = eg.ethnicity      ?? profile?.ethnicity      ?? "";
+    const race           = eg.race           ?? profile?.race           ?? "";
+    let   hispanicLatinx = eg.hispanicLatinx ?? profile?.hispanicLatinx ?? "";
+
+    // Inference: if ethnicity is Hispanic/Latinx and the yes/no question is blank → Yes
+    if (!hispanicLatinx && /hispanic|latinx|latino/i.test(String(ethnicity || ""))) {
+      hispanicLatinx = "Yes";
+    }
+
+    // Helper: get label text for a control
+    const lblFor = (el) => (typeof labelTextFor === "function" ? labelTextFor(el) : el?.closest("label")?.textContent || "");
+
+    // Helper to set by label regex with a candidate list/builder
+    const setBy = (rx, candidates) => {
+      for (const sel of selects) {
+        const lbl = (lblFor(sel) || "").trim();
+        if (!lbl) continue;
+        if (rx.test(lbl)) {
+          const cands = (typeof candidates === "function") ? candidates() : (candidates || []);
+          if (!cands.length) continue;
+
+          // strongest match via helper
+          const idx = (H.matchOptionIndex ? H.matchOptionIndex(sel, cands) : -1);
+          if (idx >= 0) {
+            sel.selectedIndex = idx;
+            sel.dispatchEvent(new Event("input",  { bubbles: true }));
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+          }
+          // loose fallback: try setSelectValueSmart per candidate
+          if (typeof setSelectValueSmart === "function") {
+            for (const c of cands) {
+              if (setSelectValueSmart(sel, c, lbl)) return true;
+            }
+          }
+        }
+      }
+      return false;
+    };
+
+    // Fill the six questions (match by wording on your test page)
+    setBy(/\bdisab/i,             () => H.buildDisabilityCandidates?.(disability) || []);
+    setBy(/\blgbtq/i,             () => H.buildLGBTQCandidates?.(lgbtq) || []);
+    setBy(/\bveteran/i,           () => H.buildVeteranCandidates?.(veteran) || []);
+    setBy(/\bethnic/i,            () => H.buildEthnicityCandidates?.(ethnicity) || []);
+    setBy(/\brace\b/i,            () => H.buildRaceCandidates?.(race) || []);
+    setBy(/hispanic.*latinx/i,    () => H.buildYesNoCandidates?.(hispanicLatinx) || []);
+
+  } catch (e) {
+    console.warn("[filler] fillVoluntarySelfID error:", e);
+  }
+}
+
+// expose for pipeline + manual test
+window.fillVoluntarySelfID = fillVoluntarySelfID;
+
+// Optional: quick test hook you can send from popup
+chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
+  if (msg?.action === "EXT_FILL_DEMOGRAPHICS") {
+    fillVoluntarySelfID(msg.profile || {}).then(() => sendResponse({ ok: true })).catch(err => sendResponse({ ok: false, error: String(err) }));
+    return true; // async
+  }
+});
+
+// Fill Key Skills (from matched resume ONLY) + set Highest Education / YOE
+async function fillSkillsAndScalars(profile) {
+  try {
+    // Highest Education & YOE as you already do (left intact)
+    const he  = (profile.highestEducation || profile.educationHighest || "").toString().trim();
+    const yoe = (profile.yearsOfExperience || profile.meta?.yearsOfExperience || "").toString().trim();
+
+    document.querySelectorAll("select").forEach(sel => {
+      const lbl = (labelTextFor(sel) || "").toLowerCase();
+      const squished = lbl.replace(/\s+/g,"");
+      if (/(highest|top).*(education|degree)|education.*level|level.*education|degree.*level/.test(lbl)) {
+        const norm = (window.H?.normalizeDegreeLabel?.(he) || he);
+        if (norm) setSelectValueSmart(sel, norm);
+      } else if (/years.*(professional)?.*experience|overall.*experience|total.*experience|^yoe$/.test(lbl)
+                 || /yearsofprofessionalexperience|yearsofexperience|yoe/.test(squished)) {
+        if (yoe) setYearsExperienceSelect(sel, yoe);
+      }
+    });
+
+    // Load matched skills saved by popup for the SELECTED resume
+    const { matchedSkills } = await new Promise(res =>
+      chrome.storage.local.get(["matchedSkills"], res)
+    );
+    const req  = Array.isArray(matchedSkills?.required)  ? matchedSkills.required  : [];
+    const pref = Array.isArray(matchedSkills?.preferred) ? matchedSkills.preferred : [];
+    const normSet = new Set([...req, ...pref].map(normSkill).filter(Boolean));
+    if (!normSet.size) {
+      console.log("[filler] No matchedSkills in storage; skipping Key Skills.");
+      return;
+    }
+
+    // Scope to "Key Skills" / "Skills & Highest Education" section if present
+    const skillsSection =
+      Array.from(document.querySelectorAll("section, fieldset, .card, .group, .item, .row, .form-section"))
+        .find(sec => /key\s*skills|skills\s*&\s*highest\s*education|\bskills\b/i.test(sec.textContent || ""));
+    const scope = skillsSection || document;
+
+    // Grab all checkboxes within the Skills section (don't assume name="skills")
+    const boxes = Array.from(scope.querySelectorAll('input[type="checkbox"]'));
+
+    for (const box of boxes) {
+      // Derive the human-visible label next to the checkbox, with fallbacks
+      const raw =
+        (box.value ||
+        box.getAttribute("aria-label") ||
+        labelForCheckbox(box) || ""   // uses the helper above
+        ).trim();
+
+      const key = normSkill(raw);      // lower + strip non-alphanumerics
+      if (key && normSet.has(key)) {
+        if (!box.checked) {
+          box.checked = true;
+          // Fire both events to satisfy custom listeners
+          box.dispatchEvent(new Event("input",  { bubbles: true }));
+          box.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[filler] fillSkillsAndScalars:", e);
+  }
+}
+
+
+
+// Ensure the correct number of education rows exist, then fill them STRICTLY one-by-one.
+// Uses ONLY existing helpers: ensureEducationRowsEduOnly + fillEducationBlocksFromProfile.
+async function ensureAndFillEducation(profile, root = document) {
+  const eduArr = Array.isArray(profile?.education) ? profile.education : [];
+  if (!eduArr.length) return;
+
+  const listEl  = root.querySelector('#eduList') || root;
+  const itemSel = listEl.id === 'eduList' ? '.item' : '[data-edu-item], .education-item, .edu-block, .item';
+
+  // add rows up to target (uses your existing click logic)
+  await ensureEducationRowsEduOnly(profile, root);
+
+  // strict loop: wait for i+1 rows, then fill slice(0, i+1); repeat
+  for (let i = 0; i < eduArr.length; i++) {
+    // wait until DOM shows at least i+1 rows
+    let tries = 0;
+    while (tries++ < 20) {
+      const count = listEl.querySelectorAll(itemSel).length;
+      if (count >= i + 1) break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    // fill ONLY up to current index (so row i gets populated now)
+    const partial = Object.assign({}, profile, { education: eduArr.slice(0, i + 1) });
+    fillEducationBlocksFromProfile(partial, root);
+
+    // verify row i has any value; if not, retry once after a paint
+    const rows = listEl.querySelectorAll(itemSel);
+    const rowI = rows[i];
+    if (rowI) {
+      const anyFilled = Array.from(rowI.querySelectorAll('input,select,textarea'))
+        .some(el => el.tagName === 'SELECT' ? !!el.value : !!(el.value || '').trim());
+      if (!anyFilled) {
+        await new Promise(r => requestAnimationFrame(r));
+        fillEducationBlocksFromProfile(partial, root);
+      }
+    }
+  }
+}
+// make globally callable from other closures / listeners
+window.ensureAndFillEducation = ensureAndFillEducation;
+
+
+// Click “+ Add Education” until the total rows === profile.education.length (no overshoot)
+async function ensureEducationRowsEduOnly(profile, root = document) {
+  try {
+    const eduArr = Array.isArray(profile?.education) ? profile.education : [];
+    if (!eduArr.length) return;
+
+    const listEl   = root.querySelector('#eduList'); // present on your test
+    const countNow = () => (listEl ? listEl.querySelectorAll('.item').length : getEducationRows(root).length);
+    const target   = eduArr.length;
+
+    // If we already have enough rows, we're done.
+    if (countNow() >= target) return;
+
+    // Find the add button (explicit first, then text/aria)
+    const addBtn =
+      root.querySelector('#addEdu') ||
+      root.querySelector('#addEducation') ||
+      root.querySelector('.add-education') ||
+      root.querySelector('[data-add="education"]') ||
+      root.querySelector('[data-action="add-education"]') ||
+      Array.from(root.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')).find((b) => {
+        const t = ((b.textContent || b.value || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
+        return /^(\+?\s*)?add\b/.test(t) && /(education|school|university|college|degree)/.test(t);
+      });
+
+    if (!addBtn) {
+      console.warn('[filler] ensureEducationRowsEduOnly: no "Add Education" button found');
+      return;
+    }
+
+    // Click ONLY until rows === target. We re-check after each click, so we never overshoot.
+    // Also, we wait for the DOM to actually mount a new row before deciding to click again.
+    let guard = 0;
+    while (countNow() < target && guard < 20) {
+      const before = countNow();
+
+      // Prefer dispatching a normal click; your test attaches addEventListener('click', ...)
+      if (typeof addBtn.click === 'function') addBtn.click();
+
+      // wait until a new item shows up (up to ~800ms)
+      let grew = false;
+      for (let tries = 0; tries < 8; tries++) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (countNow() > before) { grew = true; break; }
+      }
+
+      // If it didn't grow, break (avoid blind extra clicks)
+      if (!grew) break;
+
+      guard++;
+    }
+
+    // Final small settle so the new row is fully rendered before filling
+    for (let tries = 0; tries < 5; tries++) {
+      if (countNow() >= target) break;
+      await new Promise((r) => setTimeout(r, 80));
+    }
+  } catch (e) {
+    console.warn('[filler] ensureEducationRowsEduOnly error', e);
+  }
+}
+// make callable from any closure
+window.ensureEducationRowsEduOnly = ensureEducationRowsEduOnly;
+
+// =========================== EXPERIENCE HELPERS (multi-block) ===========================
+
+// Parse "YYYY-MM-DD" | "MM/YYYY" | "YYYY" → { m, y } where m is 1..12 or null
+function parseMonthYearLoose(s) {
+  const t = String(s || "").trim();
+  if (!t) return { m: null, y: null };
+
+  // YYYY-MM-DD
+  let m = null, y = null;
+  let m1 = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m1) { y = +m1[1]; m = +m1[2]; return { m, y }; }
+
+  // MM/YYYY or M/YYYY
+  let m2 = t.match(/^(\d{1,2})[/-](\d{4})$/);
+  if (m2) { m = +m2[1]; y = +m2[2]; return { m, y }; }
+
+  // YYYY
+  let m3 = t.match(/^(\d{4})$/);
+  if (m3) { y = +m3[1]; return { m: null, y }; }
+
+  // Month names
+  const months = {
+    jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12
+  };
+  const lower = t.toLowerCase();
+  for (const k of Object.keys(months)) {
+    if (lower.includes(k)) {
+      // look for year
+      const yHit = lower.match(/(19|20)\d{2}/);
+      return { m: months[k], y: yHit ? +yHit[0] : null };
+    }
+  }
+  return { m: null, y: null };
+}
+
+/*** ================== EXPERIENCE (mirrors EDUCATION) ================== ***/
+// 1) Find the "+ Add Experience" button — same strategy as education
+function findAddExperienceButton(root = document) {
+  return (
+    root.querySelector('#addExp') ||
+    root.querySelector('#addExperience') ||
+    root.querySelector('#addEmployment') ||
+    root.querySelector('.add-experience') ||
+    root.querySelector('[data-add="experience"]') ||
+    root.querySelector('[data-action="add-experience"]') ||
+    root.querySelector('button[aria-label*="add experience" i]') ||
+    root.querySelector('[role="button"][aria-label*="add experience" i]') ||
+    // fallback by visible text (education does this too)
+    Array.from(root.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]'))
+      .find(el => /\badd\s+(experience|employment|work)\b/i.test(
+        (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim()
+      )) ||
+    null
+  );
+}
+
+// 2) Single click rhythm — identical to clickAddEducationOnce
+async function clickAddExperienceOnce(root = document) {
+  const countNow = () => (typeof getExperienceRows === "function" ? getExperienceRows(root).length : 0);
+  const before = countNow();
+
+  const btn = findAddExperienceButton(root);
+  if (!btn) return { ok:false, error:"no_button", before, after: before };
+
+  if (typeof userLikeClick === "function") {
+    await userLikeClick(btn);
+  } else if (typeof btn.click === "function") {
+    btn.click();
+  }
+
+  // wait for DOM to grow by exactly one row (education does this wait-loop)
+  let after = before;
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 100));
+    after = countNow();
+    if (after > before) break;
+  }
+  return { ok:true, clicked:true, grew: after > before, before, after };
+}
+
+// 3) Ensure + Fill orchestrator — line-for-line like ensureAndFillEducation
+async function ensureAndFillExperience(profile, root = document) {
+  const exps  = Array.isArray(profile?.experience) ? profile.experience : [];
+  if(!exps.length);
+
+  // mirror the edu selectors
+  const listEl  = root.querySelector('#expList') || root;
+  const itemSel = (listEl.id === 'expList')
+    ? '.item'
+    : '[data-exp-item], .experience-item, .employment-item, .work-item, .exp-block, .employment-block, .work-block, .experience-row, .item';
+
+  // add rows up to target (uses your existing click logic)
+  await ensureExperienceRowsExpOnly(profile, root);
+
+  // strict loop: wait for i+1 rows, then fill slice(0, i+1); repeat
+  for (let i = 0; i < exps.length; i++) {
+    // wait until DOM shows at least i+1 rows
+    let tries = 0;
+    while (tries++ < 20) {
+      const count = listEl.querySelectorAll(itemSel).length;
+      if (count >= i + 1) break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    // fill ONLY up to current index (so row i gets populated now)
+    const partial = Object.assign({}, profile, { experience: exps.slice(0, i + 1) });
+    fillExperienceBlocksFromProfile(partial, root);
+
+    // verify row i has any value; if not, retry once after a paint
+    const rows = listEl.querySelectorAll(itemSel);
+    const rowI = rows[i];
+    if (rowI) {
+      const anyFilled = Array.from(rowI.querySelectorAll('input,select,textarea'))
+        .some(el => el.tagName === 'SELECT' ? !!el.value : !!(el.value || '').trim());
+      if (!anyFilled) {
+        await new Promise(r => requestAnimationFrame(r));
+        fillExperienceBlocksFromProfile(partial, root);
+      }
+    }
+  }
+}
+window.ensureAndFillExperience = ensureAndFillExperience;
+
+
+async function ensureExperienceRowsExpOnly(profile, root = document) {
+  try {
+    const exps = Array.isArray(profile?.experience) ? profile.experience : [];
+    if (!exps.length) return;
+
+    const listEl   = root.querySelector('#expList'); // present on your test
+    const countNow = () => (listEl ? listEl.querySelectorAll('.item').length : getEducationRows(root).length);
+    const target   = exps.length;
+
+    if (countNow() >= target) return;
+
+    // Find the add button (explicit first, then text/aria)
+    const addBtn =
+    root.querySelector('#addExp') ||
+    root.querySelector('#addExperience') ||
+    root.querySelector('.add-experience') ||
+    root.querySelector('[data-add="experience"]') ||
+    root.querySelector('[data-action="add-experience"]') ||
+    Array.from(root.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')).find((b) => {
+      const t = ((b.textContent || b.value || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
+      return /^(\+?\s*)?add\b/.test(t) && /(company|position|location|role)/.test(t);
+    });
+
+    if (!addBtn) {
+      console.warn('[filler] ensureEducationRowsEduOnly: no "Add Experience" button found');
+      return;
+    }
+
+    let guard = 0;
+    while (countNow() < target && guard < 20) {
+      const before = countNow();
+
+      // Prefer dispatching a normal click; your test attaches addEventListener('click', ...)
+      if (typeof addBtn.click === 'function') addBtn.click();
+
+      // wait until a new item shows up (up to ~800ms)
+      let grew = false;
+      for (let tries = 0; tries < 8; tries++) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (countNow() > before) { grew = true; break; }
+      }
+
+      // If it didn't grow, break (avoid blind extra clicks)
+      if (!grew) break;
+
+      guard++;
+    }
+
+    // small settle so the last row is fully mounted
+    for (let i = 0; i < 5; i++) {
+      if (countNow() >= target) break;
+      await new Promise(r => setTimeout(r, 80));
+    }
+  } catch (e) {
+    console.warn("[filler] ensureExperienceRowsExpOnly error", e);
+  }
+}
+window.ensureExperienceRowsExpOnly = ensureExperienceRowsExpOnly;
+
+
+// Return a list of container elements, each representing one experience block
+function getExperienceRows(root = document) {
+  const rows = [];
+
+  // 1) Ultimate Test explicit list
+  rows.push(...Array.from(root.querySelectorAll('#expList .item, [data-exp-item]')));
+
+  // 2) Common explicit wrappers (without any ellipses)
+  rows.push(...Array.from(root.querySelectorAll(
+    '[data-section="experience"], [data-section="employment"], .experience-block, .employment-block, .work-block'
+  )));
+
+  // 3) Fallback: group by nearest fieldset/card that contains a Company or Job Title label
+  if (!rows.length) {
+    const groups = new Set();
+    root.querySelectorAll('label').forEach(lbl => {
+      const txt = (lbl.textContent || "").trim().toLowerCase();
+      if (/company|employer|organization|job\s*title|position|role/.test(txt)) {
+        const node = lbl.closest('fieldset, .card, .row, .block, .item, section, .group, .container, .form-row') || lbl.parentElement;
+        if (node) groups.add(node);
+      }
+    });
+    rows.push(...groups);
+  }
+
+  return rows;
+}
+
+function setStartMonthYearIn(row, dateStr) {
+  const { m, y } = parseMonthYearLoose(dateStr);
+  // find selects/inputs by label text
+  const startMonthEl = [...row.querySelectorAll('select, input')].find(e => /start\s*month/i.test(labelTextFor(e)));
+  const startYearEl  = [...row.querySelectorAll('select, input')].find(e => /start\s*year/i.test(labelTextFor(e)));
+  if (startMonthEl && m != null) (setMonthValueSmart(startMonthEl, String(m)) || setSelectValueSmart(startMonthEl, String(m)));
+  if (startYearEl  && y != null) setSelectValueSmart(startYearEl,  String(y));
+}
+
+function setEndMonthYearIn(row, dateStr) {
+  const { m, y } = parseMonthYearLoose(dateStr);
+  const endMonthEl = [...row.querySelectorAll('select, input')].find(e => /end\s*month/i.test(labelTextFor(e)));
+  const endYearEl  = [...row.querySelectorAll('select, input')].find(e => /end\s*year/i.test(labelTextFor(e)));
+  if (endMonthEl && m != null) (setMonthValueSmart(endMonthEl, String(m)) || setSelectValueSmart(endMonthEl, String(m)));
+  if (endYearEl  && y != null) setSelectValueSmart(endYearEl,  String(y));
+}
+
+// Fill each experience block from profile.experience[i]
+async function fillExperienceBlocksFromProfile(profile, root = document) {
+  const exps = Array.isArray(profile?.experience) ? profile.experience : [];
+  if (!exps.length) return;
+
+  const rows = getExperienceRows(root);
+  for (let i = 0; i < Math.min(rows.length, exps.length); i++) {
+    const row = rows[i];
+    const e   = exps[i] || {};
+
+    // Company / Employer
+    const companyEl =
+      row.querySelector('[data-k="company"]') ||
+      row.querySelector('[name*="company" i]') ||
+      null;
+    if (companyEl) setTextLike(companyEl, e.company || e.employer || "");
+    else setByLabelTextIn(row, /(company|employer|organization)/i, e.company || e.employer || "");
+
+    // Job Title / Position
+    const jobEl =
+      row.querySelector('[data-k="jobTitle"]') ||
+      row.querySelector('[name*="job" i], [name*="title" i], [name*="position" i]') ||
+      null;
+    if (jobEl) setTextLike(jobEl, e.jobTitle || e.job_title || e.title || "");
+    else setByLabelTextIn(row, /(job\s*title|position|role)/i, e.jobTitle || e.job_title || e.title || "");
+
+    // Location (optional)
+    const locEl =
+      row.querySelector('[data-k="location"]') ||
+      row.querySelector('[name*="location" i], [name*="city" i], [name*="town" i]') ||
+      null;
+    if (locEl) setTextLike(locEl, e.location || "");
+    else setByLabelTextIn(row, /(location|city|town)/i, e.location || "");
+
+    // Description / Responsibilities
+    const descEl =
+      row.querySelector('[data-k="description"], [data-k="roleDescription"]') ||
+      row.querySelector('[name*="description" i], [name*="responsibil" i]') ||
+      null;
+    if (descEl) setTextLike(descEl, e.description || e.role_description || e.roleDescription || "");
+    else setByLabelTextIn(row, /(description|responsibilit)/i, e.description || e.role_description || e.roleDescription || "");
+
+    // Dates (prefer data-k selectors inside the block)
+    const sMonth = row.querySelector('select[data-k="startMonth"]') ||
+                   [...row.querySelectorAll('select')].find(el => /start\s*month/i.test(labelTextFor(el)));
+    const sYear  = row.querySelector('select[data-k="startYear"]')  ||
+                   [...row.querySelectorAll('select')].find(el => /start\s*year/i.test(labelTextFor(el)));
+    const eMonth = row.querySelector('select[data-k="endMonth"]')   ||
+                   [...row.querySelectorAll('select')].find(el => /end\s*month/i.test(labelTextFor(el)));
+    const eYear  = row.querySelector('select[data-k="endYear"]')    ||
+                   [...row.querySelectorAll('select')].find(el => /end\s*year/i.test(labelTextFor(el)));
+
+    // support split or combined forms from profile.json
+    if (e.startMonth || e.startYear) {
+      if (sMonth) setMonthValueSmart(sMonth, String(e.startMonth));
+      if (sYear)  setSelectValueSmart(sYear,  String(e.startYear));
+    } else if (e.start_date) {
+      setStartMonthYearIn(row, e.start_date);
+    }
+
+    if (e.endMonth || e.endYear) {
+      if (eMonth) setMonthValueSmart(eMonth, String(e.endMonth));
+      if (eYear)  setSelectValueSmart(eYear,  String(e.endYear));
+    } else if (e.end_date) {
+      setEndMonthYearIn(row, e.end_date);
+    }
+  }
+}
+
+window.fillExperienceBlocksFromProfile = fillExperienceBlocksFromProfile;
+
+// Set a text/select/textarea within a given container by label regex
+function setByLabelTextIn(container, rx, value) {
+  if (value == null || value === "") return false;
+
+  // Try direct label → control mapping
+  const targets = [...container.querySelectorAll('input, textarea, select')];
+  for (const el of targets) {
+    const lab = labelTextFor(el) || "";
+    if (rx.test(lab)) {
+      if (el.tagName === "SELECT") setSelectValueSmart(el, value);
+      else setTextLike(el, value);
+      return true;
+    }
+  }
+  return false;
+}
+
+// === Fill Education rows from profile.education using data-k / name / label fallbacks ===
+function fillEducationBlocksFromProfile(profile, root = document) {
+  try {
+    const eduArr = Array.isArray(profile?.education) ? profile.education : [];
+    if (!eduArr.length) return;
+
+    // your getEducationRows already updated earlier
+    const rows = (typeof getEducationRows === "function") ? getEducationRows(root) : Array.from(root.querySelectorAll("#eduList .item, [data-edu-item], .education-item, .edu-block"));
+    const n = Math.min(rows.length, eduArr.length);
+
+    for (let i = 0; i < n; i++) {
+      const row  = rows[i];
+      const data = eduArr[i] || {};
+
+      // school
+      {
+        const el = pickField(row, "school", ["school","university","college"], ["school","university","college"]);
+        if (el) setTextLike(el, data.school ?? data.institution ?? "");
+      }
+
+      // degreeShort (normalize common long names to short codes)
+      {
+        let val = data.degreeShort || data.degree || "";
+        const norm = String(val).toLowerCase().replace(/\./g,"").trim();
+        if (!val) {
+          val = "";
+        } else if (/(associate.*science|^as$)/.test(norm)) {
+          val = "AS";
+        } else if (/(associate.*arts|^aa$)/.test(norm)) {
+          val = "AA";
+        } else if (/(bachelor.*science|^bs$|^bsc$)/.test(norm)) {
+          val = "BS";
+        } else if (/(bachelor.*arts|^ba$)/.test(norm)) {
+          val = "BA";
+        } else if (/(master.*science|^ms$|^msc$)/.test(norm)) {
+          val = "MS";
+        } else if (/(master.*arts|^ma$)/.test(norm)) {
+          val = "MA";
+        } else if (/(mba)/.test(norm)) {
+          val = "MBA";
+        } else if (/(phd|doctor.*philosophy)/.test(norm)) {
+          val = "PhD";
+        }
+        const sel = pickField(row, "degreeShort", ["degree"], ["degree"]);
+        if (sel && sel.tagName === "SELECT") {
+          setSelectValueLoose(sel, val);
+        } else if (sel) {
+          setTextLike(sel, val);
+        }
+      }
+
+      // field
+      {
+        const el = pickField(row, "field", ["field","major"], ["field","major"]);
+        if (el) setTextLike(el, data.field ?? data.major ?? "");
+      }
+
+      // gpa
+      {
+        const el = pickField(row, "gpa", ["gpa"], ["gpa"]);
+        if (el) setTextLike(el, data.gpa ?? "");
+      }
+
+    // start month/year (use smart month setter so Feb/February/2 all work)
+    {
+      const mRaw = data.startMonth ?? data.start_month ?? data.start_m ?? "";
+      const yRaw = data.startYear  ?? data.start_year  ?? data.startY   ?? "";
+      const mEl = pickField(row, "startMonth", ["startMonth","start_month","fromMonth"], ["start","month"]);
+      const yEl = pickField(row, "startYear",  ["startYear","start_year","fromYear"],   ["start","year"]);
+
+      if (mEl) {
+        if (mEl.tagName === "SELECT") {
+          if (!setMonthValueSmart(mEl, String(mRaw))) {
+            setSelectValueSmart?.(mEl, String(mRaw), "Start Month") || setSelectValueLoose(mEl, String(mRaw));
+          }
+        } else {
+          setTextLike(mEl, String(mRaw));
+        }
+      }
+      if (yEl) {
+        if (yEl.tagName === "SELECT") {
+          // SMART → LOOSE fallback (covers options without value="")
+          setSelectValueSmart?.(yEl, String(yRaw), "Start Year") || setSelectValueLoose(yEl, String(yRaw));
+        } else {
+          setTextLike(yEl, String(yRaw));
+        }
+      }
+    }
+
+    // end month/year (use smart month setter)
+    {
+      const mRaw = data.endMonth ?? data.end_month ?? data.end_m ?? "";
+      const yRaw = data.endYear  ?? data.end_year  ?? data.endY   ?? "";
+      const mEl = pickField(row, "endMonth", ["endMonth","end_month","toMonth"], ["end","month"]);
+      const yEl = pickField(row, "endYear",  ["endYear","end_year","toYear"],   ["end","year"]);
+
+      if (mEl) {
+        if (mEl.tagName === "SELECT") {
+          if (!setMonthValueSmart(mEl, String(mRaw))) {
+            setSelectValueSmart?.(mEl, String(mRaw), "End Month") || setSelectValueLoose(mEl, String(mRaw));
+          }
+        } else {
+          setTextLike(mEl, String(mRaw));
+        }
+      }
+      if (yEl) {
+        if (yEl.tagName === "SELECT") {
+          // SMART → LOOSE fallback (covers options without value="")
+          setSelectValueSmart?.(yEl, String(yRaw), "End Year") || setSelectValueLoose(yEl, String(yRaw));
+        } else {
+          setTextLike(yEl, String(yRaw));
+        }
+      }
+    }
+    }
+  } catch (e) {
+    console.warn("[filler] fillEducationBlocksFromProfile error", e);
+  }
+}
 
   function collectFields(root=document){
     const out = [];
@@ -1244,6 +2248,312 @@ function _normalizeKey(k) {
   return s;
 }
 
+/* === KEY SKILLS HELPER BLOCK (content.js) === */
+function sffNormSkill(s) {
+  return String(s || "").toLowerCase().replace(/\s+/g, "").trim(); // only lower + remove spaces
+}
+
+function sffGetCheckboxNodes(root = document) {
+  const pairs = [];
+
+  // Common pattern: <label> <input type="checkbox"> Skill </label>
+  const labels = Array.from(root.querySelectorAll("label"));
+  for (const lab of labels) {
+    const input =
+      lab.querySelector('input[type="checkbox"]') ||
+      (lab.htmlFor ? root.getElementById(lab.htmlFor) : null);
+
+    if (input && input.type === "checkbox") {
+      const raw = lab.textContent || lab.innerText || "";
+      const txt = raw.replace(/\s+/g, " ").trim();
+      pairs.push({ input, label: txt });
+    }
+  }
+
+  // Standalone checkboxes with aria-label/name (rare but safe)
+  const lone = root.querySelectorAll(
+    'input[type="checkbox"][aria-label], input[type="checkbox"][name]'
+  );
+  for (const inp of lone) {
+    const has = pairs.some(p => p.input === inp);
+    if (!has) {
+      const txt = inp.getAttribute("aria-label") || inp.name || "";
+      if (txt) pairs.push({ input: inp, label: txt });
+    }
+  }
+  return pairs;
+}
+
+function sffSetCheckbox(el, on = true) {
+  try {
+    const target = !!on;
+    if (!!el.checked === target) return false;
+    el.checked = target;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function sffCheckKeySkills(predictedList) {
+  const norm = sffNormSkill;
+
+  // if provided, only consider these page labels (already predicted as key_skill)
+  const predictedSet = new Set((predictedList || []).map(norm).filter(Boolean));
+
+  // read the skills that were saved from the SELECTED resume (popup saves this)
+  const { matchedSkills } = await chrome.storage.local.get("matchedSkills");
+  const req = new Set((matchedSkills?.required || []).map(norm).filter(Boolean));
+  const pref = new Set((matchedSkills?.preferred || []).map(norm).filter(Boolean));
+  const resumeSet = new Set([...req, ...pref]); // all skills from the selected resume
+
+  // scan page checkboxes + labels
+  const pairs = sffGetCheckboxNodes();
+  let checked = 0, candidates = 0;
+  const details = [];
+
+  for (const { input, label } of pairs) {
+    const lx = norm(label);
+    if (!lx) continue;
+
+    // If we were given a predicted list, only touch those
+    const isPredicted = predictedSet.size ? predictedSet.has(lx) : true;
+    if (!isPredicted) continue;
+
+    candidates++;
+    const shouldCheck = resumeSet.has(lx);
+    const did = shouldCheck ? sffSetCheckbox(input, true) : false;
+    if (did) checked++;
+    details.push({ label, normalized: lx, matched: shouldCheck, did });
+  }
+
+  return { ok: true, found: pairs.length, candidates, checked, details };
+}
+
+// === Key Skills helpers ===
+function sffNormSkillToken(s) {
+  let t = (s || "").toString().toLowerCase().trim();
+  t = t.replace(/\s+/g, "");
+  // keep + . # then normalize special cases
+  t = t.replace(/[^a-z0-9+.#]/g, "");
+  t = t
+    .replace(/^c\+\+$/,"cpp")
+    .replace(/^c#$/,"csharp")
+    .replace(/^\.net$/,"dotnet")
+    .replace(/^node\.?js$/,"nodejs")
+    .replace(/^react\.?js$/,"react")
+    .replace(/^next\.?js$/,"nextjs")
+    .replace(/^express\.?js$/,"express")
+    .replace(/^k8s$/,"kubernetes");
+  return t.replace(/[^a-z0-9]/g,"");
+}
+
+function deriveCheckboxLabel(input) {
+  // Prefer associated <label>, then aria-label, then value/text
+  const lab = (input.id && document.querySelector(`label[for="${input.id}"]`)) || input.closest("label");
+  const aria = input.getAttribute("aria-label");
+  const txt = (lab?.textContent || aria || input.value || input.textContent || "").trim();
+  return txt;
+}
+
+function findSkillsRoot() {
+  // Prefer a section whose heading includes “Key Skills” or “Skills” (not “Education”)
+  const containers = Array.from(document.querySelectorAll("section, fieldset, form, div"));
+  for (const sec of containers) {
+    const head = sec.querySelector("h1,h2,h3,h4,h5,h6,legend,.section-title,.header");
+    const t = (head?.textContent || "").toLowerCase();
+    if ((/\bkey\s*skills\b/.test(t) || /\bskills\b/.test(t)) && !/\beducation\b/.test(t)) {
+      return sec;
+    }
+  }
+  return document.body; // fallback
+}
+
+function pickSkillCheckboxes(root) {
+  const inputs = Array.from(root.querySelectorAll('input[type="checkbox"]'));
+  const roles  = Array.from(root.querySelectorAll('[role="checkbox"]'));
+  return { inputs, roles };
+}
+
+async function getMatchedSkillsFromStorage() {
+  const data = await new Promise(res => chrome.storage.local.get(["matchedSkills"], res));
+  const ms = data?.matchedSkills || {};
+  const req = Array.isArray(ms.required)  ? ms.required  : [];
+  const pref= Array.isArray(ms.preferred) ? ms.preferred : [];
+  return { req, pref };
+}
+
+async function checkKeySkillsFromSelectedResume() {
+  // 1) Get resume matched skills from storage
+  const data = await new Promise(res => chrome.storage.local.get(["matchedSkills"], res));
+  const ms = data?.matchedSkills || {};
+  const union = new Set([...(ms.required||[]), ...(ms.preferred||[])].map(sffNormSkillToken));
+  if (!union.size) return { ok:false, reason:"no matchedSkills", checked:0, tried:0, total:0 };
+
+  // 2) Find boxes
+  const root = findSkillsRoot();
+  const { inputs, roles } = pickSkillCheckboxes(root);
+
+  let checked = 0, tried = 0;
+
+  // native inputs
+  for (const box of inputs) {
+    const key = sffNormSkillToken(deriveCheckboxLabel(box));
+    if (!key || !union.has(key)) continue;
+    tried++;
+    if (!box.checked) {
+      box.click?.();
+      if (!box.checked) {
+        box.checked = true;
+        box.dispatchEvent(new Event("input",  { bubbles: true }));
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+        const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
+        lbl?.click?.();
+      }
+    }
+    if (box.checked) checked++;
+  }
+
+  // role="checkbox" custom widgets
+  for (const el of roles) {
+    const key = sffNormSkillToken((el.getAttribute("aria-label") || el.textContent || "").trim());
+    if (!key || !union.has(key)) continue;
+    tried++;
+    const before = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
+    if (!before) {
+      el.click?.();
+      el.dispatchEvent(new Event("input",  { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    const after = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
+    if (after) checked++;
+  }
+
+  return { ok:true, checked, tried, total: inputs.length + roles.length };
+}
+
+// Prevent double-registering skills listeners (popup reloads/ reinjections)
+if (!window.__SFF_SKILLS_LISTENERS__) {
+  window.__SFF_SKILLS_LISTENERS__ = true;
+
+  // ---- put BOTH skills listeners inside this block only once ----
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "EXT_CHECK_KEY_SKILLS") {
+      checkKeySkillsFromSelectedResume()
+        .then(r => sendResponse(r))
+        .catch(e => sendResponse({ ok:false, error:String(e) }));
+      return true;
+    }
+  });
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "EXT_CHECK_PREDICTED_KEY_SKILLS") {
+      (async () => {
+        const data = await new Promise(res => chrome.storage.local.get(["matchedSkills"], res));
+        const ms = data?.matchedSkills || {};
+        const resumeSet = new Set([...(ms.required||[]), ...(ms.preferred||[])].map(sffNormSkillToken));
+        const predicted = Array.isArray(msg.skills) ? msg.skills : [];
+        const wanted = new Set(predicted.map(sffNormSkillToken).filter(t => resumeSet.has(t)));
+        if (!wanted.size) return sendResponse({ ok:true, checked:0, tried:0, total:0 });
+
+        const root = findSkillsRoot();
+        const { inputs, roles } = pickSkillCheckboxes(root);
+        let checked = 0, tried = 0;
+
+        for (const box of inputs) {
+          const key = sffNormSkillToken(deriveCheckboxLabel(box));
+          if (!key || !wanted.has(key)) continue;
+          tried++;
+          if (!box.checked) {
+            box.click?.();
+            if (!box.checked) {
+              box.checked = true;
+              box.dispatchEvent(new Event("input",  { bubbles: true }));
+              box.dispatchEvent(new Event("change", { bubbles: true }));
+              const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
+              lbl?.click?.();
+            }
+          }
+          if (box.checked) checked++;
+        }
+        for (const el of roles) {
+          const key = sffNormSkillToken((el.getAttribute("aria-label") || el.textContent || "").trim());
+          if (!key || !wanted.has(key)) continue;
+          tried++;
+          const before = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
+          if (!before) {
+            el.click?.();
+            el.dispatchEvent(new Event("input",  { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          const after = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
+          if (after) checked++;
+        }
+        sendResponse({ ok:true, checked, tried, total: inputs.length + roles.length });
+      })();
+      return true;
+    }
+  });
+}
+
+// Predicted key skills → intersect with resume skills, then check
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.action !== "EXT_CHECK_PREDICTED_KEY_SKILLS") return;
+  (async () => {
+    // 1) union of resume skills
+    const data = await new Promise(res => chrome.storage.local.get(["matchedSkills"], res));
+    const ms = data?.matchedSkills || {};
+    const resumeSet = new Set([...(ms.required||[]), ...(ms.preferred||[])].map(sffNormSkillToken));
+
+    // 2) filter predicted by intersection
+    const predicted = Array.isArray(msg.skills) ? msg.skills : [];
+    const wanted = new Set(predicted.map(sffNormSkillToken).filter(t => resumeSet.has(t)));
+    if (!wanted.size) return sendResponse({ ok:true, checked:0, tried:0, total:0 });
+
+    // 3) find + click
+    const root = findSkillsRoot();
+    const { inputs, roles } = pickSkillCheckboxes(root);
+
+    let checked = 0, tried = 0;
+
+    for (const box of inputs) {
+      const key = sffNormSkillToken(deriveCheckboxLabel(box));
+      if (!key || !wanted.has(key)) continue;
+      tried++;
+      if (!box.checked) {
+        box.click?.();
+        if (!box.checked) {
+          box.checked = true;
+          box.dispatchEvent(new Event("input",  { bubbles: true }));
+          box.dispatchEvent(new Event("change", { bubbles: true }));
+          const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
+          lbl?.click?.();
+        }
+      }
+      if (box.checked) checked++;
+    }
+
+    for (const el of roles) {
+      const key = sffNormSkillToken((el.getAttribute("aria-label") || el.textContent || "").trim());
+      if (!key || !wanted.has(key)) continue;
+      tried++;
+      const before = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
+      if (!before) {
+        el.click?.();
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const after = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
+      if (after) checked++;
+    }
+
+    sendResponse({ ok:true, checked, tried, total: inputs.length + roles.length });
+  })();
+  return true; // async
+});
+
 function _pickTopKeyFromAny(x) {
   // Accept: string | {prediction, confidence} | {topk:[...]} | null
   if (!x) return { prediction: null, confidence: 0 };
@@ -1290,6 +2600,8 @@ async function getPredictions(labels) {
       resolve(null);
     }
   });
+
+window.getPredictions = getPredictions;
 
   // 2) Optional direct fetch fallback (if you run a local API). Safe no-op if unreachable.
   const tryFetch = async () => {
@@ -1358,6 +2670,35 @@ async function getPredictions(labels) {
       start_date: (exp0.startMonth && exp0.startYear) ? `${String(exp0.startMonth).padStart(2,"0")}/${exp0.startYear}` : "",
       end_date:   (exp0.endMonth   && exp0.endYear)   ? `${String(exp0.endMonth).padStart(2,"0")}/${exp0.endYear}`   : "",
     };
+
+    // Get the full profile (arrays!) so we know how many educations to add
+    const fullProfile = await new Promise(res => {
+      try {
+        chrome.runtime.sendMessage({ action: "getProfile" }, (resp) => res((resp && resp.profile) || {}));
+      } catch {
+        res({});
+      }
+    });
+
+    // Click “+ Add Education” enough times to reveal all edu blocks,
+    // then wait a tick so new inputs are in the DOM BEFORE we scan fields.
+    await ensureAndFillEducation(fullProfile, document);
+    
+    // Experience: mirror education orchestrator
+    if (typeof ensureAndFillExperience === "function") {
+      await ensureAndFillExperience(fullProfile, document);
+    } else if (typeof ensureExperienceRowsExpOnly === "function") {
+      await ensureExperienceRowsExpOnly(fullProfile, document);
+      await fillExperienceBlocksFromProfile(fullProfile, document);
+    } else {
+      // final fallback to legacy helpers
+      if (typeof ensureExperienceRows === "function") {
+        await ensureExperienceRows(fullProfile, document);
+      }
+      await fillExperienceBlocksFromProfile(fullProfile, document);
+    }   
+        
+    await fillSkillsAndScalars(fullProfile);
 
     const pairs = collectPairs();
     if (!pairs.length) {
@@ -1456,6 +2797,73 @@ async function getPredictions(labels) {
     }
     return { ok: true, inputs: inputsCount, detected };
   }
+
+async function _sffDetectFieldsCore() {
+  // Use your existing detector. Examples:
+  // const res = await detectAllInputsOnPage();  // <-- your function
+  // return Array.isArray(res) ? res : (res?.detected || []);
+  // If you already have an EXT_DETECT_FIELDS handler that assembles the array,
+  // just reuse its core routine here.
+
+  // Minimal fallback skeleton (replace with your real detector):
+  const nodes = Array.from(document.querySelectorAll('input, select, textarea'));
+  return nodes.map(n => ({
+    labelText: (n.labels && n.labels[0]?.innerText) || n.placeholder || n.name || n.id || n.tagName,
+    inputType: n.type || n.tagName.toLowerCase(),
+    name: n.name || null,
+    id: n.id || null,
+    selector: null, // you may already compute this in your detector
+    detectedBy: "content",
+  }));
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.action === "EXT_DETECT_FIELDS_WITH_PREDICTIONS") {
+    (async () => {
+      try {
+        // 1) detect
+        const detected = await _sffDetectFieldsCore();
+
+        // 2) ask background for predictions (index-aligned)
+        const labels = detected.map(d => String(
+          d.labelText || d.label || d.placeholder || d.name || d.id || ""
+        ).trim());
+
+        const pred = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: "predictLabels", labels }, (r) => resolve(r));
+        });
+
+        const results = (pred && pred.success && Array.isArray(pred.results))
+          ? pred.results
+          : [];
+
+        // 3) attach predictions to detected rows
+        const items = detected.map((d, i) => {
+          const r = results[i] || {};
+          return Object.assign({}, d, {
+            prediction: r.prediction ?? null,
+            confidence: (typeof r.confidence === "number" ? r.confidence : null)
+          });
+        });
+
+        const predictedCount = results.filter(r => r && r.prediction).length;
+        sendResponse({
+          ok: true,
+          detected: items.length,
+          predicted: predictedCount,
+          items
+        });
+      } catch (e) {
+        console.error("[content] EXT_DETECT_FIELDS_WITH_PREDICTIONS failed:", e);
+        sendResponse({ ok: false, error: String(e) });
+      }
+    })();
+    return true; // keep the message channel open for async sendResponse
+  }
+
+  // (keep your other handlers here)
+});
+
 
   chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     try {
@@ -1700,6 +3108,19 @@ async function setComboOrTextNear(el, value) {
 function valueFromProfile(row, profile) {
   const label = (row.labelText || "").toLowerCase();
   const pred  = row.prediction;
+  const elNode = row.selector ? document.querySelector(row.selector) : null;
+  const ctx = row.context || (elNode
+    ? (window.SFF_inferContext ? window.SFF_inferContext(elNode) : null)
+    : null);
+  const edList = Array.isArray(profile.education)  ? profile.education  : [];
+  const exList = Array.isArray(profile.experience) ? profile.experience : [];
+  const edIdx = window.SFF_getEducationIndexForElement
+    ? window.SFF_getEducationIndexForElement(elNode)
+    : 0;
+
+  // Pick the correct edu entry for this field; fall back to first
+  const edX = edList[edIdx] || edList[0] || {};
+  const ex0 = exList[0]     || {};
 
   // tolerate both root-level and nested shapes
   const p  = profile.personal || {};
@@ -1759,29 +3180,58 @@ function valueFromProfile(row, profile) {
   if (pred === "job_title")        return ex.jobTitle || null;
   if (pred === "role_description") return ex.description || ex.roleDescription || null;
 
+  // Model class → Highest Education
+  if (pred === "highest_education") {
+    return (profile.highestEducation || profile.educationHighest || "") || null;
+  }
+
+  // Model class → Years of (Professional) Experience
+  if (pred === "years_of_experience") {
+    return (profile.yearsOfExperience || profile.meta?.yearsOfExperience || "") || null;
+  }
+
   const fmtMMYYYY = (m, y) => (m && y) ? `${String(m).padStart(2,"0")}/${y}` : null;
-  if (pred === "start_date") return fmtMMYYYY(ex.startMonth, ex.startYear) || fmtMMYYYY(ed.startMonth, ed.startYear);
-  if (pred === "end_date")   return fmtMMYYYY(ex.endMonth,   ex.endYear)   || fmtMMYYYY(ed.endMonth,   ed.endYear);
+
+  if (pred === "start_date") {
+    const eduStart = fmtMMYYYY(edX.startMonth, edX.startYear);
+    const jobStart = fmtMMYYYY(ex0.startMonth, ex0.startYear);
+    if (ctx === "education")  return eduStart || jobStart;
+    if (ctx === "employment") return jobStart || eduStart;
+    // default bias to education to avoid mis-filling edu dates from employment
+    return eduStart || jobStart;
+  }
+
+  if (pred === "end_date") {
+    const eduEnd = fmtMMYYYY(edX.endMonth, edX.endYear);
+    const jobEnd = fmtMMYYYY(ex0.endMonth, ex0.endYear);
+    if (ctx === "education")  return eduEnd || jobEnd;
+    if (ctx === "employment") return jobEnd || eduEnd;
+    return eduEnd || jobEnd;
+  }
 
   // ---- Education details (degree / school / major / graduation year)
   if (pred === "education") {
     // Highest Degree (supports selects and text)
     if (/\bdegree\b/.test(label)) {
-      const deg = ed.degreeLong || ed.degreeShort || "";
+      const deg = edX.degreeLong || edX.degreeShort || "";
       if (!deg) return null;
       return (window.H && H.normalizeDegreeLabel) ? H.normalizeDegreeLabel(deg) : deg;
     }
     // University / College / Institute / School
     if (/\b(university|college|institute|school)\b/.test(label)) {
-      return ed.school || null;
+      return edX.school || null;
     }
     // Field of Study / Major / Discipline / Concentration
     if (/\b(field|major|study|discipline|concentration)\b/.test(label)) {
-      return ed.field || null;
+      return edX.field || null;
+    }
+    // GPA
+    if (/\bgpa\b/.test(label)) {
+      return edX.gpa || null;
     }
     // Year of Graduation / Graduation Year
     if (/\b(grad|graduation|year)\b/.test(label)) {
-      return ed.endYear || ed.graduationYear || null;
+      return edX.endYear || edX.graduationYear || null;
     }
     return null;
   }
@@ -1844,7 +3294,7 @@ function valueFromProfile(row, profile) {
 async function fillDetected(items, profile, resumeId) {
   const report = [];
   for (const row of items || []) {
-    const el = row.selector ? document.querySelector(row.selector) : null;
+    const el = row.node || (row.selector ? document.querySelector(row.selector) : null);
     const pred = row.prediction;
     const label = row.labelText || "";
 
@@ -1929,12 +3379,150 @@ async function fillDetected(items, profile, resumeId) {
   return report;
 }
 
+// ---- Small waits for DOM to settle ----
+function waitFrame() {
+  return new Promise(r => requestAnimationFrame(() => r()));
+}
+function wait(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+async function waitDomSettle() {
+  // 2 rafs + short timeout helps when frameworks insert inputs async
+  await waitFrame(); await waitFrame(); await wait(20);
+}
+
+// === SAFE WRAPPER (always returns aligned [{prediction, confidence}, ...]) ===
+async function getPredictionsSafe(labels) {
+  try {
+    const labs = Array.from(labels || []);
+    // Use the global one. Do NOT reference a bare getPredictions here.
+    const gp = (typeof window.getPredictions === "function") ? window.getPredictions : null;
+    if (!gp) {
+      // last-resort background call
+      const reply = await new Promise(res => {
+        chrome.runtime.sendMessage({ action: "predictLabels", labels: labs }, r => res(r));
+      });
+      const ok = reply && Array.isArray(reply.results);
+      const arr = ok ? reply.results : [];
+      return labs.map((_, i) => arr[i] || { prediction: null, confidence: 0 });
+    }
+    const out = await gp(labs);
+    if (!Array.isArray(out)) return labs.map(() => ({ prediction: null, confidence: 0 }));
+    return labs.map((_, i) => out[i] || { prediction: null, confidence: 0 });
+  } catch (e) {
+    console.warn("[content] getPredictionsSafe error:", e);
+    return (labels || []).map(() => ({ prediction: null, confidence: 0 }));
+  }
+}
+
+window.getPredictionsSafe = getPredictionsSafe;
+
+// ---- One full pass: detect → predict → fill ----
+async function runFullDetectFill(profile, resumeId = null) {
+  try {
+    await waitDomSettle();
+
+    const detected = (typeof detectAllFields === "function") ? detectAllFields() : [];
+    const labels   = detected.map(r => r.labelText || "");
+    const preds    = await getPredictionsSafe(labels);
+
+    const items = detected.map((row, i) => {
+      const pr = preds[i] || { prediction: null, confidence: 0 };
+      return {
+        ...row,
+        prediction: pr.prediction ?? null,
+        confidence: (typeof pr.confidence === "number") ? pr.confidence : 0
+      };
+    });
+
+    // Your existing centralized filler
+    return await fillDetected(items, profile, resumeId);
+  } catch (e) {
+    console.warn("[content] runFullDetectFill failed:", e);
+    return [];
+  }
+}
+
+// expose for any caller (popup, other helpers, observers)
+window.runFullDetectFill = runFullDetectFill;
+
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
       if (msg?.action === "EXT_FILL_FIELDS") {
-        const report = await fillDetected(msg.items || [], msg.profile || {}, msg.resumeId || null);
-        sendResponse({ ok:true, report });
+        const profile = msg.profile || {};
+      
+        // 1) Education: ensure rows exist and fill them (handles wait + retry)
+        try {
+          if (typeof ensureAndFillEducation === "function") {
+            await ensureAndFillEducation(profile, document);
+          } else if (typeof window.ensureAndFillEducation === "function") {
+            await window.ensureAndFillEducation(profile, document);
+          } else {
+            // fallback to older two-step if orchestrator is unavailable
+            if (typeof ensureEducationRowsEduOnly === "function") {
+              await ensureEducationRowsEduOnly(profile, document);
+            } else if (typeof window.ensureEducationRowsEduOnly === "function") {
+              await window.ensureEducationRowsEduOnly(profile, document);
+            }
+            await new Promise(r => setTimeout(r, 120));
+            if (typeof fillEducationBlocksFromProfile === "function") {
+              await fillEducationBlocksFromProfile(profile, document);
+            } else if (typeof window.fillEducationBlocksFromProfile === "function") {
+              await window.fillEducationBlocksFromProfile(profile, document);
+            }
+          }
+
+          // Experience — mirror education orchestrator (single caller)
+          try {
+            await ensureAndFillExperience(profile, document);
+          } catch (e) {
+            console.warn("[content] ensureAndFillExperience failed:", e);
+          }    
+          
+          await fillVoluntarySelfID(profile);
+
+        } catch (e) {
+          console.warn("[content] add/fill edu/exp failed:", e);
+        }    
+        // 1) Initial pass with whatever the popup already had
+        const report1 = await fillDetected(msg.items || [], profile, msg.resumeId || null);
+
+        // 3) Final catch-all pass to scoop up any late-bound inputs
+        const report3 = await runFullDetectFill(profile, msg.resumeId || null);
+
+        // 4) Merge reports (dedupe by label+prediction+status)
+        const seen = new Set();
+        const merged = [];
+        for (const r of [...(report1||[]), ...(report3||[])]) {
+          const key = `${r.label ?? ""}::${r.prediction ?? ""}::${r.status ?? ""}`;
+          if (!seen.has(key)) { seen.add(key); merged.push(r); }
+        }
+
+        // --- Build a fresh detect+predict snapshot AFTER adding/filling rows ---
+        const detectedNow = (typeof detectAllFields === "function") ? detectAllFields() : [];
+        const labelsNow   = detectedNow.map(r => r.labelText || "");
+        const predsNow    = await getPredictionsSafe(labelsNow);
+
+        // annotate detections with predictions for the popup
+        const annotated = detectedNow.map((row, i) => ({
+          ...row,
+          prediction: (predsNow[i] && predsNow[i].prediction) || null,
+          confidence: (predsNow[i] && typeof predsNow[i].confidence === "number") ? predsNow[i].confidence : 0
+        }));
+        const predictedCount = annotated.filter(a => !!a.prediction).length;
+
+        // return both: the fill report + the *live* detection summary
+        sendResponse({
+          ok: true,
+          report: merged,
+          detectSummary: {
+            detected: annotated.length,
+            predicted: predictedCount,
+            items: annotated
+          }
+        });
         return;
       }      
     } catch (e) {
@@ -2046,3 +3634,4 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
   });
 })();
+

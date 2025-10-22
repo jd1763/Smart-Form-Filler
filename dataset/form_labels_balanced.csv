@@ -716,15 +716,15 @@ Employment Duties,role_description
 Daily Tasks,role_description
 Main Role,role_description
 Primary Duties,role_description
-LinkedIn, social
-LinkedIn URL, social
-GitHub, social
-GitHub Link, social
-Portfolio, social
-Personal Website, social
-Website, social
-Online Profile, social
-Professional Website, social
+LinkedIn,social
+LinkedIn URL,social
+GitHub,social
+GitHub Link,social
+Portfolio,social
+Personal Website,social
+Website,social
+Online Profile,social
+Professional Website,social
 LinkedIn,social
 LinkedIn Profile,social
 LinkedIn URL,social
@@ -930,3 +930,271 @@ Visa Status,work_auth
 Right to Work,work_auth
 Legal Work Authorization,work_auth
 Sponsorship Required,work_auth
+Years of Professional Experience,years_of_experience
+Years of Experience,years_of_experience
+Year(s) of Experience,years_of_experience
+Total Years of Experience,years_of_experience
+Overall Experience,years_of_experience
+Experience (Years),years_of_experience
+YOE,years_of_experience
+Professional Experience (Years),years_of_experience
+Work Experience (Years),years_of_experience
+How many years of professional experience?,years_of_experience
+Years of relevant experience,years_of_experience
+Total Experience,years_of_experience
+Experience Level (Years),years_of_experience
+Years of total experience,years_of_experience
+Total Yrs Exp,years_of_experience
+Professional exp (yrs),years_of_experience
+Highest Education,highest_education
+Highest Degree,highest_education
+Highest Level of Education,highest_education
+Education Level,highest_education
+Degree Level,highest_education
+What is your highest level of education?,highest_education
+Highest Qualification,highest_education
+Educational Attainment,highest_education
+Top Degree,highest_education
+Highest completed education,highest_education
+Education level (highest),highest_education
+Degree level (highest),highest_education
+Key Skills,skills
+Technical Skills,skills
+Core Skills,skills
+Required Skills,skills
+Preferred Skills,skills
+Relevant Skills,skills
+Skills,skills
+Your Skills,skills
+Skills (Select all that apply),skills
+Skills & Highest Education,skills
+Python,key_skill
+Java,key_skill
+C,key_skill
+C++,key_skill
+C#,key_skill
+Go,key_skill
+Golang,key_skill
+Rust,key_skill
+Kotlin,key_skill
+Swift,key_skill
+JavaScript,key_skill
+JS,key_skill
+TypeScript,key_skill
+TS,key_skill
+HTML,key_skill
+CSS,key_skill
+SQL,key_skill
+MySQL,key_skill
+PostgreSQL,key_skill
+Postgres,key_skill
+SQLite,key_skill
+Oracle,key_skill
+SQL Server,key_skill
+MongoDB,key_skill
+Redis,key_skill
+Cassandra,key_skill
+DynamoDB,key_skill
+Elasticsearch,key_skill
+Snowflake,key_skill
+Presto,key_skill
+Hive,key_skill
+Spark,key_skill
+Hadoop,key_skill
+Kafka,key_skill
+Airflow,key_skill
+dbt,key_skill
+Pandas,key_skill
+NumPy,key_skill
+SciPy,key_skill
+scikit-learn,key_skill
+sklearn,key_skill
+TensorFlow,key_skill
+PyTorch,key_skill
+Keras,key_skill
+XGBoost,key_skill
+LightGBM,key_skill
+Matplotlib,key_skill
+Seaborn,key_skill
+Plotly,key_skill
+OpenCV,key_skill
+NLTK,key_skill
+spaCy,key_skill
+Transformers,key_skill
+LangChain,key_skill
+React,key_skill
+React.js,key_skill
+ReactJS,key_skill
+Next.js,key_skill
+NextJS,key_skill
+Angular,key_skill
+Vue,key_skill
+Node,key_skill
+Node.js,key_skill
+NodeJS,key_skill
+Express,key_skill
+Express.js,key_skill
+ExpressJS,key_skill
+Django,key_skill
+Flask,key_skill
+FastAPI,key_skill
+Spring,key_skill
+Spring Boot,key_skill
+ASP.NET,key_skill
+.NET,key_skill
+.NET Core,key_skill
+Ruby on Rails,key_skill
+Rails,key_skill
+Laravel,key_skill
+Svelte,key_skill
+REST,key_skill
+GraphQL,key_skill
+gRPC,key_skill
+WebSockets,key_skill
+Microservices,key_skill
+Monorepo,key_skill
+OOP,key_skill
+FP,key_skill
+TDD,key_skill
+JUnit,key_skill
+pytest,key_skill
+Jest,key_skill
+Mocha,key_skill
+Chai,key_skill
+Cypress,key_skill
+Selenium,key_skill
+Playwright,key_skill
+Puppeteer,key_skill
+Storybook,key_skill
+Docker,key_skill
+Kubernetes,key_skill
+K8s,key_skill
+Helm,key_skill
+Terraform,key_skill
+Ansible,key_skill
+Packer,key_skill
+Jenkins,key_skill
+GitHub Actions,key_skill
+GitLab CI,key_skill
+CircleCI,key_skill
+ArgoCD,key_skill
+Prometheus,key_skill
+Grafana,key_skill
+Loki,key_skill
+ELK,key_skill
+Datadog,key_skill
+New Relic,key_skill
+AWS,key_skill
+Azure,key_skill
+GCP,key_skill
+S3,key_skill
+EC2,key_skill
+Lambda,key_skill
+RDS,key_skill
+ECS,key_skill
+EKS,key_skill
+CloudFormation,key_skill
+CDK,key_skill
+CloudWatch,key_skill
+BigQuery,key_skill
+Pub/Sub,key_skill
+Firebase,key_skill
+Vercel,key_skill
+Netlify,key_skill
+Heroku,key_skill
+Render,key_skill
+Nginx,key_skill
+Apache,key_skill
+Gunicorn,key_skill
+uWSGI,key_skill
+Linux,key_skill
+Unix,key_skill
+Bash,key_skill
+Shell,key_skill
+PowerShell,key_skill
+Git,key_skill
+GitHub,key_skill
+GitLab,key_skill
+Bitbucket,key_skill
+Jira,key_skill
+Confluence,key_skill
+Postman,key_skill
+Insomnia,key_skill
+Swagger,key_skill
+OpenAPI,key_skill
+OAuth,key_skill
+OAuth2,key_skill
+OIDC,key_skill
+JWT,key_skill
+SAML,key_skill
+TLS,key_skill
+SSL,key_skill
+RSA,key_skill
+gcloud,key_skill
+az cli,key_skill
+aws cli,key_skill
+Numba,key_skill
+Dask,key_skill
+Pydantic,key_skill
+SQLAlchemy,key_skill
+Prisma,key_skill
+Knex,key_skill
+TypeORM,key_skill
+Mongoose,key_skill
+Celery,key_skill
+RQ,key_skill
+RabbitMQ,key_skill
+ActiveMQ,key_skill
+SQS,key_skill
+SNS,key_skill
+Kinesis,key_skill
+Redshift,key_skill
+Databricks,key_skill
+Spark SQL,key_skill
+Delta Lake,key_skill
+Parquet,key_skill
+Avro,key_skill
+Feather,key_skill
+D3.js,key_skill
+Three.js,key_skill
+Tailwind CSS,key_skill
+Bootstrap,key_skill
+Chakra UI,key_skill
+Material UI,key_skill
+shadcn/ui,key_skill
+Framer Motion,key_skill
+Redux,key_skill
+Zustand,key_skill
+RxJS,key_skill
+Vitest,key_skill
+Vite,key_skill
+Webpack,key_skill
+Rollup,key_skill
+Babel,key_skill
+ESLint,key_skill
+Prettier,key_skill
+Husky,key_skill
+PNPM,key_skill
+Yarn,key_skill
+NPM,key_skill
+Make,key_skill
+CMake,key_skill
+Gradle,key_skill
+Maven,key_skill
+Ant,key_skill
+OpenAPI Generator,key_skill
+CodeGen,key_skill
+C Plus Plus,key_skill
+C-Plus-Plus,key_skill
+C Sharp,key_skill
+C-Sharp,key_skill
+Nodejs,key_skill
+Reactjs,key_skill
+Nextjs,key_skill
+Expressjs,key_skill
+DotNet,key_skill
+dotnet,key_skill
+K8S,key_skill
+CI/CD,key_skill
+CI CD,key_skill
+CICD,key_skill

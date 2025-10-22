@@ -5,6 +5,21 @@ const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[popup]", ...a);
 const err = (...a) => console.error("[popup]", ...a);
 
+// --- global shims so legacy pieces don't crash ---
+if (typeof window.getActiveTab === "undefined") {
+  window.getActiveTab = async function () {
+    const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return t || null;
+  };
+}
+if (typeof window.sendToTab === "undefined") {
+  window.sendToTab = function (tabId, payload) {
+    return new Promise(res =>
+      chrome.tabs.sendMessage(tabId, payload, r => res(r))
+    );
+  };
+}
+
 // ========= DIAGNOSTICS PANEL =========
 let DIAG; // root <div> we render into
 
@@ -182,19 +197,44 @@ function normalizeDetectedShape(resp) {
   const arr = Array.isArray(resp?.detected) ? resp.detected : [];
   return arr.map(x => ({
     key:   x.key || x.prediction || x.name || null,
-    label: x.label || x.labelText || x.placeholder || x.name || x.id || "(Unknown)",
-    confidence: "N/A"  // not shown in Detected; only for Non-Filled meta
+    // prefer canonical labelText, then explicit label, then id/name; never placeholder
+    label: x.labelText || x.label || x.id || x.name || "(Unknown)",
+    confidence: "N/A"
   }));
 }
 
   // ---------- tab + messaging helpers ----------
-  async function getActiveTab() {
-    const [tab] = await chrome.tabs.query({ active:true, currentWindow:true });
-    return tab;
+async function getActiveTab(){
+  return new Promise(res=>{
+    chrome.tabs.query({active:true,currentWindow:true},tabs=>res(tabs?.[0]||null));
+    });
   }
+
   async function ask(tabId, payload) {
     try { return await chrome.tabs.sendMessage(tabId, payload); }
     catch { return null; }
+  }
+
+  function sendToTab(tabId, payload) {
+    return new Promise(res => {
+      chrome.tabs.sendMessage(tabId, payload, (resp) => {
+        if (chrome.runtime.lastError) return res({ ok:false, error: chrome.runtime.lastError.message });
+        res(resp || { ok:false });
+      });
+    });
+  }
+  
+  // Run the Key Skills pass in the best frame (handles iframes)
+  async function runKeySkillsPass(tabId) {
+    try {
+      const frameId = await getBestFrame(tabId);
+      const resp = await sendToFrame(tabId, frameId, { action: "EXT_CHECK_KEY_SKILLS" });
+      log("[popup] key-skills:", resp);
+      return resp;
+    } catch (e) {
+      err("runKeySkillsPass failed:", e);
+      return { ok:false, error:String(e) };
+    }
   }
 
 // --------- detection + seeding ----------
@@ -219,15 +259,22 @@ async function detectAndSeed() {
     resp = await sendToFrame(tab.id, frameId, { action: "EXT_DETECT_FIELDS_SIMPLE" });
   }
 
-  const detected = normalizeDetectedShape(resp || { detected: [] });
+  // Build detected strictly from labelText (robust & consistent with predictDebug)
+  const raw = Array.isArray(resp?.detected) ? resp.detected : [];
+  const detected = raw
+    .map(d => ({
+      key: d.prediction || d.name || d.id || null,
+      label: (d.labelText || "").trim()
+    }))
+    .filter(x => x.label); // drop anything without a label
 
-  // Detected = label-only cards (no chip/meter)
+  // Single source of truth for header + dropdown
+  window.SFF_DETECTED = detected.slice();
+
+  // Render Detected (label-only)
   renderDetected(detectedListEl, detected);
 
-  // Filled = empty, but keep the same card style
-  renderFieldList(filledFieldsEl, [], { title: "Filled", mode: "filled" });
-
-  // Non-Filled = same card layout as Filled, with N/A confidence and 0% meter
+  // Seed Non-Filled with the same label-only items
   const nonFilledInit = detected.map(d => ({
     key: d.key || null,
     label: d.label,
@@ -235,14 +282,14 @@ async function detectAndSeed() {
   }));
   renderFieldList(notFilledFieldsEl, nonFilledInit, { title: "Non-Filled", mode: "nonfilled" });
   forceNonFilledBadges(notFilledFieldsEl);
-  
-  // counts
-  refreshAllCounts({
-    detectedCount: detected.length,
-    filledCount:   0,
-    nonFilledCount: detected.length
-  });
 
+  // Counts from the same list/DOM
+  const detectedCount  = detected.length;
+  const filledCount    = filledFieldsEl.querySelectorAll(".field-item").length;
+  const nonFilledCount = notFilledFieldsEl.querySelectorAll(".field-item").length;
+  if (typeof refreshAllCounts === "function") {
+    refreshAllCounts({ detectedCount, filledCount, nonFilledCount });
+  }
   detectedHintEl.textContent = `${detected.length} fields found`;
 
   return { detected};
@@ -299,7 +346,6 @@ function ensureNotFilledBadges(container){
       const nonFilledInit = detected.map(d => ({ key: d.key || null, label: d.label, confidence: "N/A" }));
       renderFieldList(notFilledFieldsEl, nonFilledInit, { title: "Non-Filled", mode: "nonfilled" });
       forceNonFilledBadges(notFilledFieldsEl);
-      refreshAllCounts({ detectedCount: detected.length, filledCount: 0, nonFilledCount: detected.length });
       return;
     }
   
@@ -358,19 +404,52 @@ function ensureNotFilledBadges(container){
 
   // ---------- toggles (click only; no persist, no auto-open) ----------
   function wireToggles() {
-    const makeToggle = (hdrEl, panelEl) => {
-      hdrEl.addEventListener("click", () => {
-        const open = panelEl.style.display !== "none";
-        panelEl.style.display = open ? "none" : "block";
-        const base  = hdrEl.dataset.base  || hdrEl.textContent.replace(/^[▶▼]\s*/, "");
-        const count = hdrEl.dataset.count || "";
-        hdrEl.textContent = `${open ? "▶" : "▼"} ${base}${count ? ` (${count})` : ""}`;
+    // live counters coming from the UI that's currently rendered
+    function currentCounts() {
+      const detectedCount =
+        (Array.isArray(window.SFF_DETECTED) && window.SFF_DETECTED.length) ||
+        (document.getElementById("detectedList")?.querySelectorAll(".field-item").length || 0);
+      const filledCount =
+        (document.getElementById("filledFields")?.querySelectorAll(".field-item").length || 0);
+      const nonFilledCount =
+        (document.getElementById("notFilledFields")?.querySelectorAll(".field-item").length || 0);
+      return { detectedCount, filledCount, nonFilledCount };
+    }
+  
+    function setHeader(hdrEl, panelEl, base, count) {
+      const open = panelEl.style.display !== "none";
+      hdrEl.dataset.base  = base;
+      hdrEl.dataset.count = String(count);
+      hdrEl.textContent   = `${open ? "▼" : "▶"} ${base} (${count})`;
+    }
+  
+    const toggles = [
+      { hdr: document.getElementById("detectedToggle"),  panel: document.getElementById("detectedFields"),  base: "Detected Fields" },
+      { hdr: document.getElementById("filledToggle"),    panel: document.getElementById("filledFields"),    base: "Filled Fields" },
+      { hdr: document.getElementById("notFilledToggle"), panel: document.getElementById("notFilledFields"), base: "Non-Filled Fields" },
+    ].filter(x => x.hdr && x.panel);
+  
+    toggles.forEach(({hdr, panel, base}) => {
+      hdr.addEventListener("click", () => {
+        const open = panel.style.display !== "none";
+        panel.style.display = open ? "none" : "block";
+        const { detectedCount, filledCount, nonFilledCount } = currentCounts();
+        const n = base.startsWith("Detected") ? detectedCount
+                : base.startsWith("Filled")   ? filledCount
+                : nonFilledCount;
+        setHeader(hdr, panel, base, n);
       });
-    };
-    makeToggle(detectedToggle,  detectedFieldsEl);
-    makeToggle(filledToggle,    filledFieldsEl);
-    makeToggle(notFilledToggle, notFilledFieldsEl);
-  }
+    });
+  
+    // initial paint
+    const { detectedCount, filledCount, nonFilledCount } = currentCounts();
+    toggles.forEach(({hdr, panel, base}) => {
+      const n = base.startsWith("Detected") ? detectedCount
+              : base.startsWith("Filled")   ? filledCount
+              : nonFilledCount;
+      setHeader(hdr, panel, base, n);
+    });
+  }  
   wireToggles();
 
   // ---------- INIT (fresh every open; no cache restore) ----------
@@ -380,32 +459,107 @@ function ensureNotFilledBadges(container){
 
   // ---------- fill button ----------
   btnFill?.addEventListener("click", async () => {
-    const tab = await getActiveTab();
-    if (!tab?.id) return;
-    statusEl.textContent = "Filling…";
-  
-    const r = await ask(tab.id, { action: "fillFormSmart" });
-  
-    if (!r?.ok) {
-      statusEl.textContent = r?.error ? `❌ Fill failed — ${r.error}` : "❌ Fill failed.";
-      return;
+    // --- capture matched skills for the SELECTED resume used to APPLY (not suggestor) ---
+    try {
+      // 1) get selected resume text (from the UI where the user picked it)
+      const getSelectedResumeText = () => {
+        // selected card pattern
+        const card = document.querySelector('.resume-card.selected [data-resume-text], .resume-card.is-active [data-resume-text]');
+        if (card) return (card.textContent || card.value || "").trim();
+
+        // select dropdown pattern
+        const dd = document.querySelector('#resumeSelect, select[name="resume"], select[data-role="resume"]');
+        if (dd && dd.value) {
+          const opt = dd.options[dd.selectedIndex];
+          if (opt && opt.textContent) return opt.textContent.trim();
+        }
+
+        // textarea / preview pattern
+        const ta = document.querySelector('#resumeText, textarea[name="resumeText"], .resume-preview, #resume-preview');
+        if (ta) return (ta.textContent || ta.value || "").trim();
+
+        return "";
+      };
+
+      // 2) get job description text if available (helps if we re-match)
+      const getJobText = () => {
+        const el = document.querySelector('#jobDescription, textarea[name="jobDescription"], #jd, .jd-text');
+        return el ? (el.value || el.textContent || "").trim() : "";
+      };
+
+      const resumeText = getSelectedResumeText();
+      const jobText    = getJobText();
+
+      // 3) compute match for THIS resume (if computeMatch exists). Otherwise, fall back to existing buckets on screen.
+      let required = [], preferred = [];
+      if (typeof computeMatch === "function" && resumeText) {
+        const m = computeMatch(resumeText, jobText);
+        if (Array.isArray(m?.required))  required  = m.required;
+        if (Array.isArray(m?.preferred)) preferred = m.preferred;
+      }
+      if (!required.length || !preferred.length) {
+      // fallback: scrape visible lists from the popup UI (NEW: chip containers)
+      const reqDom = Array.from(
+        document.querySelectorAll('#matchedReq .chip, #skills-required li, #skillsRequired li, .bucket.skills .required li')
+      ).map(el => el.textContent.trim()).filter(Boolean);
+
+      const prefDom = Array.from(
+        document.querySelectorAll('#matchedPref .chip, #skills-preferred li, #skillsPreferred li, .bucket.skills .preferred li')
+      ).map(el => el.textContent.trim()).filter(Boolean);
+
+      if (!required.length)  required  = reqDom;
+      if (!preferred.length) preferred = prefDom;
+
+      }
+
+      // 4) write to storage and await completion so content.js can read immediately
+      await new Promise(res => chrome.storage.local.set(
+        { matchedSkills: { required, preferred } },
+        () => res()
+      ));
+      console.log("[popup] matchedSkills (selected resume) saved:", { required: required.length, preferred: preferred.length });
+    } catch (e) {
+      console.warn("[popup] matchedSkills(save) failed:", e);
     }
-  
-    // 🚫 No form found → do nothing else
-    const inputs = Number(r.inputs || 0);
-    if (!inputs) {
-      statusEl.textContent = "❌ No form detected on this page.";
-      btnTryAgain.style.display = "none";
-      return;
-    }
-  
-    // Proceed as usual
-    renderBuckets(detected, r);
-    const summary = `🪄 Form already filled`;
-  
-    btnTryAgain.style.display = "inline-block";
-    statusEl.textContent = summary + " — Run again?";
-  });  
+    // --- end capture ---
+
+    try {
+      // Use the single, unified fill pipeline so skills/education/experience logic is consistent.
+      await fillUsingPredictPipeline({ silent: true });
+    
+      // === prevent over-add and fill experiences ===
+      const tab = await getActiveTab();
+      if (tab?.id) {
+        // 1) Load the profile so the content script knows the exact experience target
+        let prof = {};
+        try {
+          prof = await getProfileFromBackend(); // already defined in this file
+        } catch (_) {
+          prof = {};
+        }
+            
+        // 2) Ensure content + target the best frame
+        await ensureContent(tab.id);
+        const frameId = await getBestFrame(tab.id);
+
+        // 3) Now actually fill the Experience (and Education) blocks
+        const { lastResumeId } = await chrome.storage.local.get("lastResumeId");
+        await sendToFrame(tab.id, frameId, {
+          action: "EXT_FILL_FIELDS",
+          items: (typeof SFF_DETECTED !== "undefined" && Array.isArray(SFF_DETECTED)) ? SFF_DETECTED : [],
+          profile: prof,
+          resumeId: lastResumeId || null
+        });
+
+        // 5) Settle, rescan counts for the popup, and run key-skills pass
+        await new Promise(r => setTimeout(r, 180));
+        await rescanNow();
+        await runKeySkillsPass(tab.id);
+      }
+    } catch (e) {
+      statusEl.textContent = "❌ " + (e.message || e);
+    }    
+  });
 
   btnTryAgain?.addEventListener("click", async () => { btnFill?.click(); });
 })();
@@ -747,11 +901,6 @@ function hideNoResumesCard() {
   if (fillBtn) { fillBtn.disabled = false; fillBtn.title = ""; }
 }
 
-async function getActiveTab(){
-  return new Promise(res=>{
-    chrome.tabs.query({active:true,currentWindow:true},tabs=>res(tabs?.[0]||null));
-  });
-}
 const isSupportedUrl = (u)=> /^https?:\/\//i.test(u)||/^file:\/\//i.test(u);
 async function pingAny(tabId){
   return new Promise(res=>{
@@ -795,6 +944,36 @@ function sendToFrame(tabId, frameId, msg){
       resolve(resp);
     });
   });
+}
+// Trigger the generic "match against matchedSkills and check boxes" pass
+async function runKeySkillsPass(tabId){
+  try{
+    if (!await ensureContent(tabId)) return { ok:false, error:"content unreachable" };
+    const frameId = await getBestFrame(tabId);
+    const resp = await sendToFrame(tabId, frameId, { action: "EXT_CHECK_KEY_SKILLS" });
+    log("[popup] key-skills:", resp);
+    return resp || { ok:false };
+  }catch(e){
+    err("[popup] key-skills error:", e);
+    return { ok:false, error:String(e) };
+  }
+}
+// Send a specific list of predicted key skills; content will intersect with resume's matched skills
+async function runPredictedKeySkillsPass(tabId, skills){
+  try{
+    if (!await ensureContent(tabId)) return { ok:false, error:"content unreachable" };
+    const frameId = await getBestFrame(tabId);
+    const unique = Array.from(new Set((skills||[]).map(s=>String(s).trim()).filter(Boolean)));
+    const resp = await sendToFrame(tabId, frameId, {
+      action: "EXT_CHECK_PREDICTED_KEY_SKILLS",
+      skills: unique
+    });
+    log("[popup] predicted key-skills:", resp);
+    return resp || { ok:false };
+  }catch(e){
+    err("[popup] predicted key-skills error:", e);
+    return { ok:false, error:String(e) };
+  }
 }
 async function getJobDescription(){
   const tab = await getActiveTab();
@@ -1350,14 +1529,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 // Buttons
-document.getElementById("fillForm")?.addEventListener("click", async () => {
-  try { await fillUsingPredictPipeline({ silent: true }); }
-  catch (e) { setStatus("❌ " + (e.message || e)); }
-});
-document.getElementById("tryAgain")?.addEventListener("click", async () => {
-  try { await fillUsingPredictPipeline({ silent: true }); }
-  catch (e) { setStatus("❌ " + (e.message || e)); }
-});
 document.getElementById("manageProfileBtn")?.addEventListener("click", () => {
   // open the profile editor page
   const url = chrome.runtime.getURL("profile.html");
@@ -1450,6 +1621,157 @@ function renderDetectedDebug(list, withPred = false) {
   }
 }
 
+async function withActiveTab(fn) {
+  return new Promise(resolve => {
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+      const tab = tabs && tabs[0];
+      resolve(fn(tab));
+    });
+  });
+}
+
+async function refreshDetectUI(tabId) {
+  try {
+    if (!tabId) return;
+
+    // re-resolve DOM nodes each time (unchanged)
+    const detectedListEl    = document.getElementById("detectedList");
+    const filledFieldsEl    = document.getElementById("filledFields");
+    const notFilledFieldsEl = document.getElementById("notFilledFields");
+    const detectedToggle    = document.getElementById("detectedToggle");
+    const filledToggle      = document.getElementById("filledToggle");
+    const notFilledToggle   = document.getElementById("notFilledToggle");
+    if (!detectedListEl || !filledFieldsEl || !notFilledFieldsEl) return;
+
+    await new Promise(r => setTimeout(r, 120));
+
+    // 1) fresh snapshot (prefer the same detector used on first paint)
+    let snap = await sendToTab(tabId, { action: "EXT_DETECT_FIELDS" });
+    let rows = Array.isArray(snap?.detected) ? snap.detected : null;
+
+    // Fallback to the prediction-annotated endpoint only if needed
+    if (!rows) {
+      const snap2 = await sendToTab(tabId, { action: "EXT_DETECT_FIELDS_WITH_PREDICTIONS" });
+      rows = Array.isArray(snap2?.items) ? snap2.items : [];
+      snap = { ...snap2, detected: rows }; // normalize for later
+    }
+
+    // label-only → de-dupe by label (collapse radio options under their group label)
+    const seen = new Set();
+    window.SFF_DETECTED = rows
+      .map(d => {
+        const label = (d.labelText || d.groupLabel || d.label || "").trim();
+        const key   = d.prediction || d.name || d.id || null;
+        return label ? { key, label } : null;
+      })
+      .filter(Boolean)
+      .filter(it => {
+        const k = it.label.toLowerCase();
+        if (seen.has(k)) return false; // drop duplicates
+        seen.add(k);
+        return true;
+      });
+
+    // Render Detected from the cleaned snapshot
+    const detectedNorm = window.SFF_DETECTED.slice();
+    renderDetected(detectedListEl, detectedNorm);
+
+// 3) Paint Filled/Non-Filled.
+//    If the page has a previous filler summary -> use it.
+//    Otherwise seed Non-Filled straight from what we just detected.
+const sum = await sendToTab(tabId, { action: "EXT_GET_FILLER_SUMMARY" }).catch(() => null);
+
+if (sum?.ok && (Array.isArray(sum.summary?.filled) || Array.isArray(sum.summary?.notFilled))) {
+  const filled = (sum.summary.filled || []).filter(isTrulyFilled);
+
+  const movedBack = (sum.summary.filled || [])
+    .filter(f => !isTrulyFilled(f))
+    .map(f => ({
+      key: f.key || null,
+      label: f.label || "(Unknown)",
+      confidence: parseConfidence(f.confidence) ?? "N/A"
+    }));
+
+  const nonFilled = (sum.summary.notFilled || []).map(nf => ({
+    key: nf.key || null,
+    label: nf.label || "(Unknown)",
+    confidence: parseConfidence(nf.confidence) ?? "N/A"
+  })).concat(movedBack);
+
+  renderFieldList(filledFieldsEl,    filled,    { title: "Filled",     mode: "filled" });
+  renderFieldList(notFilledFieldsEl, nonFilled, { title: "Non-Filled", mode: "nonfilled" });
+  forceNonFilledBadges(notFilledFieldsEl);
+} else {
+  // Non-destructive fallback: only seed on first paint; never wipe existing lists
+  const firstPaint = !filledFieldsEl.children.length && !notFilledFieldsEl.children.length;
+  if (firstPaint) {
+    const nonFilledInit = detectedNorm.map(d => ({
+      key: d.key, label: d.label, confidence: "N/A"
+    }));
+    renderFieldList(notFilledFieldsEl, nonFilledInit, { title: "Non-Filled", mode: "nonfilled" });
+    forceNonFilledBadges(notFilledFieldsEl);
+    // do NOT touch filledFieldsEl here
+  }
+}
+
+// Update hint too so the header/line shows the right number
+const hint = document.getElementById("detectedHint");
+if (hint) hint.textContent = `${detectedNorm.length} fields found`;
+
+
+    // 4) consistent counters
+    const detectedCount   = detectedNorm.length;
+    const filledCount     = filledFieldsEl.querySelectorAll(".field-item").length;
+    const nonFilledCount  = notFilledFieldsEl.querySelectorAll(".field-item").length;
+
+    if (typeof refreshAllCounts === "function") {
+      refreshAllCounts({ detectedCount, filledCount, nonFilledCount });
+    }    
+
+    const predictBtnCounter = document.getElementById("predictCount");
+    if (predictBtnCounter) {
+      const predictedCount = Array.isArray(rows) ? rows.filter(r => r && r.prediction).length : 0;
+      predictBtnCounter.textContent = `${predictedCount}/${window.SFF_DETECTED.length} predicted`;
+    }    
+  } catch (e) {
+    console.error("[popup] refreshDetectUI error:", e);
+  }
+}
+
+renderDetectedDebug(window.SFF_DETECTED, false);
+
+async function rescanNow() {
+  const tab = await (window.getActiveTab ? window.getActiveTab() : getActiveTabSimple());
+  if (tab?.id) await refreshDetectUI(tab.id);
+}
+
+window.rescanNow = rescanNow; // so add-education code can call it
+
+// === Fill form button (no extra experience clicks) ===
+document.getElementById("fillForm")?.addEventListener("click", async () => {
+  await withActiveTab(async (tab) => {
+    if (!tab?.id) return;
+    // 1) Smart fill (adds what’s needed & fills it)
+    await sendToTab(tab.id, { action: "fillFormSmart" });
+
+    // 2) Small settle, then refresh popup counts
+    await new Promise(r => setTimeout(r, 120));
+    await rescanNow();
+
+    // 3) (optional) recheck key skills
+    await sendToTab(tab.id, { action: "EXT_CHECK_KEY_SKILLS" });
+  });
+});
+
+// Also refresh once when popup opens so the initial numbers are right
+document.addEventListener("DOMContentLoaded", () => {
+  withActiveTab(async (tab) => {
+    if (!tab?.id) return;
+    await refreshDetectUI(tab.id);
+  });
+});
+
+
 // Debug-only detector (renamed to avoid shadowing main)
 async function runDetectorDebug() {
   const tab = await getActiveTab();
@@ -1480,7 +1802,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
-
 
 // DEBUG: Predict → annotate options with predictions and update #predictCount
 document.getElementById("btnPredict")?.addEventListener("click", async () => {
@@ -1620,6 +1941,27 @@ async function fillUsingPredictPipeline({ silent = true } = {}) {
     tryBtn.style.display  = hasAny ? "inline-block" : "none";
   }
 
+  // === After a successful fill, flip on the Key Skills ===
+  try {
+    const tab = await getActiveTab();
+    if (tab?.id) {
+      // Collect labels predicted as key_skill from SFF_DETECTED
+      const predictedKeySkills = (Array.isArray(SFF_DETECTED) ? SFF_DETECTED : [])
+        .filter(d => String(d?.prediction || "").toLowerCase() === "key_skill")
+        .map(d => (d.labelText || d.label || "").toString().trim())
+        .filter(Boolean);
+
+      if (predictedKeySkills.length) {
+        await runPredictedKeySkillsPass(tab.id, predictedKeySkills);
+      } else {
+        // Fallback: generic "use matchedSkills only" pass
+        await runKeySkillsPass(tab.id);
+      }
+    }
+  } catch (e) {
+    err("[popup] key-skills pass failed:", e);
+  }
+
   return resp;
 }
 
@@ -1683,6 +2025,8 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         if (!SFF_DETECTED.length) await runDetectorDebug();
         await predictForDetected();
+        await new Promise(r => setTimeout(r, 120));
+        await rescanNow();
       } catch (e) {
         console.error("[popup][predict] error:", e);
         const det = document.getElementById("detectedDetails");
@@ -1692,6 +2036,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
+// Bind the Fill button after DOM is ready (supports new or old id)
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("fillForm")
+  if (!btn) return;
+  btn.addEventListener("click", runFill); // use the unified handler you already have
+});
+
+
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("btnFill");
   if (!btn) return;
@@ -1699,6 +2051,16 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const resp = await fillUsingPredictPipeline({ silent: false }); // also renders the debug report
       if (!resp?.success) throw new Error(resp?.error || "Fill failed");
+      
+      const tab2 = await getActiveTab();
+      if (tab2?.id) {
+        // wait a tick so newly inserted rows are in the DOM
+        await new Promise(r => setTimeout(r, 120));
+        await rescanNow();
+      
+        // (optional) re-check skills if you show that panel
+        await sendToTab(tab2.id, { action: "EXT_CHECK_KEY_SKILLS" });
+      }      
     } catch (e) {
       const pre = document.getElementById("fillReport");
       const sum = document.getElementById("fillSummary");

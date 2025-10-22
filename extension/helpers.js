@@ -73,6 +73,16 @@
         const { firstName, lastName } = splitFullName(ud.fullName || "");
         return { value: wantName === "firstName" ? firstName : lastName, key: wantName };
       }
+
+      // Special-cases for scalar selects that the predictor often maps to "education"
+      if (/highest\s+education/i.test(labelText)) {
+        // Use the explicit top-level field when present; fallback to the mirror if needed
+        return { value: userData.highestEducation || userData.educationHighest || "", key: "highestEducation" };
+      }
+      if (/years?\s+of\s+professional\s+experience/i.test(labelText) || /years?\s+of\s+experience/i.test(labelText)) {
+        return { value: userData.yearsOfExperience || "", key: "yearsOfExperience" };
+      }
+
   
       // Address: let the label decide first (City/State/Zip/Country), then mappedKey as fallback
       if (wantAddr) {
@@ -770,3 +780,149 @@ H.buildStateCandidates = H.buildStateCandidates || function buildStateCandidates
     raw
   ])).filter(Boolean);
 };
+
+// === Smart <select> helpers & candidate builders (demographics) ===
+(function () {
+  const H = (window.SFFHelpers = window.SFFHelpers || {});
+  const nz = (s) => (s ?? "").toString().trim();
+  const norm = (s) => nz(s).toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+  // Pick the best matching option index from a list of candidates (strings)
+  H.matchOptionIndex = function matchOptionIndex(select, candidates) {
+    if (!select || !candidates || !candidates.length) return -1;
+    const cands = candidates.map(nz).filter(Boolean);
+    if (!cands.length) return -1;
+
+    const opts = Array.from(select.options || []).map((o, i) => ({
+      i,
+      t: nz(o.textContent),
+      v: nz(o.value),
+      tn: norm(o.textContent),
+      vn: norm(o.value),
+    }));
+
+    // exact normalized match
+    for (const cand of cands) {
+      const cn = norm(cand);
+      const hit = opts.find((o) => o.tn === cn || o.vn === cn);
+      if (hit) return hit.i;
+    }
+    // contains normalized
+    for (const cand of cands) {
+      const cn = norm(cand);
+      const hit = opts.find((o) => o.tn.includes(cn) || o.vn.includes(cn));
+      if (hit) return hit.i;
+    }
+    // raw case-insensitive equality
+    for (const cand of cands) {
+      const cl = cand.toLowerCase();
+      const hit = opts.find(
+        (o) => o.t.toLowerCase() === cl || o.v.toLowerCase() === cl
+      );
+      if (hit) return hit.i;
+    }
+    // starts-with (text)
+    for (const cand of cands) {
+      const cl = cand.toLowerCase();
+      const hit = opts.find((o) => o.t.toLowerCase().startsWith(cl));
+      if (hit) return hit.i;
+    }
+    return -1;
+  };
+
+  // Generic Yes/No/Decline candidates
+  H.buildYesNoCandidates = function (val) {
+    const s = nz(val).toLowerCase();
+    if (!s) return [];
+    if (s.startsWith("y")) return ["Yes", "Y", "True"];
+    if (s.startsWith("n")) return ["No", "N", "False"];
+    if (s.includes("prefer") || s.includes("decline") || s.includes("not")) {
+      return [
+        "Prefer not to answer",
+        "Prefer not to say",
+        "Decline to state",
+        "Decline",
+      ];
+    }
+    return [val];
+  };
+
+  // Disability (usually Yes/No/Decline)
+  H.buildDisabilityCandidates = function (val) {
+    const s = nz(val).toLowerCase();
+    if (!s) return [];
+    return H.buildYesNoCandidates(s).concat(["Decline to state"]);
+  };
+
+  // LGBTQ+ (Yes/No/Decline)
+  H.buildLGBTQCandidates = function (val) {
+    const s = nz(val).toLowerCase();
+    if (!s) return [];
+    return H.buildYesNoCandidates(s).concat(["Decline to state"]);
+  };
+
+  // Veteran Status (common phrasings)
+  H.buildVeteranCandidates = function (val) {
+    const s = nz(val).toLowerCase();
+    if (!s) return [];
+    if (s.includes("not") && s.includes("veteran"))
+      return ["No", "Not a Veteran", "I am not a veteran", "Non-Veteran"];
+    if (s.includes("veteran") || s.startsWith("y"))
+      return ["Yes", "Veteran", "I am a veteran"];
+    if (s.includes("decline") || s.includes("prefer"))
+      return ["Decline to state", "Prefer not to answer"];
+    return H.buildYesNoCandidates(s).concat(["Decline to state"]);
+  };
+
+  // Ethnicity (canonical buckets differ per site)
+  H.buildEthnicityCandidates = function (val) {
+    const s = nz(val).toLowerCase();
+    if (!s) return [];
+    const m = new Map([
+      ["hispanic", ["Hispanic/Latinx", "Hispanic or Latino", "Latino", "Latinx"]],
+      ["latinx",   ["Hispanic/Latinx", "Latinx", "Hispanic or Latino"]],
+      ["black",    ["Black or African American", "Black", "African American"]],
+      ["african",  ["Black or African American", "African American", "Black"]],
+      ["white",    ["White"]],
+      ["asian",    ["Asian"]],
+      ["americanindian", ["American Indian or Alaska Native"]],
+      ["alaska",   ["American Indian or Alaska Native"]],
+      ["pacific",  ["Native Hawaiian or Other Pacific Islander"]],
+      ["hawaiian", ["Native Hawaiian or Other Pacific Islander"]],
+      ["two",      ["Two or More Races", "Two or more", "Multiracial"]],
+      ["mixed",    ["Two or More Races", "Multiracial"]],
+      ["decline",  ["Decline to state", "Prefer not to answer", "Prefer not to say"]],
+      ["other",    ["Other", "Other / Prefer to self-describe"]],
+    ]);
+    for (const [k, arr] of m.entries()) {
+      if (s.includes(k)) return arr;
+    }
+    return [val];
+  };
+
+  // Race (provide if your file doesn't already define it)
+  if (typeof H.buildRaceCandidates !== "function") {
+    H.buildRaceCandidates = function (val) {
+      const s = nz(val).toLowerCase();
+      if (!s) return [];
+      const m = new Map([
+        ["black", ["Black or African American", "Black", "African American"]],
+        ["african", ["Black or African American", "African American", "Black"]],
+        ["white", ["White"]],
+        ["asian", ["Asian"]],
+        ["americanindian", ["American Indian or Alaska Native"]],
+        ["alaska", ["American Indian or Alaska Native"]],
+        ["pacific", ["Native Hawaiian or Other Pacific Islander"]],
+        ["hawaiian", ["Native Hawaiian or Other Pacific Islander"]],
+        ["two", ["Two or More Races", "Two or more", "Multiracial"]],
+        ["mixed", ["Two or More Races", "Multiracial"]],
+        ["decline", ["Decline to state", "Prefer not to answer", "Prefer not to say"]],
+        ["other", ["Other"]],
+      ]);
+      for (const [k, arr] of m.entries()) {
+        if (s.includes(k)) return arr;
+      }
+      return [val];
+    };
+  }
+})();

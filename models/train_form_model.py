@@ -11,20 +11,7 @@ from sklearn.pipeline import Pipeline
 from pathlib import Path
 # Point to the repo root (one level up from /models)
 REPO = Path(__file__).resolve().parents[1]
-
-candidates = [
-    REPO / "dataset" / "form_labels_balanced.csv",
-    REPO / "dataset" / "form_labels.csv",
-]
-
-csv_path = None
-for p in candidates:
-    if p.exists():
-        csv_path = p
-        break
-if not csv_path:
-    raise FileNotFoundError("Could not find form_labels*.csv in expected locations.")
-
+csv_path = REPO / "dataset" / "form_labels_balanced.csv"
 data = pd.read_csv(csv_path)
 # Expect columns: label_text, field_type
 data = data.dropna(subset=["label_text", "field_type"]).copy()
