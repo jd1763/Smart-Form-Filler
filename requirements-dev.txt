@@ -1,16 +1,7 @@
 # Development & Testing Tools
-
-# Unit testing
 pytest==8.3.2
-
-# Code formatting
 black==24.8.0
-
-# Linting (style checks)
+isort==7.0.0
 flake8==7.1.1
-
-# Type checking
 mypy==1.12.1
-
-# Pre-commit hooks (optional, for automation)
 pre-commit==4.0.1

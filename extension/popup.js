@@ -4,6 +4,7 @@
 const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[popup]", ...a);
 const err = (...a) => console.error("[popup]", ...a);
+const BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
 
 // --- global shims so legacy pieces don't crash ---
 if (typeof window.getActiveTab === "undefined") {
@@ -18,6 +19,61 @@ if (typeof window.sendToTab === "undefined") {
       chrome.tabs.sendMessage(tabId, payload, r => res(r))
     );
   };
+}
+
+// Classify whether we can/should inject on this URL (popup-only guard)
+function classifyPageUrl(urlRaw){
+  const url = String(urlRaw || "");
+  const lower = url.toLowerCase();
+
+  const withId = (pfx) => lower.startsWith(`${pfx}${chrome.runtime?.id || ""}`);
+
+  // Hard no: browser/extension internals
+  if (lower.startsWith("chrome://") || lower.startsWith("edge://") || lower.startsWith("about:") || lower.startsWith("view-source:")) {
+    return { ok:false, reason:"internal", msg:"❌ This is a browser internal page. Open a normal website tab." };
+  }
+  if (lower.startsWith("chrome-extension://")) {
+    // If it's our own extension page (e.g., profile.html), be explicit
+    if (withId("chrome-extension://")) {
+      return { ok:false, reason:"extension_self", msg:"❌ This is the extension page (profile/settings). Open a job form tab to fill." };
+    }
+    return { ok:false, reason:"extension_other", msg:"❌ This is an extension page. Open a normal website tab." };
+  }
+
+  // PDFs often run in a viewer we can’t inject into
+  if (/\.(pdf)(\?|#|$)/i.test(lower) || /\/pdfviewer\//i.test(lower) || /\/pdfjs\//i.test(lower)) {
+    return { ok:false, reason:"pdf", msg:"❌ This looks like a PDF viewer. Open an HTML application form." };
+  }
+
+  // about:blank or data URLs
+  if (lower === "" || lower === "about:blank" || lower.startsWith("data:")) {
+    return { ok:false, reason:"blank", msg:"❌ No active page to fill. Navigate to a form first." };
+  }
+
+  return { ok:true };
+}
+
+// Safe wrapper around your ensureContent — never throws, returns {ok, reason, err}
+async function ensureContentSafe(tabId){
+  try {
+    const ok = await ensureContent(tabId);
+    return { ok: !!ok };
+  } catch (e) {
+    const msg = e && (e.message || String(e)) || "unknown";
+    if (/Cannot access contents of url/i.test(msg)) return { ok:false, reason:"injectionDenied", err:msg };
+    if (/Receiving end does not exist/i.test(msg))   return { ok:false, reason:"notReachable", err:msg };
+    return { ok:false, reason:"unknown", err:msg };
+  }
+}
+
+// Safe wrapper for sendToFrame — returns null on runtime errors
+async function sendToFrameSafe(tabId, frameId, payload){
+  try {
+    return await sendToFrame(tabId, frameId, payload);
+  } catch (e) {
+    console.warn("[popup] sendToFrameSafe error:", e);
+    return null;
+  }
 }
 
 // ========= DIAGNOSTICS PANEL =========
@@ -89,17 +145,123 @@ const MATCH_API_BASE = "http://127.0.0.1:5000"; // api.py host/port
 const RESUME_API_BASE = MATCH_API_BASE; 
 const MATCH_ROUTE = "/match";
 
-// Tight whitelist so “missing skills” stays clean
+// Combined + expanded whitelist (mirrors SKILL_TERMS). Keep lowercase; your normalizer can map symbols.
 const SKILL_WORDS = new Set([
-  "python","java","c++","c","r","sql","mysql","postgres","mongodb","redis",
-  "aws","gcp","azure","docker","kubernetes","k8s","terraform","linux",
-  "spark","hadoop","airflow","pandas","numpy","scikit-learn","sklearn",
-  "react","node","javascript","typescript","graphql","rest","grpc",
-  "kafka","snowflake","databricks","tableau","git","ci","cd","tomcat",
-  "android","gradle","junit","eclipse","intellij","vscode","jsp","html","css",
-  "unit_testing","unittest","pytest","data_modeling",
-  "s3","iam","eks","ecs","cloud","unix","bash","shell","unit testing", "unit test"
+  // Languages
+  "python","java","javascript","typescript","c","c++","c#","c sharp","csharp",
+  "go","golang","rust","scala","kotlin","swift","objective-c","ruby","php","perl",
+  "r","dart","matlab","julia","sql","nosql","no-sql","bash","zsh","powershell",
+  "html","css","scss","sass","less",
+
+  // Frontend & Web
+  "react","react.js","reactjs","redux","next.js","nextjs","angular","angularjs",
+  "vue","vue.js","vuejs","svelte","sveltekit","tailwind","tailwindcss","bootstrap",
+  "material ui","mui","chakra ui","three.js","d3","chart.js","storybook",
+  "webpack","vite","rollup","babel","eslint","prettier",
+
+  // Backend & APIs
+  "node","node.js","nodejs","express","express.js","koa","nest","nest.js","nestjs",
+  "fastify","hapi","django","flask","fastapi","tornado","pyramid",
+  "spring","spring boot","spring mvc","hibernate","quarkus","micronaut",
+  "asp.net","asp.net core",".net",".net core","dotnet","laravel","symfony",
+  "codeigniter","rails","ruby on rails","phoenix","elixir","gin","fiber",
+  "rest","rest api","graphql","grpc","soap","websocket","websockets",
+  "openapi","swagger","asyncio",
+
+  // Databases (SQL)
+  "mysql","mariadb","postgres","postgresql","oracle","sql server","mssql","sqlite",
+  "aurora","redshift","snowflake","bigquery","synapse","teradata",
+
+  // Databases (NoSQL, search, cache, time series, graph)
+  "mongodb","dynamodb","cassandra","couchdb","cosmos db","neo4j","arangodb","janusgraph",
+  "hbase","elasticsearch","opensearch","solr","redis","memcached","influxdb",
+  "timescaledb","prometheus","questdb",
+
+  // Data formats & serialization
+  "parquet","orc","avro","jsonl","protobuf","thrift","csv",
+
+  // Data/ETL/Streaming/Orchestration
+  "spark","hadoop","yarn","mapreduce","hive","pig","presto","trino","flink","beam",
+  "airflow","luigi","prefect","dbt",
+  "kafka","schema registry","ksql","pulsar","kinesis","pubsub","pub/sub",
+  "eventbridge","sqs","sns","rabbitmq","activemq","nats","zeromq","celery","sidekiq",
+
+  // DevOps / CI-CD / Build
+  "git","github","gitlab","bitbucket","svn",
+  "ci","cd","ci/cd","github actions","gitlab ci","circleci","jenkins","travis",
+  "teamcity","bamboo","spinnaker","argo","argo cd","argo workflows",
+  "nexus","jfrog","artifactory","sonarqube","coveralls","codecov",
+  "maven","gradle","sbt","ant","make","cmake","nmake","poetry","pipenv","virtualenv","conda",
+  "npm","yarn","pnpm","pip","twine","tox","ruff","flake8","black","isort","pylint","mypy",
+  "pre-commit","shellcheck",
+
+  // Containers / Orchestration / Networking
+  "docker","docker compose","podman","kubernetes","k8s","helm","istio","linkerd",
+  "traefik","haproxy","nginx","apache httpd","apache","caddy","envoy","consul","vault",
+  "nomad","etcd","zookeeper",
+
+  // Cloud (AWS)
+  "aws","cloud","iam","ec2","s3","rds","aurora","efs","ecr","elb","alb","nlb","vpc",
+  "route 53","cloudfront","cloudwatch","cloudtrail","lambda","api gateway",
+  "step functions","eventbridge","sns","sqs","sagemaker","athena","glue","emr",
+  "kinesis","eks","ecs","fargate","elastic beanstalk","batch","lightsail","secrets manager",
+  "kms","opensearch",
+
+  // Cloud (GCP)
+  "gcp","compute engine","cloud storage","cloud sql","bigquery","spanner","firestore",
+  "datastore","bigtable","pub/sub","dataflow","dataproc","composer","gke","cloud run",
+  "cloud functions","vertex ai","cloud build","artifact registry","cloud logging",
+  "cloud monitoring","memorystore","iam",
+
+  // Cloud (Azure)
+  "azure","vm","aks","app service","functions","cosmos db","sql database","blob storage",
+  "event hubs","service bus","synapse","databricks","data factory","key vault","monitor",
+  "devops","pipelines","container registry","application gateway",
+
+  // Testing / QA
+  "unit testing","unittest","pytest","nose","doctest","junit","testng","mockito","hamcrest",
+  "kotest","spock","xunit","mstest","selenium","cypress","playwright","puppeteer",
+  "robot framework","rest-assured","supertest","jest","mocha","chai","ava","vitest",
+  "enzyme","jasmine","karma","postman","newman","locust","k6","gatling","jmeter","tdd","bdd",
+  "property-based testing","hypothesis",
+
+  // Mobile
+  "android","android sdk","jetpack","jetpack compose","gradle","adb",
+  "ios","swiftui","xcode","cocoapods",
+  "react native","expo","flutter","ionic","cordova",
+
+  // Analytics / Viz
+  "matplotlib","seaborn","plotly","bokeh","altair","ggplot","tableau","looker","lookml",
+  "power bi","superset","metabase","redash","grafana","kibana","quicksight",
+
+  // ML / AI / MLOps
+  "machine learning","ml","deep learning","dl","scikit-learn","sklearn","pandas","numpy",
+  "scipy","xgboost","lightgbm","catboost","pytorch","tensorflow","tf","keras",
+  "pytorch lightning","onnx","mlflow","huggingface","transformers","opencv","nltk","spacy",
+  "gensim","fairseq","detectron","yolo","stable diffusion","prophet","statsmodels",
+  "feature engineering","model deployment","model serving","onnxruntime","triton inference server",
+  "kubeflow","seldon","bentoml","ray","ray serve","feast","tfx","vertex ai",
+
+  // Observability / Logging
+  "prometheus","loki","tempo","jaeger","zipkin","opentelemetry","elastic stack","elk",
+  "logstash","fluentd","fluent-bit","datadog","new relic","splunk","sentry","rollbar","honeycomb",
+
+  // Security & Auth
+  "oauth","oauth2","openid connect","oidc","jwt","saml","mfa","sso","rbac","abac",
+  "tls","ssl","https","ssh","bcrypt","argon2","pbkdf2","owasp","cors","csrf","rate limiting",
+  "waf","zap","burp suite","keycloak","okta","auth0","cognito","kms","secrets manager","vault",
+
+  // Architecture & CS topics
+  "microservices","event-driven","domain-driven design","ddd","clean architecture",
+  "hexagonal architecture","cqrs","event sourcing","message queues","caching","cache",
+  "webhooks","serverless","monolith","soa","design patterns","data structures","algorithms",
+  "oop","functional programming","concurrency","multithreading","async","synchronization",
+  "transactions","acid","cap theorem","eventual consistency","distributed systems",
+
+  // Workflow & misc tools
+  "jira","confluence","notion","slack","microsoft teams","excel","gitflow","semver"
 ]);
+
 
 // === skill aliases (keep minimal) ===
 const SFF_SKILL_ALIASES = Object.assign(Object.create(null), {
@@ -225,75 +387,167 @@ async function getActiveTab(){
   }
   
   // Run the Key Skills pass in the best frame (handles iframes)
-  async function runKeySkillsPass(tabId) {
-    try {
-      const frameId = await getBestFrame(tabId);
-      const resp = await sendToFrame(tabId, frameId, { action: "EXT_CHECK_KEY_SKILLS" });
-      log("[popup] key-skills:", resp);
-      return resp;
-    } catch (e) {
-      err("runKeySkillsPass failed:", e);
-      return { ok:false, error:String(e) };
-    }
+async function runKeySkillsPass(tabId){
+  try{
+    if (!await ensureContent(tabId)) return { ok:false, error:"content unreachable" };
+    const frameId = await getBestFrame(tabId);
+    const resp = await sendToFrame(tabId, frameId, { action: "EXT_CHECK_KEY_SKILLS" });
+
+    // Recheck consent checkboxes after skills pass
+    await runConsentBroadcast(tabId);
+
+    log("[popup] key-skills:", resp);
+    return resp || { ok:false };
+  }catch(e){
+    err("[popup] key-skills error:", e);
+    return { ok:false, error:String(e) };
   }
+}
 
 // --------- detection + seeding ----------
 async function detectAndSeed() {
   const tab = await getActiveTab();
-  if (!tab?.id) return { detected: [], pageKey: "" };
-
-  detectedHintEl.textContent = "Scanning page for fields…";
-
-  // Ensure content scripts are injected BEFORE we ask the page (fixes first-open issue)
-  // Uses helpers already defined elsewhere in this file.
-  if (!await ensureContent(tab.id)) {
-    detectedHintEl.textContent = "Couldn’t reach the page. Try again on a form.";
-    renderSimpleList(detectedListEl, []);
-    refreshAllCounts({ detectedCount: 0, filledCount: 0, nonFilledCount: 0 });
+  if (!tab?.id) {
+    // clear UI
+    renderDetected(detectedListEl, []);
+    if (typeof refreshAllCounts === "function") {
+      refreshAllCounts({ detectedCount: 0, filledCount: 0, nonFilledCount: 0 });
+    }
+    detectedHintEl.textContent = "No active tab.";
     return { detected: [], pageKey: "" };
   }
 
-  const frameId = await getBestFrame(tab.id);       // pick frame with most inputs
+  detectedHintEl.textContent = "Scanning page for fields…";
+
+  // Ensure content is injected
+  if (!await ensureContent(tab.id)) {
+    renderDetected(detectedListEl, []);
+    if (typeof refreshAllCounts === "function") {
+      refreshAllCounts({ detectedCount: 0, filledCount: 0, nonFilledCount: 0 });
+    }
+    detectedHintEl.textContent = "Couldn’t reach the page. Try again on a form.";
+    return { detected: [], pageKey: "" };
+  }
+
+  // Ask the best frame to detect fields — exactly like detectDebug
+  const frameId = await getBestFrame(tab.id);
   let resp = await sendToFrame(tab.id, frameId, { action: "EXT_DETECT_FIELDS" });
   if (!resp || !resp.ok) {
     resp = await sendToFrame(tab.id, frameId, { action: "EXT_DETECT_FIELDS_SIMPLE" });
   }
 
-  // Build detected strictly from labelText (robust & consistent with predictDebug)
   const raw = Array.isArray(resp?.detected) ? resp.detected : [];
+  // Build the Detected list from labelText only (same as detectDebug/predict)
   const detected = raw
-    .map(d => ({
-      key: d.prediction || d.name || d.id || null,
-      label: (d.labelText || "").trim()
-    }))
-    .filter(x => x.label); // drop anything without a label
+  .map(d => ({
+    key: d.prediction || d.name || d.id || null,
+    label: (d.labelText || "").trim(),   // authoritative label
+    selector: d.selector || null          // needed to tie to the page snapshot
+  }))
+  .filter(x => x.label);
 
-  // Single source of truth for header + dropdown
+  // Store once so other flows can reuse
   window.SFF_DETECTED = detected.slice();
 
-  // Render Detected (label-only)
+  // Render Detected only (no filled/non-filled yet)
   renderDetected(detectedListEl, detected);
-
-  // Seed Non-Filled with the same label-only items
-  const nonFilledInit = detected.map(d => ({
-    key: d.key || null,
-    label: d.label,
-    confidence: "N/A"
-  }));
-  renderFieldList(notFilledFieldsEl, nonFilledInit, { title: "Non-Filled", mode: "nonfilled" });
-  forceNonFilledBadges(notFilledFieldsEl);
-
-  // Counts from the same list/DOM
-  const detectedCount  = detected.length;
-  const filledCount    = filledFieldsEl.querySelectorAll(".field-item").length;
-  const nonFilledCount = notFilledFieldsEl.querySelectorAll(".field-item").length;
-  if (typeof refreshAllCounts === "function") {
-    refreshAllCounts({ detectedCount, filledCount, nonFilledCount });
-  }
   detectedHintEl.textContent = `${detected.length} fields found`;
 
-  return { detected};
+  // Update header counts safely (don’t touch missing globals)
+  if (typeof refreshAllCounts === "function") {
+    refreshAllCounts({
+      detectedCount: detected.length,
+      filledCount: 0,
+      nonFilledCount: 0
+    });
+  }
+
+  return { detected };
 }
+
+// === Build Filled / Non-Filled from the current page snapshot (confidence N/A) ===
+async function rescanFilledNonFilledFromPage() {
+  try {
+    const tab = await (window.getActiveTab ? window.getActiveTab() : (async () => {
+      const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return t || null;
+    })());
+    if (!tab?.id) return;
+
+    // Ensure content is injected; get best frame (even if unused here)
+    if (typeof ensureContent === "function") {
+      const ok = await ensureContent(tab.id);
+      if (!ok) return;
+    }
+    const frameId = (typeof getBestFrame === "function") ? await getBestFrame(tab.id) : 0;
+
+    // Ask content which fields are currently filled vs not filled
+    const snap = await new Promise(res =>
+      chrome.tabs.sendMessage(tab.id, { action: "EXT_SNAPSHOT_BUCKETS" }, r => res(r || {}))
+    );
+
+    const filledRaw    = Array.isArray(snap?.filled)    ? snap.filled    : [];
+    const notFilledRaw = Array.isArray(snap?.notFilled) ? snap.notFilled : [];
+
+    // Build a selector -> detectorLabel map from our Detected box
+    const det = Array.isArray(window.SFF_DETECTED) ? window.SFF_DETECTED : [];
+    const labelBySel = new Map(det.filter(d => d.selector).map(d => [d.selector, d.label]));
+
+    // Load confidence cache from last fill
+    const { sffConfCache } = await chrome.storage.local.get("sffConfCache");
+    const confCache = sffConfCache || {};
+    const pickConf = (rec) => {
+      const v =
+        (rec?.selector && confCache.bySelector?.[rec.selector]) ??
+        (rec?.key      && confCache.byKey?.[rec.key]) ??
+        (rec?.label    && confCache.byLabel?.[rec.label]);
+      return (v == null ? "N/A" : v); // number in [0..1] or "N/A"
+    };
+    // Always show the detector's label when we have a selector match
+    const toRow = (rec) => {
+      const label = (rec?.selector && labelBySel.get(rec.selector)) || rec?.label || "(Unknown)";
+      const row = {
+        key: rec.key || null,
+        label,
+        confidence: pickConf(rec)
+      };
+      if (typeof rec.value !== "undefined") row.value = rec.value;
+      return row;
+    };
+
+    const filled    = filledRaw.map(toRow);
+    const nonFilled = notFilledRaw.map(toRow);
+
+    // Render
+    renderFieldList(filledFieldsEl, filled,    { title: "Filled",     mode: "filled"    });
+    renderFieldList(notFilledFieldsEl, nonFilled, { title: "Non-Filled", mode: "nonfilled" });
+    // Ensure "Not filled" styling stays consistent
+    if (typeof forceNonFilledBadges === "function") {
+      forceNonFilledBadges(notFilledFieldsEl);
+    }
+
+    // Header counts (Detected from detector; buckets from snapshot)
+    if (typeof refreshAllCounts === "function") {
+      refreshAllCounts({
+        detectedCount: det.length,
+        filledCount: filled.length,
+        nonFilledCount: nonFilled.length
+      });
+    }
+  } catch (e) {
+    console.error("[popup] rescanFilledNonFilledFromPage error:", e);
+  }
+}
+
+// Minimal rescan: refresh Detected from the page, nothing else.
+window.rescanNow = async function() {
+  try {
+    return await detectAndSeed();
+  } catch (e) {
+    console.error("[popup] rescanNow error:", e);
+    return { detected: [] };
+  }
+};
 
 // Ensure Non-Filled cards show the same layout as Filled:
 // - red "Not filled" badge next to label
@@ -341,6 +595,11 @@ function ensureNotFilledBadges(container){
   }
 
   function renderBuckets(detected, reportOrNull) {
+    // Re-resolve bucket containers locally so this function never depends on outer scope
+    const filledFieldsEl     = document.getElementById("filledFields");
+    const notFilledFieldsEl  = document.getElementById("notFilledFields");
+    if (!filledFieldsEl || !notFilledFieldsEl) return;
+
     if (!reportOrNull) {
       renderFieldList(filledFieldsEl, [], { title: "Filled", mode: "filled" });
       const nonFilledInit = detected.map(d => ({ key: d.key || null, label: d.label, confidence: "N/A" }));
@@ -456,6 +715,7 @@ function ensureNotFilledBadges(container){
   const { detected } = await detectAndSeed();
   statusEl.textContent = "Ready…";
   btnTryAgain.style.display = "none";
+  await rescanFilledNonFilledFromPage();
 
   // ---------- fill button ----------
   btnFill?.addEventListener("click", async () => {
@@ -555,6 +815,7 @@ function ensureNotFilledBadges(container){
         await new Promise(r => setTimeout(r, 180));
         await rescanNow();
         await runKeySkillsPass(tab.id);
+        await rescanFilledNonFilledFromPage();
       }
     } catch (e) {
       statusEl.textContent = "❌ " + (e.message || e);
@@ -856,8 +1117,8 @@ function computeDisplayScore({ jdText, missing }) {
 
   const prefFrac = prefMatched / prefTotal;
 
-  // 90/10 split
-  const score = (90 * reqFrac) + (10 * prefFrac);
+  // 80/20 split
+  const score = (80 * reqFrac) + (20 * prefFrac);
   return Math.round(score);
 }
 
@@ -910,17 +1171,45 @@ async function pingAny(tabId){
     });
   });
 }
+
 async function ensureContent(tabId){
+  // 0) Read the tab url to see if we should even try injecting
+  let url = "";
+  try {
+    const t = await chrome.tabs.get(tabId);
+    url = t?.url || "";
+  } catch {}
+
+  const cls = (typeof classifyPageUrl === "function") ? classifyPageUrl(url) : { ok:true };
+  if (!cls.ok) {
+    // Don’t attempt injection on browser internals / extension pages / PDFs / blanks
+    log("[popup] ensureContent: skip injection on", cls.reason, url);
+    return false;
+  }
+
+  // 1) If content is already alive, we’re good
   if (await pingAny(tabId)) return true;
+
+  // 2) Try to inject scripts (helpers first, then content)
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      files: ["helpers.js", "content.js"]  // ← helpers first, then content
+      files: ["helpers.js", "content.js"]
     });
   } catch (e) {
-    err("inject helpers/content:", e.message || e);
+    const msg = e?.message || String(e);
+    // These are expected when pages are not injectible; don’t treat as errors
+    if (/Cannot access contents of url/i.test(msg) ||
+        /extensions cannot inject into/i.test(msg)) {
+      log("[popup] ensureContent: injection denied on", url, ":", msg);
+      return false;
+    }
+    // Other unexpected errors — keep as errors
+    err("inject helpers/content:", msg);
     return false;
   }
+
+  // 3) One final ping to confirm
   return await pingAny(tabId);
 }
 
@@ -945,18 +1234,34 @@ function sendToFrame(tabId, frameId, msg){
     });
   });
 }
-// Trigger the generic "match against matchedSkills and check boxes" pass
-async function runKeySkillsPass(tabId){
-  try{
-    if (!await ensureContent(tabId)) return { ok:false, error:"content unreachable" };
-    const frameId = await getBestFrame(tabId);
-    const resp = await sendToFrame(tabId, frameId, { action: "EXT_CHECK_KEY_SKILLS" });
-    log("[popup] key-skills:", resp);
-    return resp || { ok:false };
-  }catch(e){
-    err("[popup] key-skills error:", e);
-    return { ok:false, error:String(e) };
+async function sendToAllFrames(tabId, payload) {
+  // Try to enumerate frames; fall back to top frame if API is unavailable
+  let frames = [];
+  try {
+    frames = await chrome.webNavigation.getAllFrames({ tabId });
+  } catch {}
+  if (!frames?.length) {
+    const one = await sendToFrame(tabId, 0, payload);
+    return [one];
   }
+  const results = [];
+  for (const f of frames) {
+    const resp = await sendToFrame(tabId, f.frameId, payload);
+    if (resp) results.push(resp);
+  }
+  return results;
+}
+async function runConsentBroadcast(tabId) {
+  if (!await ensureContent(tabId)) return { ok:false, error:"content unreachable" };
+  const resps = await sendToAllFrames(tabId, { action: "EXT_CHECK_CONSENT" });
+  // merge results
+  const merged = (resps || []).reduce((acc, r) => ({
+    ok: acc.ok && (r?.ok !== false),
+    tried: acc.tried + (r?.tried || 0),
+    checked: acc.checked + (r?.checked || 0),
+    total: acc.total + (r?.total || 0),
+  }), { ok:true, tried:0, checked:0, total:0 });
+  return merged;
 }
 // Send a specific list of predicted key skills; content will intersect with resume's matched skills
 async function runPredictedKeySkillsPass(tabId, skills){
@@ -1033,6 +1338,54 @@ function setEndMonthYearPair(monthStr, yearStr, root=document) {
   if (yearEl  && yearStr)  setSelectValueSmart(yearEl,  yearStr);
 }
 
+// Persist selected resume, fetch keyword skills, mirror to backend profile, and cache locally.
+async function setSelectedResumeById(resumeId, resumeName){
+  try {
+    // 1) Get skills for this resume
+    const r = await fetch(`${BACKEND_BASE}/skills/by_resume`, {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ resumeId })
+    });
+    const j = await r.json();
+    const skills = Array.isArray(j.skills) ? j.skills : [];
+    const name   = resumeName || j.name || String(resumeId) || "";
+
+    // 2) Cache locally so popup/content can use immediately
+    await chrome.storage.local.set({
+      lastResumeId: resumeId,
+      selectedResume: { id: resumeId, name, skills }
+    });
+
+    // 3) Guard: only touch backend if it's reachable (prevents wipes if down/misconfigured)
+    let backendOk = false;
+    try {
+      const pr = await fetch(`${BACKEND_BASE}/profile`);
+      backendOk = !!(pr && pr.ok);
+    } catch (_) { backendOk = false; }
+    if (!backendOk) {
+      console.warn("[popup] GET /profile failed; skip PATCH to avoid corrupting profile.json");
+      console.log("[popup] Cached selection locally only.");
+      return; // ← do not PATCH if we can't read current profile
+    }
+
+    // 4) PATCH-merge only the selectedResume* fields (Step 2)
+    const patch = {
+      selectedResumeId: String(resumeId || ""),
+      selectedResumeName: String(name || ""),
+      selectedResumeSkills: Array.from(new Set(skills)).sort()
+    };
+    await fetch(`${BACKEND_BASE}/profile`, {
+      method: "PATCH",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify(patch)
+    });
+
+    console.log("[popup] selectedResume updated with skills:", resumeId, skills.length);
+  } catch (e) {
+    console.error("[popup] setSelectedResumeById failed:", e);
+  }
+}
 
 /* ============= INLINE RESUME PICKER IN FILLER CARD (always visible) ============= */
 function ensureInlineResumePicker(resumes){
@@ -1084,7 +1437,20 @@ function ensureInlineResumePicker(resumes){
       await setLastResumeId(sel.value);
     }
   })();
-  sel.onchange = () => { setLastResumeId(sel.value); };
+  sel.addEventListener("change", async (e) => {
+    const id = e.target.value;
+    const name = e.target.options[e.target.selectedIndex]?.textContent || id || "";
+    await setLastResumeId(id);
+    if (!id) {
+      await chrome.storage.local.set({
+        lastResumeId: "",
+        selectedResume: { id:"", name:"", skills:[] }
+      });
+      return;
+    }
+    await setSelectedResumeById(id, name);
+  });
+
 }
 
 /* ===================== MATCHER: AUTO RUN ON OPEN (Week-6 multi-resume) ===================== */
@@ -1223,6 +1589,7 @@ async function autoMatch(){
           const _selPct = Math.max(0, Math.min(100, Number(dispScore) || 0));
           if (selectedSc)  selectedSc.textContent  = `Match: ${_selPct}%`;
           if (resumeStatusEl) resumeStatusEl.textContent = "Done.";
+          await setSelectedResumeById(sel.id, sel.name || sel.id);
         } catch (e) {
           console.error("[popup] resumeSelect error:", e);
           if (resumeStatusEl) resumeStatusEl.textContent = "Error scoring selection.";
@@ -1278,6 +1645,45 @@ async function saveToggles(url,tog){ const {toggKey}=stateKeysFor(url); await ch
 
 // UI utilities
 const setStatus = (msg)=> (statusEl && (statusEl.textContent=msg));
+// --- flash status (auto-clear after a moment, then show an "after" message) ---
+let _statusTimer = null;
+function flashStatus(msg, ms = 2500, after = "") {
+  if (!statusEl) return;
+  statusEl.textContent = msg;
+  if (_statusTimer) clearTimeout(_statusTimer);
+  _statusTimer = setTimeout(() => {
+    if (!statusEl) return;
+    // Only replace if nobody changed the status in the meantime
+    if (statusEl.textContent === msg) statusEl.textContent = after;
+  }, ms);
+}
+
+
+// --- make Try Again match Fill Form (with graceful fallback) ---
+function harmonizeTryAgainStyle() {
+  const fill  = document.getElementById("fillForm");
+  const retry = document.getElementById("tryAgain");
+  if (!fill || !retry) return;
+
+  // Copy classes if Fill Form has them
+  if (fill.className) retry.className = fill.className;
+
+  // Minimal pretty fallback if no shared classes exist
+  if (!fill.className) {
+    retry.style.cssText = [
+      "display:inline-flex","align-items:center","gap:6px",
+      "padding:8px 12px","border-radius:8px","border:1px solid #e5e7eb",
+      "background:#111827","color:#fff","font-weight:600","cursor:pointer"
+    ].join(";");
+  }
+
+  // Add a simple icon if none present
+  if (!retry.dataset.styled) {
+    retry.dataset.styled = "1";
+    retry.innerHTML = `<span aria-hidden="true"></span><span>Try Again</span>`;
+  }
+}
+
 function installToggle(headerEl, contentEl, initiallyOpen, onChange){
   const set=(open)=>{ contentEl.style.display=open?"block":"none";
     const title=headerEl.textContent.replace(/^[▶▼]\s*/,"");
@@ -1347,16 +1753,24 @@ function renderFieldList(container, items, { title = "", showSummary = true, mod
     const confNorm = parseConfidence(f.confidence);               // 0..1 or null
     const confPct  = fmtPct(f.confidence);                        // 0..100 int or null
     const cls      = confClass(confNorm != null ? confNorm : "N/A");
-    const isFilled = confPct != null && confPct > 0;              // renderer-only; we will override the badge for Non-Filled
-
+    const inFilledSection    = (mode === "filled");
+    const inNonFilledSection = (mode === "nonfilled");
+    const showAsFilled       = inFilledSection || (confPct != null && confPct > 0);
+    
     const card=document.createElement("div"); card.className="field-item";
     const label=document.createElement("div"); label.className="label"; label.textContent=f.label;
 
     const badge=document.createElement("span"); 
-    badge.className = "badge" + (isFilled ? "" : " na");
-    badge.textContent = isFilled ? "Filled" : "N/A";               // for Non-Filled we’ll fix this text after render
+    badge.className = "badge" + (showAsFilled ? "" : " na");
+    // If we know the section, state it explicitly; otherwise fall back to confidence-based guess
+    badge.textContent = inFilledSection
+        ? "Filled"
+        : inNonFilledSection
+          ? "Not filled"
+          : (showAsFilled ? "Filled" : "N/A");         // for Non-Filled we’ll fix this text after render
+    label.appendChild(document.createTextNode(" "));
     label.appendChild(badge);
-
+    
     const chipEl=document.createElement("div"); 
     chipEl.className="chip"; 
     chipEl.textContent = confPct != null ? `Confidence ${confPct}%` : "Confidence N/A";
@@ -1425,7 +1839,7 @@ async function preloadAndRestore(){
   // BucketUI (the IIFE at the top) handles detection, seeding, and counts.
 }
 
-function renderResultsAndRemember(url, resp, statusText){
+async function renderResultsAndRemember(url, resp, statusText){
   const rawFilled   = Array.isArray(resp.filled) ? resp.filled.slice() : [];
   const trulyFilled = rawFilled.filter(isTrulyFilled);
   
@@ -1452,7 +1866,28 @@ function renderResultsAndRemember(url, resp, statusText){
   renderFieldList(filledBox,    trulyFilled, { title:"Filled",     mode:"filled"    });
   renderFieldList(notFilledBox, nonFilled,   { title:"Non-Filled", mode:"nonfilled" });
   forceNonFilledBadges(notFilledBox);
-  setStatus(statusText);
+  if (statusText && /^✅/.test(statusText)) {
+    flashStatus(statusText, 2600, " Ready.");
+  } else {
+    setStatus(statusText);
+  }  
+  
+  // cache confidences so a later rescan can restore chip + meter
+  try {
+    const confCache = { bySelector: {}, byKey: {}, byLabel: {} };
+    const add = (arr=[]) => arr.forEach(f => {
+      const c = (typeof f.confidence === "number") ? f.confidence : parseConfidence(f.confidence);
+      if (f?.selector) confCache.bySelector[f.selector] = c;
+      if (f?.key)      confCache.byKey[f.key]           = c;
+      const lbl = (f?.label || "").trim();
+      if (lbl)         confCache.byLabel[lbl]           = c;
+    });
+    add(Array.isArray(resp.filled)    ? resp.filled    : []);
+    add(Array.isArray(resp.notFilled) ? resp.notFilled : []);
+    await chrome.storage.local.set({ sffConfCache: confCache });
+  } catch (e) {
+    console.warn("[popup] conf cache save failed:", e);
+  }
 
   // Update headers (counts)
   try{
@@ -1491,34 +1926,65 @@ function renderResultsAndRemember(url, resp, statusText){
 
 async function runFill(){
   const tab = await getActiveTab();
-  if(!tab) return setStatus("❌ No active tab.");
-  const url = tab.url||"";
-  if(!isSupportedUrl(url)) return setStatus("❌ This page type can’t be filled.");
-  if(!await ensureContent(tab.id)) return setStatus("❌ Could not reach content script.");
-  const frameId = await getBestFrame(tab.id);
-  const resp = await sendToFrame(tab.id, frameId, { action:"fillFormSmart" });
-  if(!resp) return setStatus("❌ No response from content script.");
+  if(!tab){ setStatus("❌ No active tab."); return; }
 
-  let statusText = "Ready.";
-  if(resp.ok && typeof resp.inputs==="number"){
-    if(resp.inputs===0) statusText="❌ No form detected on this page.";
-    else if(Array.isArray(resp.filled) && resp.filled.length===0) statusText="ℹ️ Form found, but 0 fields matched your data.";
-    else statusText="✅ Form filled! You can try again.";
-  }else if(resp.ok===false && resp.error){
-    statusText="❌ Error: "+resp.error;
-  }else{
-    statusText="ℹ️ Unexpected response (see console).";
+  const cls = classifyPageUrl(tab.url||"");
+  if(!cls.ok){ setStatus(cls.msg); return; }
+
+  // Try to ensure content script without throwing
+  const ensured = await ensureContentSafe(tab.id);
+  if(!ensured.ok){
+    if (ensured.reason === "injectionDenied") {
+      setStatus("❌ Could not inject on this page (blocked origin). Try another tab.");
+      return;
+    }
+    if (ensured.reason === "notReachable") {
+      setStatus("❌ Content script not reachable. Refresh the page and try again.");
+      return;
+    }
+    setStatus("❌ Could not reach content script.");
+    return;
   }
 
-  renderResultsAndRemember(url, resp, statusText);
-
-  const filled = Array.isArray(resp.filled)? resp.filled : [];
-  const fillBtn = document.getElementById("fillForm");
-  const tryBtn = document.getElementById("tryAgain");
-  if (fillBtn && tryBtn) {
-    fillBtn.style.display = filled.length ? "none" : "inline-block";
-    tryBtn.style.display = filled.length ? "inline-block" : "none";
+  // Frame resolution should not crash the UI
+  let frameId = 0;
+  try {
+    frameId = await getBestFrame(tab.id);
+  } catch (e) {
+    console.warn("[popup] getBestFrame failed:", e);
+    frameId = 0;
   }
+
+  const resp = await sendToFrameSafe(tab.id, frameId, { action:"fillFormSmart" });
+  if(!resp){ setStatus("❌ No response from content script."); return; }
+
+  // Friendly outcomes
+  if (resp.ok === true) {
+    if (typeof resp.inputs === "number") {
+      if (resp.inputs === 0) setStatus("❌ No form fields detected on this page.");
+      else flashStatus("✅ Form filled! You can try again.", 2600);
+      return;
+    }
+    flashStatus("✅ Done.", 2200, " Ready.");
+    return;
+  }  
+
+  // Known structured error
+  if (resp.ok === false && resp.error) {
+    // Normalize a couple of common messages
+    if (/no\s*fields/i.test(resp.error)) {
+      setStatus("❌ No form fields detected on this page.");
+      return;
+    }
+    if (/not\s*supported/i.test(resp.error)) {
+      setStatus("❌ This page type can’t be filled.");
+      return;
+    }
+    setStatus("❌ Error: " + resp.error);
+    return;
+  }
+
+  setStatus("ℹ️ Unexpected response (see console).");
 }
 
 /* ===================== INIT ===================== */
@@ -1526,6 +1992,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   initTabs();
   try { await preloadAndRestore(); } catch(e){ err(e); }
   autoMatch(); // run matcher immediately
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  harmonizeTryAgainStyle();
 });
 
 // Buttons
@@ -1542,6 +2012,24 @@ document.getElementById("uploadResumeCTA")?.addEventListener("click", () => {
   if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
   else window.open(chrome.runtime.getURL("resumes.html"));
 });
+
+// disable Debug tab UI (non-destructive)
+(function hideDebugTabNow(){
+  try {
+    const btn  = document.querySelector('[data-tab="debug"], #tab-debug, .tab-debug');
+    const pane = document.querySelector('#panel-debug, [data-panel="debug"], .panel-debug');
+    if (btn)  btn.remove();
+    if (pane) pane.remove();
+
+    // If the now-removed tab was active, switch to the first available tab
+    const activeGone = !document.querySelector('.tab-button.active');
+    if (activeGone) {
+      const first = document.querySelector('[data-tab]:not([data-tab="debug"]), .tab-button:not(#tab-debug)');
+      first?.click?.();
+    }
+  } catch(_) {}
+})();
+
 
 /* ========== Unified Debug Output helpers (one-box) ========== */
 function _dbgBox(){ return document.getElementById("debugOutput"); }
@@ -1634,118 +2122,190 @@ async function refreshDetectUI(tabId) {
   try {
     if (!tabId) return;
 
-    // re-resolve DOM nodes each time (unchanged)
-    const detectedListEl    = document.getElementById("detectedList");
     const filledFieldsEl    = document.getElementById("filledFields");
     const notFilledFieldsEl = document.getElementById("notFilledFields");
-    const detectedToggle    = document.getElementById("detectedToggle");
-    const filledToggle      = document.getElementById("filledToggle");
-    const notFilledToggle   = document.getElementById("notFilledToggle");
+    const detectedListEl    = document.getElementById("detectedList");
     if (!detectedListEl || !filledFieldsEl || !notFilledFieldsEl) return;
 
+    // Small delay if the page just changed (keeps it stable)
     await new Promise(r => setTimeout(r, 120));
 
-    // 1) fresh snapshot (prefer the same detector used on first paint)
-    let snap = await sendToTab(tabId, { action: "EXT_DETECT_FIELDS" });
-    let rows = Array.isArray(snap?.detected) ? snap.detected : null;
-
-    // Fallback to the prediction-annotated endpoint only if needed
-    if (!rows) {
-      const snap2 = await sendToTab(tabId, { action: "EXT_DETECT_FIELDS_WITH_PREDICTIONS" });
-      rows = Array.isArray(snap2?.items) ? snap2.items : [];
-      snap = { ...snap2, detected: rows }; // normalize for later
+    // --- Reachability guard: if no content script, show friendly UI and bail ---
+    const reachable = await chrome.tabs.sendMessage(tabId, { action: "ping" }).catch(() => null);
+    if (!reachable || !reachable.ok) {
+      const det = document.getElementById("detectedDetails");
+      if (det) det.textContent = "Couldn’t reach the page. Try again on a form.";
+      renderDetectedDebug([], false);
+      renderFieldList(filledFieldsEl, [],    { title: "Filled",     mode: "filled" });
+      renderFieldList(notFilledFieldsEl, [], { title: "Non-Filled", mode: "nonfilled" });
+      forceNonFilledBadges(notFilledFieldsEl);
+      return; // stop: do not attempt any other messages
     }
 
-    // label-only → de-dupe by label (collapse radio options under their group label)
-    const seen = new Set();
-    window.SFF_DETECTED = rows
-      .map(d => {
-        const label = (d.labelText || d.groupLabel || d.label || "").trim();
-        const key   = d.prediction || d.name || d.id || null;
-        return label ? { key, label } : null;
-      })
-      .filter(Boolean)
-      .filter(it => {
-        const k = it.label.toLowerCase();
-        if (seen.has(k)) return false; // drop duplicates
-        seen.add(k);
-        return true;
-      });
+    // 1) Ask for a fresh snapshot (guard against failures too)
+    const snap = await chrome.tabs.sendMessage(tabId, { action: "EXT_PAGE_SNAPSHOT" }).catch(() => null);
+    if (!snap) {
+      const det = document.getElementById("detectedDetails");
+      if (det) det.textContent = "Couldn’t reach the page. Try again on a form.";
+      renderDetectedDebug([], false);
+      renderFieldList(filledFieldsEl, [],    { title: "Filled",     mode: "filled" });
+      renderFieldList(notFilledFieldsEl, [], { title: "Non-Filled", mode: "nonfilled" });
+      forceNonFilledBadges(notFilledFieldsEl);
+      return;
+    }
 
-    // Render Detected from the cleaned snapshot
-    const detectedNorm = window.SFF_DETECTED.slice();
-    renderDetected(detectedListEl, detectedNorm);
+    // 2) Render in the debug-style “Detected” box only
+    renderDetectedDebug(snap?.items || [], false);
 
-// 3) Paint Filled/Non-Filled.
-//    If the page has a previous filler summary -> use it.
-//    Otherwise seed Non-Filled straight from what we just detected.
-const sum = await sendToTab(tabId, { action: "EXT_GET_FILLER_SUMMARY" }).catch(() => null);
+    // 3) Paint Filled/Non-Filled strictly from the current page snapshot (labels from detector)
+    const snapBuckets = await sendToTab(tabId, { action: "EXT_SNAPSHOT_BUCKETS" }).catch(() => null);
+    const filledRaw    = Array.isArray(snapBuckets?.filled)    ? snapBuckets.filled    : [];
+    const notFilledRaw = Array.isArray(snapBuckets?.notFilled) ? snapBuckets.notFilled : [];
 
-if (sum?.ok && (Array.isArray(sum.summary?.filled) || Array.isArray(sum.summary?.notFilled))) {
-  const filled = (sum.summary.filled || []).filter(isTrulyFilled);
+    // Build label maps from the detector snapshot
+    const rows = Array.isArray(snap?.items) ? snap.items : [];
+    const labelBySelector = new Map(
+      rows.map(r => [ r.selector, (r.labelText || r.groupLabel || r.label || "").trim() ])
+    );
+    const labelByName = new Map(
+      rows
+        .filter(r => /^(radio|checkbox)$/i.test(r.inputType || r.type || ""))
+        .map(r => [ r.name, (r.labelText || r.groupLabel || r.label || "").trim() ])
+    );
 
-  const movedBack = (sum.summary.filled || [])
-    .filter(f => !isTrulyFilled(f))
-    .map(f => ({
+    // Prefer detector's label; for radios/checkboxes, fall back to group name
+    const pickLabel = (rec) =>
+    (rec && labelBySelector.get(rec.selector)) ||
+    rec.label || "(Unknown)";  
+
+    // Normalize Filled (show value; confidence N/A for now)
+    const filled = filledRaw.map(f => ({
       key: f.key || null,
-      label: f.label || "(Unknown)",
-      confidence: parseConfidence(f.confidence) ?? "N/A"
+      label: pickLabel(f),
+      confidence: "N/A",
+      value: f.value
     }));
 
-  const nonFilled = (sum.summary.notFilled || []).map(nf => ({
-    key: nf.key || null,
-    label: nf.label || "(Unknown)",
-    confidence: parseConfidence(nf.confidence) ?? "N/A"
-  })).concat(movedBack);
-
-  renderFieldList(filledFieldsEl,    filled,    { title: "Filled",     mode: "filled" });
-  renderFieldList(notFilledFieldsEl, nonFilled, { title: "Non-Filled", mode: "nonfilled" });
-  forceNonFilledBadges(notFilledFieldsEl);
-} else {
-  // Non-destructive fallback: only seed on first paint; never wipe existing lists
-  const firstPaint = !filledFieldsEl.children.length && !notFilledFieldsEl.children.length;
-  if (firstPaint) {
-    const nonFilledInit = detectedNorm.map(d => ({
-      key: d.key, label: d.label, confidence: "N/A"
+    // Normalize Non-Filled (label from detector; N/A confidence)
+    const nonFilled = notFilledRaw.map(nf => ({
+      key: nf.key || null,
+      label: pickLabel(nf),
+      confidence: "N/A"
     }));
-    renderFieldList(notFilledFieldsEl, nonFilledInit, { title: "Non-Filled", mode: "nonfilled" });
+
+    renderFieldList(filledFieldsEl,    filled,    { title: "Filled",     mode: "filled" });
+    renderFieldList(notFilledFieldsEl, nonFilled, { title: "Non-Filled", mode: "nonfilled" });
     forceNonFilledBadges(notFilledFieldsEl);
-    // do NOT touch filledFieldsEl here
-  }
-}
 
-// Update hint too so the header/line shows the right number
-const hint = document.getElementById("detectedHint");
-if (hint) hint.textContent = `${detectedNorm.length} fields found`;
-
-
-    // 4) consistent counters
-    const detectedCount   = detectedNorm.length;
-    const filledCount     = filledFieldsEl.querySelectorAll(".field-item").length;
-    const nonFilledCount  = notFilledFieldsEl.querySelectorAll(".field-item").length;
-
-    if (typeof refreshAllCounts === "function") {
-      refreshAllCounts({ detectedCount, filledCount, nonFilledCount });
-    }    
-
-    const predictBtnCounter = document.getElementById("predictCount");
-    if (predictBtnCounter) {
-      const predictedCount = Array.isArray(rows) ? rows.filter(r => r && r.prediction).length : 0;
-      predictBtnCounter.textContent = `${predictedCount}/${window.SFF_DETECTED.length} predicted`;
-    }    
   } catch (e) {
-    console.error("[popup] refreshDetectUI error:", e);
+    console.error("[popup][detect] refreshDetectUI failed:", e);
   }
 }
 
 renderDetectedDebug(window.SFF_DETECTED, false);
 
-async function rescanNow() {
-  const tab = await (window.getActiveTab ? window.getActiveTab() : getActiveTabSimple());
-  if (tab?.id) await refreshDetectUI(tab.id);
+// --- tiny helpers to persist per-page prediction map (label -> {key, confidence}) ---
+function pageKeyFromUrl(u){ try{ const x=new URL(u); return `${x.origin}${x.pathname}`; } catch{ return u||"unknown"; } }
+function _predKeyFor(url){ return `sff:${pageKeyFromUrl(url)}:predMap`; }
+async function _savePredMap(url, mapObj){
+  try{ await chrome.storage.local.set({ [_predKeyFor(url)]: mapObj }); }catch{}
+}
+async function _loadPredMap(url){
+  try{
+    const k = _predKeyFor(url);
+    const g = await chrome.storage.local.get(k);
+    return g[k] || {};
+  }catch{ return {}; }
 }
 
-window.rescanNow = rescanNow; // so add-education code can call it
+// --- Main: snapshot page + get confidences + render buckets ---
+async function rescanBuckets(){
+  const tab = await (window.getActiveTab ? window.getActiveTab() : getActiveTabSimple());
+  if (!tab?.id) return;
+
+  // Ensure content and pick the best frame
+  try { if (typeof ensureContent === "function") { const ok = await ensureContent(tab.id); if (!ok) return; } } catch {}
+  const frameId = (typeof getBestFrame === "function") ? await getBestFrame(tab.id) : 0;
+
+  // 1) Detect with predictions for current labels (confidence source)
+  const predResp = await new Promise(res =>
+    chrome.tabs.sendMessage(tab.id, { action: "EXT_DETECT_FIELDS_WITH_PREDICTIONS" }, r => res(r))
+  );
+  const predItems = Array.isArray(predResp?.items) ? predResp.items : [];
+
+  // Build { label -> { key, confidence } } for quick joins later
+  const predMap = {};
+  for (const it of predItems) {
+    const label = String(it.labelText || it.label || it.placeholder || it.name || it.id || "").trim();
+    if (!label) continue;
+    predMap[label] = {
+      key: it.prediction ?? null,
+      confidence: (typeof it.confidence === "number" ? it.confidence : null)
+    };
+  }
+  await _savePredMap(tab.url || "", predMap);
+
+  // 2) DOM snapshot: which fields are actually filled right now?
+  const snap = await new Promise(res =>
+    chrome.tabs.sendMessage(tab.id, { action: "EXT_SNAPSHOT_BUCKETS" }, r => res(r))
+  );
+  const filledSnap    = Array.isArray(snap?.filled) ? snap.filled : [];
+  const notFilledSnap = Array.isArray(snap?.notFilled) ? snap.notFilled : [];
+
+  // 3) Build the Detected list from the prediction pass (label-only for that panel)
+  const detected = predItems
+    .map(d => ({ key: d.prediction || d.name || d.id || null, label: String(d.labelText || d.label || d.name || d.id || "").trim() }))
+    .filter(x => x.label);
+
+  window.SFF_DETECTED = detected.slice(); // single source of truth for Detected panel
+
+  // 4) Assemble a "report-like" object so we can reuse your existing renderers
+  //    Attach confidences from predMap by label; missing → "N/A"
+  const pickConf = (label) => {
+    const m = predMap[label];
+    if (!m || m.confidence == null) return "N/A";
+    return m.confidence; // keep numeric 0..1 — your parseConfidence handles it
+  };
+  const pickKey = (label) => (predMap[label]?.key ?? null);
+
+  const report = {
+    filled: filledSnap.map(f => ({
+      key:       pickKey(f.label),
+      label:     f.label,
+      confidence: pickConf(f.label),
+      value:     f.value,
+      inputType: f.inputType,
+      status:    f.status || "filled",
+      didSet:    !!f.didSet
+    })),
+    notFilled: notFilledSnap.map(nf => ({
+      key:       pickKey(nf.label),
+      label:     nf.label,
+      confidence: pickConf(nf.label)
+    }))
+  };
+
+  // 5) Render into the three buckets using your normal path
+  if (typeof renderBuckets === "function") {
+    renderBuckets(detected, report);
+  } else {
+    const filledFieldsEl    = document.getElementById("filledFields");
+    const notFilledFieldsEl = document.getElementById("notFilledFields");
+    if (!filledFieldsEl || !notFilledFieldsEl) return;
+
+    // minimal fallback: seed non-filled and fill-filled lists (uses your card renderer)
+    renderFieldList(filledFieldsEl, report.filled, { title: "Filled", mode: "filled" });
+    renderFieldList(notFilledFieldsEl, report.notFilled, { title: "Non-Filled", mode: "nonfilled" });
+    forceNonFilledBadges(notFilledFieldsEl);
+  }
+}
+
+// --- Replace the internals of rescanNow to call our new pipeline ---
+async function rescanNow() {
+  const tab = await (window.getActiveTab ? window.getActiveTab() : getActiveTabSimple());
+  if (tab?.id) await rescanBuckets();
+}
+window.rescanNow = rescanNow;
 
 // === Fill form button (no extra experience clicks) ===
 document.getElementById("fillForm")?.addEventListener("click", async () => {
@@ -1755,8 +2315,8 @@ document.getElementById("fillForm")?.addEventListener("click", async () => {
     await sendToTab(tab.id, { action: "fillFormSmart" });
 
     // 2) Small settle, then refresh popup counts
-    await new Promise(r => setTimeout(r, 120));
-    await rescanNow();
+    await new Promise(r => setTimeout(r, 350));
+    await rescanNow();    
 
     // 3) (optional) recheck key skills
     await sendToTab(tab.id, { action: "EXT_CHECK_KEY_SKILLS" });
@@ -1764,12 +2324,16 @@ document.getElementById("fillForm")?.addEventListener("click", async () => {
 });
 
 // Also refresh once when popup opens so the initial numbers are right
-document.addEventListener("DOMContentLoaded", () => {
-  withActiveTab(async (tab) => {
-    if (!tab?.id) return;
-    await refreshDetectUI(tab.id);
+document.addEventListener('DOMContentLoaded', async () => {
+  const t = await getActiveTabSimple();
+  if (t?.id) refreshDetectUI(t.id);
+
+  document.getElementById('rescanBtn')?.addEventListener('click', async () => {
+    const t2 = await getActiveTabSimple();
+    if (t2?.id) refreshDetectUI(t2.id);
   });
 });
+
 
 
 // Debug-only detector (renamed to avoid shadowing main)

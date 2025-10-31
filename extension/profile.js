@@ -28,16 +28,22 @@ async function _getProfile(){
   try { const r = await fetch(`${API_BASE}/profile`); return r.ok ? await r.json() : {}; } catch { return {}; }
 }
 async function _saveProfileSelected({ id, name, skills }){
-  // merge into existing profile; NOTE: selectedResumeSkills is a plain array
-  const current = await _getProfile();
-  const payload = { ...(current||{}), selectedResumeId: String(id||""), selectedResumeName: String(name||""), selectedResumeSkills: Array.from(new Set(skills||[])).sort() };
+  const patch = {
+    selectedResumeId: String(id || ""),
+    selectedResumeName: String(name || ""),
+    selectedResumeSkills: Array.from(new Set(skills || [])).sort()
+  };
   try {
-    await fetch(`${API_BASE}/profile`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+    await fetch(`${API_BASE}/profile`, {
+      method: "PATCH",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify(patch)
+    });
   } catch (e) {
-    console.warn("[profile] POST /profile failed", e);
+    console.warn("[profile] PATCH /profile failed", e);
   }
   // mirror to local storage so popup/content can read instantly (optional)
-  try { await chrome.storage.local.set({ selectedResume: { id, name, skills: payload.selectedResumeSkills } }); } catch {}
+  try { await chrome.storage.local.set({ selectedResume: { id, name, skills: patch.selectedResumeSkills } }); } catch {}
 }
 async function _listResumes(){
   try {
@@ -128,14 +134,33 @@ async function initProfileResumeDropdown(profileData = {}) {
     const name = sel.options[sel.selectedIndex]?.textContent || id || "";
     if (!id) {
       window._pendingResume = { id:"", name:"", skills:[] };
-      applyMeta();
+      if (meta) meta.textContent = "";
       return;
     }
+  
+    // 1) get resume text (you already have this helper)
     const text = await _getResumeText(id);
-    const skills = _extractSkillsFromText(text); // same extractor you already use【turn2file3†L21-L26】
+  
+    // 2) ask backend to extract skills (NEW)
+    let skills = [];
+    try {
+      const r = await fetch(`${BACKEND_BASE}/skills/extract`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ text })
+      });
+      const j = await r.json();
+      skills = Array.isArray(j.skills) ? j.skills : [];
+    } catch (e) {
+      console.warn("[profile] skills extract failed:", e);
+    }
+  
+    // 3) stash pending (not saved until user clicks Save)
     window._pendingResume = { id, name, skills };
+  
+    // 4) UI hint
     if (meta) meta.textContent = `${name} (pending — click Save)`;
-  });
+  });  
 }
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -305,6 +330,17 @@ function _extractAllSkillsFromText(text){
   
 function setStatus(s){ statusEl.textContent = s; }
 
+let _statusTimer = null;
+function flashStatus(text, ms = 2500){
+  if (!statusEl) return;
+  statusEl.textContent = text;
+  if (_statusTimer) clearTimeout(_statusTimer);
+  _statusTimer = setTimeout(() => {
+    // only clear if unchanged (so errors or newer messages persist)
+    if (statusEl.textContent === text) statusEl.textContent = "";
+  }, ms);
+}
+
 /* ---------- helpers to render repeating rows ---------- */
 function monthYearRow(prefix, item={}){
     const camel = (s)=> s.charAt(0).toLowerCase()+s.slice(1); // Start -> start
@@ -335,6 +371,70 @@ function monthYearRow(prefix, item={}){
     return wrap;
   }  
 
+  // --- Guard month/year pairs inside a container (e.g., an Education or Experience row)
+  function wireDateBounds(scope){
+    const sM = scope.querySelector('[data-k="startMonth"]');
+    const sY = scope.querySelector('[data-k="startYear"]');
+    const eM = scope.querySelector('[data-k="endMonth"]');
+    const eY = scope.querySelector('[data-k="endYear"]');
+    if (!sM || !sY || !eM || !eY) return;
+
+    const refresh = () => {
+      const sm = parseInt(sM.value || "0", 10) || 0;
+      const sy = parseInt(sY.value || "0", 10) || 0;
+      const em = parseInt(eM.value || "0", 10) || 0;
+      const ey = parseInt(eY.value || "0", 10) || 0;
+
+      // clear any previous disables
+      [...sY.options].forEach(o => o.disabled = false);
+      [...sM.options].forEach(o => o.disabled = false);
+      [...eY.options].forEach(o => o.disabled = false);
+      [...eM.options].forEach(o => o.disabled = false);
+
+      // If END picked first → limit START to <= END (year), and months <= endMonth when same year
+      if (ey) {
+        [...sY.options].forEach(o => {
+          const y = parseInt(o.value || "0", 10) || 0;
+          if (y && y > ey) o.disabled = true;
+        });
+        if (em) {
+          // only when same-year or start-year not chosen yet
+          if (!sy || sy === ey) {
+            [...sM.options].forEach(o => {
+              const m = parseInt(o.value || "0", 10) || 0;
+              if (m && m > em) o.disabled = true;
+            });
+          }
+        }
+      }
+
+      // If START picked first → limit END to >= START (year), and months >= startMonth when same year
+      if (sy) {
+        [...eY.options].forEach(o => {
+          const y = parseInt(o.value || "0", 10) || 0;
+          if (y && y < sy) o.disabled = true;
+        });
+        if (sm) {
+          if (!ey || ey === sy) {
+            [...eM.options].forEach(o => {
+              const m = parseInt(o.value || "0", 10) || 0;
+              if (m && m < sm) o.disabled = true;
+            });
+          }
+        }
+      }
+
+      // If a now-disabled value is selected, clear it so the user sees the constraint
+      if (sY.selectedOptions[0]?.disabled) sY.value = "";
+      if (sM.selectedOptions[0]?.disabled) sM.value = "";
+      if (eY.selectedOptions[0]?.disabled) eY.value = "";
+      if (eM.selectedOptions[0]?.disabled) eM.value = "";
+    };
+
+    [sM, sY, eM, eY].forEach(el => el.addEventListener("change", refresh));
+    refresh();
+  }
+
   function eduItemView(item = {}, idx) {
     const wrap = document.createElement("div");
     wrap.className = "item";
@@ -362,8 +462,18 @@ function monthYearRow(prefix, item={}){
     // Month/Year rows
     const dates = document.createElement("div");
     dates.appendChild(monthYearRow("Start", item));
-    dates.appendChild(monthYearRow("End", item));
+
+    // Build a normal "End" row, then rename labels to "End / Expected Graduation"
+    const endRow = monthYearRow("End", item);
+    const labs = endRow.querySelectorAll("label");
+    if (labs[0]) labs[0].textContent = "End / Expected Graduation Month";
+    if (labs[1]) labs[1].textContent = "End / Expected Graduation Year";
+    dates.appendChild(endRow);
+
     wrap.appendChild(dates);
+
+    // Guard: keep Start <= End and End >= Start
+    wireDateBounds(dates);
   
     // preselect degree
     const sel = wrap.querySelector('[data-k="degreeCombo"]');
@@ -378,27 +488,60 @@ function monthYearRow(prefix, item={}){
     return wrap;
   }  
 
-function expItemView(item={}, idx){
-  const wrap = document.createElement("div");
-  wrap.className = "item";
-  wrap.innerHTML = `
-    <div class="grid">
-      <div><label>Company</label><input data-k="company" value="${item.company||""}"></div>
-      <div><label>Job Title</label><input data-k="jobTitle" value="${item.jobTitle||""}"></div>
-      <div class="full"><label>Description</label><textarea data-k="description">${item.description||""}</textarea></div>
-    </div>
-  `;
-  const dates = document.createElement("div");
-  dates.appendChild(monthYearRow("Start", item));
-  dates.appendChild(monthYearRow("End",   item));
-  wrap.appendChild(dates);
+  function expItemView(item = {}, idx){
+    const wrap = document.createElement("div");
+    wrap.className = "item";
+    wrap.innerHTML = `
+      <div class="grid">
+        <div><label>Company</label><input data-k="company" value="${item.company||""}"></div>
+        <div><label>Job Title</label><input data-k="jobTitle" value="${item.jobTitle||""}"></div>
+        <div class="full"><label>Description</label><textarea data-k="description">${item.description||""}</textarea></div>
+      </div>
+    `;
+  
+    // Month/Year rows
+    const dates = document.createElement("div");
+    dates.appendChild(monthYearRow("Start", item));
+    dates.appendChild(monthYearRow("End",   item));
+    wrap.appendChild(dates);
 
-  const row = document.createElement("div");
-  row.className = "row"; row.style.marginTop = "8px";
-  row.innerHTML = `<button class="btn" data-del>Delete</button><span class="muted">Experience #${idx+1}</span>`;
-  wrap.appendChild(row);
-  return wrap;
-}
+    // Guard: keep Start <= End and End >= Start
+    wireDateBounds(dates);
+      
+    // "Currently work here" checkbox
+    const cur = document.createElement("div");
+    cur.className = "row";
+    cur.style.marginTop = "6px";
+    cur.innerHTML = `
+      <label class="row" style="gap:6px; align-items:center;">
+        <input type="checkbox" data-k="isCurrent">
+        <span>Currently work here</span>
+      </label>
+    `;
+    wrap.appendChild(cur);
+  
+    // Wire up disable/enable of End selectors
+    const curBox     = cur.querySelector('[data-k="isCurrent"]');
+    const endMonthEl = dates.querySelector('[data-k="endMonth"]');
+    const endYearEl  = dates.querySelector('[data-k="endYear"]');
+  
+    if (item.isCurrent === true) curBox.checked = true;
+  
+    const applyDisable = () => {
+      const on = !!curBox.checked;
+      if (endMonthEl) endMonthEl.disabled = on;
+      if (endYearEl)  endYearEl.disabled  = on;
+    };
+    applyDisable();
+    curBox.addEventListener("change", applyDisable);
+  
+    // Footer
+    const row = document.createElement("div");
+    row.className = "row"; row.style.marginTop = "8px";
+    row.innerHTML = `<button class="btn" data-del>Delete</button><span class="muted">Experience #${idx+1}</span>`;
+    wrap.appendChild(row);
+    return wrap;
+  }  
 
 function renderArray(container, arr, itemView){
   container.innerHTML = "";
@@ -531,112 +674,181 @@ $("addEdu").addEventListener("click", () => {
 $("addExp").addEventListener("click", ()=>{
     (window._exp ||= []).push({
       company:"", jobTitle:"", description:"",
-      startMonth:"", startYear:"", endMonth:"", endYear:""
+      startMonth:"", startYear:"", endMonth:"", endYear:"",
+      isCurrent: false
     });
     renderArray($("expList"), window._exp, expItemView);
     });  
 
-$("save").addEventListener("click", async ()=>{
-    const out = collectMain();
-    // Ensure these exist at the top level (used by filler)
-    out.yearsOfExperience = (document.getElementById("yearsOfExperience")?.value || "").trim();
-    out.highestEducation  = (document.getElementById("highestEducation")?.value || "").trim();
-
-    // education array
-    out.education = [];
-    $("eduList").querySelectorAll(".item").forEach(item => {
-    const g = {};
-    // Collect all simple fields with data-k
-    item.querySelectorAll("[data-k]").forEach(inp => {
-        const k = inp.getAttribute("data-k");
-        let v = (inp.value || "").trim();
-        // We don't keep degreeCombo in the final object; we'll map it to short/long below
-        if (k !== "degreeCombo") g[k] = v;
-    });
-
-    // Pull degree selection and map to short/long
-    const degShort = (item.querySelector('[data-k="degreeCombo"]')?.value || "").trim();
-    if (degShort) {
-        g.degreeShort = degShort;
-        g.degreeLong = DEGREE_MAP[degShort] || "";
-    } else {
-        g.degreeShort = "";
-        g.degreeLong  = "";
-    }
-
-    out.education.push(g);
-    });
-
-    // experience array
-    out.experience = [];
-    $("expList").querySelectorAll(".item").forEach(item=>{
-    const g = {};
-    item.querySelectorAll("[data-k]").forEach(inp=>{
-        const k = inp.getAttribute("data-k");
-        g[k] = (inp.value || "").trim();
-    });
-    out.experience.push(g);
-    });
-
-  // Selected Resume (commit if user changed it; otherwise keep what's loaded)
-  const sel = document.getElementById("profileResumeSelect");
-  const loaded = (window._loadedProfile || {});
-  let sr = window._pendingResume;
-
-  if (!sr && sel && sel.value) {
-    // no pending change but a selection exists in the UI: use it with a reasonable fallback for skills
-    const name = sel.options[sel.selectedIndex]?.textContent || sel.value;
-    const fallbackSkills = Array.isArray(loaded?.selectedResumeSkills) ? loaded.selectedResumeSkills : [];
-    sr = { id: sel.value, name, skills: fallbackSkills };
-  }
-  if (!sr && loaded?.selectedResumeId) {
-    // nothing chosen now; stick with what the profile already had
-    sr = {
-      id:    String(loaded.selectedResumeId),
-      name:  loaded.selectedResumeName || "",
-      skills: Array.isArray(loaded.selectedResumeSkills) ? loaded.selectedResumeSkills : []
-    };
-  }
-
-  if (sr) {
-    out.selectedResumeId      = String(sr.id || "");
-    out.selectedResumeName    = String(sr.name || "");
-    out.selectedResumeSkills  = Array.from(new Set(sr.skills || [])).sort();
-    try {
-      await chrome.storage.local.set({
-        lastResumeId: out.selectedResumeId,
-        selectedResume: { id: out.selectedResumeId, name: out.selectedResumeName, skills: out.selectedResumeSkills }
+    $("save").addEventListener("click", async ()=>{
+      const out = collectMain();
+    
+      // Ensure these exist at the top level (used by filler)
+      out.yearsOfExperience = (document.getElementById("yearsOfExperience")?.value || "").trim();
+      out.highestEducation  = (document.getElementById("highestEducation")?.value || "").trim();
+    
+      // ===== education array =====
+      out.education = [];
+      $("eduList").querySelectorAll(".item").forEach(item => {
+        const g = {};
+        // Collect all simple fields with data-k
+        item.querySelectorAll("[data-k]").forEach(inp => {
+          const k = inp.getAttribute("data-k");
+          let v = (inp.value || "").trim();
+          // We don't keep degreeCombo in the final object; we'll map it to short/long below
+          if (k !== "degreeCombo") g[k] = v;
+        });
+    
+        // Pull degree selection and map to short/long
+        const degShort = (item.querySelector('[data-k="degreeCombo"]')?.value || "").trim();
+        if (degShort) {
+          g.degreeShort = degShort;
+          g.degreeLong  = DEGREE_MAP[degShort] || "";
+        } else {
+          g.degreeShort = "";
+          g.degreeLong  = "";
+        }
+    
+        out.education.push(g);
       });
-    } catch {}
-  } else {
-    // Explicitly clear if nothing is selected
-    out.selectedResumeId = "";
-    out.selectedResumeName = "";
-    out.selectedResumeSkills = [];
-    try { await chrome.storage.local.set({ lastResumeId: "", selectedResume: { id:"", name:"", skills:[] } }); } catch {}
-  }
+    
+      // ===== experience array =====
+      out.experience = [];
+      $("expList").querySelectorAll(".item").forEach(item=>{
+        const g = {};
+        item.querySelectorAll("[data-k]").forEach(inp=>{
+          const k = inp.getAttribute("data-k");
+          let v;
+          if (inp.type === "checkbox") {
+            v = !!inp.checked;                 
+          } else {
+            v = (inp.value || "").trim();
+          }
+          g[k] = v;
+        });
 
-  // Keep your existing matchedSkills mirror (for EXT_CHECK_KEY_SKILLS)
-  out.matchedSkills = {
-    required:  profileMatched.required,
-    preferred: profileMatched.preferred
-  };
-  chrome.storage.local.set({ matchedSkills: out.matchedSkills }, ()=>{});
+        out.experience.push(g);
+      });
 
-  // Save to backend (/profile) — this is what writes profile.json on your server
-  try{
-    const r = await fetch(`${BACKEND_BASE}/profile`, {
-      method: "POST",
-      headers: { "Content-Type":"application/json" },
-      body: JSON.stringify(out)
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    setStatus("Saved to backend!");
-  }catch(e){
-    console.error(e);
-    setStatus("Save failed (backend).");
-  }
-});
+    
+      // ===== Selected Resume (compute skills via backend) =====
+      const sel    = document.getElementById("profileResumeSelect");
+      const loaded = (window._loadedProfile || {});
+      let   sr     = window._pendingResume; // if user changed during this session
+    
+      // If no pending but a UI selection exists, use it
+      if (!sr && sel && sel.value) {
+        const name = sel.options[sel.selectedIndex]?.textContent || sel.value;
+        sr = { id: sel.value, name, skills: [] }; // skills will be computed below
+      }
+    
+      // If still nothing, fall back to what profile had
+      if (!sr && loaded?.selectedResumeId) {
+        sr = {
+          id: String(loaded.selectedResumeId),
+          name: loaded.selectedResumeName || "",
+          skills: Array.isArray(loaded.selectedResumeSkills) ? loaded.selectedResumeSkills : []
+        };
+      }
+    
+      // Compute skills if we have an id (prefer ID-based; fallback to text extract)
+      if (sr && sr.id) {
+        try {
+          // 1) Try backend/data/text/<id>.txt via /skills/by_resume
+          const r1 = await fetch(`${BACKEND_BASE}/skills/by_resume`, {
+            method: "POST",
+            headers: { "Content-Type":"application/json" },
+            body: JSON.stringify({ resumeId: sr.id })
+          });
+          if (r1.ok) {
+            const j1 = await r1.json();
+            const k1 = Array.isArray(j1.skills) ? j1.skills : [];
+            if (k1.length) sr.skills = k1;
+          }
+
+          // 2) Fallback: extract from raw text if still empty
+          if (!Array.isArray(sr.skills) || !sr.skills.length) {
+            const textRes = await _getResumeText(sr.id);
+            const r2 = await fetch(`${BACKEND_BASE}/skills/extract`, {
+              method: "POST",
+              headers: { "Content-Type":"application/json" },
+              body: JSON.stringify({ text: textRes || "" })
+            });
+            if (r2.ok) {
+              const j2 = await r2.json();
+              sr.skills = Array.isArray(j2.skills) ? j2.skills : [];
+            }
+          }
+        } catch (e) {
+          console.warn("[profile] skills compute failed:", e);
+          sr.skills = Array.isArray(sr.skills) ? sr.skills : [];
+        }
+      }
+    
+      if (sr) {
+        out.selectedResumeId     = String(sr.id || "");
+        out.selectedResumeName   = String(sr.name || "");
+        out.selectedResumeSkills = Array.from(new Set(sr.skills || [])).sort();
+        try {
+          await chrome.storage.local.set({
+            lastResumeId: out.selectedResumeId,
+            selectedResume: {
+              id: out.selectedResumeId,
+              name: out.selectedResumeName,
+              skills: out.selectedResumeSkills
+            }
+          });
+        } catch {}
+      } else {
+        // Explicitly clear if nothing is selected
+        out.selectedResumeId = "";
+        out.selectedResumeName = "";
+        out.selectedResumeSkills = [];
+        try {
+          await chrome.storage.local.set({
+            lastResumeId: "",
+            selectedResume: { id:"", name:"", skills:[] }
+          });
+        } catch {}
+      }
+    
+      // ===== remove matchedSkills from payload =====
+      if (out.matchedSkills) delete out.matchedSkills;
+    
+      // ===== Save to backend (/profile) — MERGE, don't replace =====
+      try{
+        const r = await fetch(`${BACKEND_BASE}/profile`, {
+          method: "PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify(out)   // deep-merged server-side
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        setStatus("Saved to backend!");
+        flashStatus("Saved to backend.", 1500);
+
+        // === mirror the entire updated profile to storage and broadcast ===
+        try {
+          // `out` is the profile you just constructed & PATCHed above
+          await chrome.storage.local.set({
+            userData: out,
+            profileVersion: Date.now()
+          });
+          // tell all extension pages & content scripts the profile is fresh
+          chrome.runtime.sendMessage({
+            type: "SFF_PROFILE_UPDATED",
+            profile: out,
+            ts: Date.now()
+          });
+          console.log("[profile] broadcasted SFF_PROFILE_UPDATED and mirrored userData");
+        } catch (e) {
+          console.warn("[profile] failed to mirror/broadcast updated profile:", e);
+        }
+        window._pendingResume = null; // clear pending after successful save
+      }catch(e){
+        console.error(e);
+        setStatus("Save failed (backend).");
+      }
+    });    
 
 document.addEventListener("DOMContentLoaded", () => {
   load().catch(err => console.warn("[profile] load() failed:", err));

@@ -14,6 +14,7 @@ import glob
 import json
 import mimetypes
 import os
+import re
 import sys  # helps build file paths
 import uuid
 from pathlib import Path
@@ -30,13 +31,13 @@ from pdfminer.high_level import extract_text as pdf_extract_text
 from sqlalchemy import Column, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from .matcher.resume_selector import select_best_resume
-
 # === Import matchers ===
 # - BaselineMatcher: TF-IDF + cosine similarity
 # - MatcherEmbeddings: Sentence-BERT embeddings + semantic similarity
 from ml.matcher_baseline import BaselineMatcher
 from ml.matcher_embeddings import MatcherEmbeddings
+
+from .matcher.resume_selector import select_best_resume
 
 # Add the project root to Python path so we can import ml/ and backend/ modules
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -120,6 +121,662 @@ class Resume(Base):
 
 Base.metadata.create_all(engine)
 
+# A tiny whitelist; replace/expand from your real list if you have one.
+# Combined + expanded whitelist of skills / technologies
+SKILL_TERMS = [
+    # --- Languages ---
+    "python",
+    "java",
+    "javascript",
+    "typescript",
+    "c",
+    "c++",
+    "c#",
+    "c sharp",
+    "csharp",
+    "go",
+    "golang",
+    "rust",
+    "scala",
+    "kotlin",
+    "swift",
+    "objective-c",
+    "ruby",
+    "php",
+    "perl",
+    "r",
+    "dart",
+    "matlab",
+    "julia",
+    "sql",
+    "nosql",
+    "no-sql",
+    "bash",
+    "zsh",
+    "powershell",
+    "html",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    # --- Frontend & Web ---
+    "react",
+    "react.js",
+    "reactjs",
+    "redux",
+    "next.js",
+    "nextjs",
+    "angular",
+    "angularjs",
+    "vue",
+    "vue.js",
+    "vuejs",
+    "svelte",
+    "sveltekit",
+    "tailwind",
+    "tailwindcss",
+    "bootstrap",
+    "material ui",
+    "mui",
+    "chakra ui",
+    "three.js",
+    "d3",
+    "chart.js",
+    "storybook",
+    "webpack",
+    "vite",
+    "rollup",
+    "babel",
+    "eslint",
+    "prettier",
+    # --- Backend & APIs ---
+    "node",
+    "node.js",
+    "nodejs",
+    "express",
+    "express.js",
+    "koa",
+    "nest",
+    "nest.js",
+    "nestjs",
+    "fastify",
+    "hapi",
+    "django",
+    "flask",
+    "fastapi",
+    "tornado",
+    "pyramid",
+    "spring",
+    "spring boot",
+    "spring mvc",
+    "hibernate",
+    "quarkus",
+    "micronaut",
+    "asp.net",
+    "asp.net core",
+    ".net",
+    ".net core",
+    "dotnet",
+    "laravel",
+    "symfony",
+    "codeigniter",
+    "rails",
+    "ruby on rails",
+    "phoenix",
+    "elixir",
+    "gin",
+    "fiber",
+    "rest",
+    "rest api",
+    "graphql",
+    "grpc",
+    "soap",
+    "websocket",
+    "websockets",
+    "openapi",
+    "swagger",
+    "asyncio",
+    # --- Databases (SQL) ---
+    "mysql",
+    "mariadb",
+    "postgres",
+    "postgresql",
+    "oracle",
+    "sql server",
+    "mssql",
+    "sqlite",
+    "aurora",
+    "redshift",
+    "snowflake",
+    "bigquery",
+    "synapse",
+    "teradata",
+    # --- Databases (NoSQL, search, cache, time series, graph) ---
+    "mongodb",
+    "dynamodb",
+    "cassandra",
+    "couchdb",
+    "cosmos db",
+    "neo4j",
+    "arangodb",
+    "janusgraph",
+    "hbase",
+    "elasticsearch",
+    "opensearch",
+    "solr",
+    "redis",
+    "memcached",
+    "influxdb",
+    "timescaledb",
+    "prometheus",
+    "questdb",
+    # --- Data formats & serialization ---
+    "parquet",
+    "orc",
+    "avro",
+    "jsonl",
+    "protobuf",
+    "thrift",
+    "csv",
+    # --- Data/ETL/Streaming/Orchestration ---
+    "spark",
+    "hadoop",
+    "yarn",
+    "mapreduce",
+    "hive",
+    "pig",
+    "presto",
+    "trino",
+    "flink",
+    "beam",
+    "airflow",
+    "luigi",
+    "prefect",
+    "dbt",
+    "kafka",
+    "schema registry",
+    "ksql",
+    "pulsar",
+    "kinesis",
+    "pubsub",
+    "pub/sub",
+    "eventbridge",
+    "sqs",
+    "sns",
+    "rabbitmq",
+    "activemq",
+    "nats",
+    "zeromq",
+    "celery",
+    "sidekiq",
+    # --- DevOps / CI-CD / Build ---
+    "git",
+    "github",
+    "gitlab",
+    "bitbucket",
+    "svn",
+    "ci",
+    "cd",
+    "ci/cd",
+    "github actions",
+    "gitlab ci",
+    "circleci",
+    "jenkins",
+    "travis",
+    "teamcity",
+    "bamboo",
+    "spinnaker",
+    "argo",
+    "argo cd",
+    "argo workflows",
+    "nexus",
+    "jfrog",
+    "artifactory",
+    "sonarqube",
+    "coveralls",
+    "codecov",
+    "maven",
+    "gradle",
+    "sbt",
+    "ant",
+    "make",
+    "cmake",
+    "nmake",
+    "poetry",
+    "pipenv",
+    "virtualenv",
+    "conda",
+    "npm",
+    "yarn",
+    "pnpm",
+    "pip",
+    "twine",
+    "tox",
+    "ruff",
+    "flake8",
+    "black",
+    "isort",
+    "pylint",
+    "mypy",
+    "pre-commit",
+    "shellcheck",
+    # --- Containers / Orchestration / Networking ---
+    "docker",
+    "docker compose",
+    "podman",
+    "kubernetes",
+    "k8s",
+    "helm",
+    "istio",
+    "linkerd",
+    "traefik",
+    "haproxy",
+    "nginx",
+    "apache httpd",
+    "apache",
+    "caddy",
+    "envoy",
+    "consul",
+    "vault",
+    "nomad",
+    "etcd",
+    "zookeeper",
+    # --- Cloud (AWS) ---
+    "aws",
+    "cloud",
+    "iam",
+    "ec2",
+    "s3",
+    "rds",
+    "aurora",
+    "efs",
+    "ecr",
+    "elb",
+    "alb",
+    "nlb",
+    "vpc",
+    "route 53",
+    "cloudfront",
+    "cloudwatch",
+    "cloudtrail",
+    "lambda",
+    "api gateway",
+    "step functions",
+    "eventbridge",
+    "sns",
+    "sqs",
+    "sagemaker",
+    "athena",
+    "glue",
+    "emr",
+    "kinesis",
+    "eks",
+    "ecs",
+    "fargate",
+    "elastic beanstalk",
+    "batch",
+    "lightsail",
+    "secrets manager",
+    "kms",
+    "opensearch",
+    # --- Cloud (GCP) ---
+    "gcp",
+    "compute engine",
+    "cloud storage",
+    "cloud sql",
+    "bigquery",
+    "spanner",
+    "firestore",
+    "datastore",
+    "bigtable",
+    "pub/sub",
+    "dataflow",
+    "dataproc",
+    "composer",
+    "gke",
+    "cloud run",
+    "cloud functions",
+    "vertex ai",
+    "cloud build",
+    "artifact registry",
+    "cloud logging",
+    "cloud monitoring",
+    "memorystore",
+    "iam",
+    # --- Cloud (Azure) ---
+    "azure",
+    "vm",
+    "aks",
+    "app service",
+    "functions",
+    "cosmos db",
+    "sql database",
+    "blob storage",
+    "event hubs",
+    "service bus",
+    "synapse",
+    "databricks",
+    "data factory",
+    "key vault",
+    "monitor",
+    "devops",
+    "pipelines",
+    "container registry",
+    "application gateway",
+    # --- Testing / QA ---
+    "unit testing",
+    "unittest",
+    "pytest",
+    "nose",
+    "doctest",
+    "junit",
+    "testng",
+    "mockito",
+    "hamcrest",
+    "kotest",
+    "spock",
+    "xunit",
+    "mstest",
+    "selenium",
+    "cypress",
+    "playwright",
+    "puppeteer",
+    "robot framework",
+    "rest-assured",
+    "supertest",
+    "jest",
+    "mocha",
+    "chai",
+    "ava",
+    "vitest",
+    "enzyme",
+    "jasmine",
+    "karma",
+    "postman",
+    "newman",
+    "locust",
+    "k6",
+    "gatling",
+    "jmeter",
+    "tdd",
+    "bdd",
+    "property-based testing",
+    "hypothesis",
+    # --- Mobile ---
+    "android",
+    "android sdk",
+    "jetpack",
+    "jetpack compose",
+    "gradle",
+    "adb",
+    "ios",
+    "swiftui",
+    "xcode",
+    "cocoapods",
+    "react native",
+    "expo",
+    "flutter",
+    "ionic",
+    "cordova",
+    # --- Analytics / Viz ---
+    "matplotlib",
+    "seaborn",
+    "plotly",
+    "bokeh",
+    "altair",
+    "ggplot",
+    "tableau",
+    "looker",
+    "lookml",
+    "power bi",
+    "superset",
+    "metabase",
+    "redash",
+    "grafana",
+    "kibana",
+    "quicksight",
+    # --- ML / AI / MLOps ---
+    "machine learning",
+    "ml",
+    "deep learning",
+    "dl",
+    "scikit-learn",
+    "sklearn",
+    "pandas",
+    "numpy",
+    "scipy",
+    "xgboost",
+    "lightgbm",
+    "catboost",
+    "pytorch",
+    "tensorflow",
+    "tf",
+    "keras",
+    "pytorch lightning",
+    "onnx",
+    "mlflow",
+    "huggingface",
+    "transformers",
+    "opencv",
+    "nltk",
+    "spacy",
+    "gensim",
+    "fairseq",
+    "detectron",
+    "yolo",
+    "stable diffusion",
+    "prophet",
+    "statsmodels",
+    "feature engineering",
+    "model deployment",
+    "model serving",
+    "onnxruntime",
+    "triton inference server",
+    "kubeflow",
+    "seldon",
+    "bentoml",
+    "ray",
+    "ray serve",
+    "feast",
+    "tfx",
+    "vertex ai",
+    # --- Observability / Logging ---
+    "prometheus",
+    "loki",
+    "tempo",
+    "jaeger",
+    "zipkin",
+    "opentelemetry",
+    "elastic stack",
+    "elk",
+    "logstash",
+    "fluentd",
+    "fluent-bit",
+    "datadog",
+    "new relic",
+    "splunk",
+    "sentry",
+    "rollbar",
+    "honeycomb",
+    # --- Security & Auth ---
+    "oauth",
+    "oauth2",
+    "openid connect",
+    "oidc",
+    "jwt",
+    "saml",
+    "mfa",
+    "sso",
+    "rbac",
+    "abac",
+    "tls",
+    "ssl",
+    "https",
+    "ssh",
+    "bcrypt",
+    "argon2",
+    "pbkdf2",
+    "owasp",
+    "cors",
+    "csrf",
+    "rate limiting",
+    "waf",
+    "zap",
+    "burp suite",
+    "keycloak",
+    "okta",
+    "auth0",
+    "cognito",
+    "kms",
+    "secrets manager",
+    "vault",
+    # --- Architecture & CS topics ---
+    "microservices",
+    "event-driven",
+    "domain-driven design",
+    "ddd",
+    "clean architecture",
+    "hexagonal architecture",
+    "cqrs",
+    "event sourcing",
+    "message queues",
+    "caching",
+    "cache",
+    "webhooks",
+    "serverless",
+    "monolith",
+    "soa",
+    "design patterns",
+    "data structures",
+    "algorithms",
+    "oop",
+    "functional programming",
+    "concurrency",
+    "multithreading",
+    "async",
+    "synchronization",
+    "transactions",
+    "acid",
+    "cap theorem",
+    "eventual consistency",
+    "distributed systems",
+    # --- Workflow & misc tools ---
+    "jira",
+    "confluence",
+    "notion",
+    "slack",
+    "microsoft teams",
+    "excel",
+    "gitflow",
+    "semver",
+]
+
+
+# --- Helpers for /skills/by_resume ---
+def get_resume_text_by_id(rid: str) -> str:
+    """
+    Return extracted text for resume <rid>, preferring backend/data/text/<id>.txt.
+    If missing, try to repair via ensure_text_exists(...), otherwise extract from PDF
+    in backend/data/resumes and persist to backend/data/text.
+    """
+    try:
+        with SessionLocal() as s:
+            r = s.get(Resume, str(rid))
+            if not r:
+                return ""
+
+            # 1) Try DB path if present
+            if getattr(r, "text_path", None):
+                p = Path(r.text_path)
+                if p.exists():
+                    return p.read_text(encoding="utf-8")
+
+            # 2) Canonical text location by ID
+            txt_path = TEXT_DIR / f"{r.id}.txt"
+            if txt_path.exists():
+                # (optional) backfill DB
+                try:
+                    r.text_path = str(txt_path)
+                    s.add(r)
+                    s.commit()
+                except Exception:
+                    pass
+                return txt_path.read_text(encoding="utf-8")
+
+            # 3) If you have an existing helper, let it (re)create the text file
+            try:
+                # ensure_text_exists should return a Path or str to the text file
+                out = ensure_text_exists(s, r)  # <-- use your existing function if present
+                out_p = Path(out)
+                if out_p.exists():
+                    return out_p.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+            # 4) Last resort: extract from PDF and persist
+            pdf_candidates = []
+            if getattr(r, "pdf_path", None):
+                pdf_candidates.append(Path(r.pdf_path))
+            pdf_candidates.append(PDF_DIR / f"{r.id}.pdf")
+
+            text = ""
+            for pdf in pdf_candidates:
+                try:
+                    if pdf and pdf.exists():
+                        text = extract_text_any(str(pdf)) or ""  # use your existing extractor
+                        if text:
+                            break
+                except Exception:
+                    continue
+
+            if text:
+                try:
+                    TEXT_DIR.mkdir(parents=True, exist_ok=True)
+                    txt_path.write_text(text, encoding="utf-8")
+                    # backfill DB for next time
+                    try:
+                        r.text_path = str(txt_path)
+                        s.add(r)
+                        s.commit()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            return text
+    except Exception:
+        return ""
+
+
+def get_resume_name_by_id(rid: str) -> str:
+    """Human-readable file name for the resume from DB (fallback empty)."""
+    try:
+        with SessionLocal() as s:
+            r = s.get(Resume, str(rid))
+            return getattr(r, "original_name", "") or getattr(r, "file_name", "") or ""
+    except Exception:
+        return ""
+
+
+def _normalize(s: str) -> str:
+    return " ".join(s.lower().split())
+
+
+def extract_skills_from_text(text: str):
+    t = _normalize(text)
+    hits = set()
+    multi = [s for s in SKILL_TERMS if " " in s]
+    single = [s for s in SKILL_TERMS if " " not in s]
+    # exact substring for multi-word
+    for m in multi:
+        if m in t:
+            hits.add(m)
+    # token presence for single words
+    tokens = set(re.split(r"[^a-z0-9\+#\.]+", t))
+    for s in single:
+        if s in tokens:
+            hits.add(s)
+    return sorted(hits)
+
 
 def _find_pdf_for_id(rid: str):
     # Look in current root
@@ -190,6 +847,55 @@ def count_resumes(session):
     return session.query(Resume).count()
 
 
+# --- Deep merge ---
+def deep_merge(a: dict, b: dict) -> dict:
+    for k, v in (b or {}).items():
+        if isinstance(v, dict) and isinstance(a.get(k), dict):
+            deep_merge(a[k], v)
+        else:
+            a[k] = v
+    return a
+
+
+@app.post("/skills/extract")
+def skills_extract():
+    """
+    POST { "text": "<resume plain text>" } -> { "skills": [...] }
+    Must return 200 even for empty text (tests expect that).
+    """
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "") or ""
+    skills = extract_skills_from_text(text)
+    return jsonify({"skills": skills}), 200
+
+
+@app.post("/skills/by_resume")
+def skills_by_resume():
+    """
+    POST { "resumeId": "<id>" } -> { "id": "<id>", "name": "<name>", "skills": [...] }
+    Tests monkeypatch api.get_resume_text_by_id / api.get_resume_name_by_id.
+    We call those if present; otherwise we gracefully fall back.
+    """
+    data = request.get_json(silent=True) or {}
+    rid = data.get("resumeId")
+    if not rid:
+        return jsonify({"error": "resumeId required"}), 400
+
+    # Use monkeypatched helpers if present (pytest sets them on this module).
+    try:
+        text = get_resume_text_by_id(rid)  # provided by tests via monkeypatch
+    except NameError:
+        text = ""
+
+    try:
+        name = get_resume_name_by_id(rid)  # provided by tests via monkeypatch
+    except NameError:
+        name = ""
+
+    skills = extract_skills_from_text(text or "")
+    return jsonify({"id": rid, "name": name, "skills": skills}), 200
+
+
 @app.get("/profile")
 def get_profile():
     if not PROFILE_PATH.exists():
@@ -218,6 +924,35 @@ def save_profile():
         return jsonify({"ok": True, "updated_at": dt.datetime.utcnow().isoformat() + "Z"})
     except Exception as e:
         return jsonify({"error": f"Failed to write profile: {e}"}), 500
+
+
+@app.route("/profile", methods=["PATCH"])
+def patch_profile():
+    # 1) parse patch body
+    try:
+        patch = request.get_json(force=True, silent=True) or {}
+    except Exception as e:
+        return jsonify({"error": f"Bad JSON: {e}"}), 400
+
+    # 2) read current profile.json (empty if missing)
+    try:
+        existing = {}
+        if PROFILE_PATH.exists():
+            with open(PROFILE_PATH, "r", encoding="utf-8") as f:
+                existing = json.load(f) or {}
+    except Exception as e:
+        return jsonify({"error": f"Failed to read profile: {e}"}), 500
+
+    # 3) deep-merge + write
+    merged = deep_merge(existing, patch)
+    try:
+        PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(PROFILE_PATH, "w", encoding="utf-8") as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({"error": f"Failed to write profile: {e}"}), 500
+
+    return jsonify(merged)
 
 
 # --------- List ----------

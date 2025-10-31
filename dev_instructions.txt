@@ -1,12 +1,18 @@
 # ----------------------------
 # Developer Setup Instructions
--> for contributors/dev mode (tests, linting, formatting, type checks)
+# -> for contributors/dev mode (tests, linting, formatting, type checks)
 # ----------------------------
 
-# 1) Activate the virtual environment
+# 0) One-time: create/activate venv (same as run_instructions)
+# (from project root)
+python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 
-# 2) Install dev dependencies
+# 1) Install runtime deps first (so code actually runs)
+pip install -r requirements.txt
+
+# 2) Install dev-only tooling
 pip install -r requirements-dev.txt
 
 # 3) Run unit tests
@@ -14,9 +20,13 @@ pytest
 
 # 4) Format code
 black .
+isort .
 
 # 5) Lint code (style checks)
 flake8 .
 
-# 6) Type checking
+# 6) (Optional) Type checking
 mypy .
+
+# 7) Start backend locally
+python -m backend.api

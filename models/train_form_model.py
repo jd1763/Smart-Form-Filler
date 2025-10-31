@@ -1,14 +1,14 @@
 # train_form_model.py
+from pathlib import Path
+
 import joblib
 import pandas as pd
-from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
-from pathlib import Path
 # Point to the repo root (one level up from /models)
 REPO = Path(__file__).resolve().parents[1]
 csv_path = REPO / "dataset" / "form_labels_balanced.csv"
@@ -26,22 +26,29 @@ X_train, X_test, y_train, y_test = train_test_split(
 # Char-level TF-IDF handles typos/case/punctuations in tiny labels extremely well
 model = Pipeline(
     steps=[
-        ("tfidf", TfidfVectorizer(
-            lowercase=True,
-            strip_accents="unicode",
-            analyzer="char_wb",       # word-boundary char n-grams are great for short labels
-            ngram_range=(2, 6),       # captures substrings like "cou", "county", "zip"
-            min_df=1,
-            sublinear_tf=True
-        )),
-        ("clf", LogisticRegression(
-            solver="lbfgs",
-            max_iter=2000,
-            C=2.0,                    # a tad more capacity
-            class_weight="balanced",  # helps recall on under-represented classes
-            multi_class="auto"
-        )),
-])
+        (
+            "tfidf",
+            TfidfVectorizer(
+                lowercase=True,
+                strip_accents="unicode",
+                analyzer="char_wb",  # word-boundary char n-grams are great for short labels
+                ngram_range=(2, 6),  # captures substrings like "cou", "county", "zip"
+                min_df=1,
+                sublinear_tf=True,
+            ),
+        ),
+        (
+            "clf",
+            LogisticRegression(
+                solver="lbfgs",
+                max_iter=2000,
+                C=2.0,  # a tad more capacity
+                class_weight="balanced",  # helps recall on under-represented classes
+                multi_class="auto",
+            ),
+        ),
+    ]
+)
 
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)

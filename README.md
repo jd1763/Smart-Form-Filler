@@ -138,7 +138,7 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
 
 ---
 
-### Week 7–8 — Polish & Deploy (Resume Vault + Profile Backend + Popup UX)
+### Week 7 — Polish (Resume Vault + Profile Backend + Popup UX)
 
 ### What’s new
 - **Backend Resume Vault**
@@ -175,6 +175,27 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
 
 - **Styling**
   - Centralized button/hover/focus styles and select focus rings in `styles.css`.
+
+## Week 8–9 (Oct 17–26, 2025)
+
+- Robust label resolver:
+  - Added `label[for]` resolution for all control types (not just checkboxes).
+  - Improved fallbacks to `aria-label`, fieldset legends, and nearest group headers.
+- EEO & Demographics:
+  - Support for radio/select variants (Hispanic/Latino/a/x, LGBTQ+, Veteran, Disability), with broader regex synonyms.
+- Education/Experience stability:
+  - Prevent ML/detection post-pass from overwriting structured rows (`#eduList`, `#expList`).
+  - DOM-based row indexing for stable per-row mapping.
+  - Fixed experience row counter to avoid cross-referencing education counts.
+- “Current job” UX:
+  - Profile stores `isCurrent: true` without baking end dates.
+  - At fill time, end month/year are computed dynamically (timezone-safe) and optional “Present/Current” controls are toggled if present.
+- Popup accuracy:
+  - Detected count is stable before/after opening the dropdown.
+  - Detected list always shows labels (no option values/placeholder text).
+  - Filled/Nonfilled panels refresh from page state after each Fill action.
+- Tests:
+  - Added second Employment section with a “Present/Current” checkbox to exercise dynamic end-date logic.
 
 
 ---

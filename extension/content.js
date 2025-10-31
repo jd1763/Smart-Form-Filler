@@ -672,7 +672,7 @@ function getEducationRows(root = document) {
         const opt = getOptionLabel(el); // {text, reason} or null
       
         // CHECKBOX: the label is usually the actual question ("I agree to a background check ...")
-        if (t === "checkbox" && opt && opt.text && opt.text.trim().length > 3) {
+        if (t === "checkbox" && opt && opt.text) {
           out.push({
             labelText: opt.text,          // <-- use the checkbox label as the question
             detectedBy: "checkbox-label",
@@ -749,6 +749,9 @@ function getEducationRows(root = document) {
     }
     return out;
   }
+  // Expose for popup & other modules
+try { window.detectAllFields = detectAllFields; } catch {}
+
 
   // Lightweight probe
   function probe() {
@@ -764,9 +767,11 @@ function getEducationRows(root = document) {
         return; // no async
       }
       if (msg && msg.action === 'EXT_DETECT_FIELDS') {
-        const detected = detectAllFields();
+        const detected = (typeof detectAllFields === "function")
+          ? detectAllFields()
+          : (typeof scanPageForFields === "function" ? scanPageForFields() : []);
         sendResponse({ ok: true, detected });
-        return; // no async
+        return; // no async      
       }
     } catch (e) {
       sendResponse({ ok: false, error: String(e) });
@@ -1343,9 +1348,18 @@ function setYearsExperienceSelect(select, raw) {
 
   // ---------- Labels + DOM traversal ----------
   function labelTextFor(el){
-    if (el.id) {
-      const forLab = el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      const t = forLab?.textContent?.trim();
+    // 0) explicit <label for=id> (works for any control type)
+    const id = el.getAttribute("id");
+    if (id) {
+      const sel = `label[for="${CSS?.escape ? CSS.escape(id) : id}"]`;
+      const lab = el.ownerDocument.querySelector(sel);
+      const t = (lab?.textContent || "").trim();
+      if (t) return t;
+    }
+    if (el?.tagName === "INPUT" && el.type === "checkbox") {
+      const t = (typeof deriveCheckboxLabel === "function"
+        ? deriveCheckboxLabel(el)
+        : labelForCheckbox?.(el)) || "";
       if (t) return t;
     }
     let wrap = el.closest("label");
@@ -1371,21 +1385,49 @@ function setYearsExperienceSelect(select, raw) {
 function normSkill(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
+
 // label fallback for checkboxes
 function labelForCheckbox(box) {
   if (!box) return "";
+  const bad = /skills?\b|highest\s*education/i;
+
+  // 1) explicit <label for=id>
   const id = box.getAttribute("id");
   if (id) {
     const lab = document.querySelector(`label[for="${id}"]`);
-    if (lab && lab.textContent) return lab.textContent.trim();
+    const t = (lab?.textContent || "").trim();
+    if (t && !bad.test(t)) return t;
   }
+
+  // 2) wrapped inside a <label>...</label>
+  const wrapLab = box.closest("label");
+  if (wrapLab?.textContent) {
+    const t = wrapLab.textContent.trim();
+    if (t && !bad.test(t)) return t;
+  }
+
+  // 3) aria-label
   const aria = box.getAttribute("aria-label");
-  if (aria) return aria.trim();
-  const sib = (box.nextSibling && box.nextSibling.textContent || "").trim();
-  if (sib) return sib;
-  const wrap = box.closest(".field, .row, .item, .form-group, div");
-  const guess = wrap?.querySelector("label")?.textContent?.trim();
-  return guess || "";
+  if (aria && !bad.test(aria)) return aria.trim();
+
+  // 4) immediate text sibling (rare but cheap)
+  const sib = (box.nextSibling && box.nextSibling.nodeType === Node.TEXT_NODE
+               ? box.nextSibling.textContent
+               : "").trim();
+  if (sib && !bad.test(sib)) return sib;
+
+  // 5) last resort: a label inside the same small row that *contains this input*
+  const row = box.closest(".item, .row, .field, .form-group, [role='group']");
+  if (row) {
+    // prefer a <label> that either wraps this box OR points to its id
+    const tie =
+      (id ? row.querySelector(`label[for="${id}"]`) : null) ||
+      box.parentElement?.closest("label");
+    const guess = (tie?.textContent || "").trim();
+    if (guess && !bad.test(guess)) return guess;
+  }
+
+  return "";
 }
 
 // === Voluntary Self-ID / Demographics filler (reads profile.eligibility) ===
@@ -1409,43 +1451,57 @@ async function fillVoluntarySelfID(profile, root = document) {
     }
 
     // Helper: get label text for a control
-    const lblFor = (el) => (typeof labelTextFor === "function" ? labelTextFor(el) : el?.closest("label")?.textContent || "");
+    const lblFor = (el) => {
+      if (typeof labelTextFor === "function") return labelTextFor(el);
+      const id = el?.id && (CSS?.escape ? CSS.escape(el.id) : el.id);
+      const byFor = id ? el.ownerDocument.querySelector(`label[for="${id}"]`) : null;
+      return (byFor?.textContent || el.closest("label")?.textContent || el.getAttribute("aria-label") || el.name || el.id || "").trim();
+    };
+    
+// Helper to set by label regex with a candidate list/builder
+const setBy = (rx, candidates) => {
+  for (const sel of selects) {
+    const lbl = (lblFor(sel) || "").trim();
+    if (!lbl) continue;
+    if (rx.test(lbl)) {
+      const cands = (typeof candidates === "function") ? candidates() : (candidates || []);
+      if (!cands.length) continue;
 
-    // Helper to set by label regex with a candidate list/builder
-    const setBy = (rx, candidates) => {
-      for (const sel of selects) {
-        const lbl = (lblFor(sel) || "").trim();
-        if (!lbl) continue;
-        if (rx.test(lbl)) {
-          const cands = (typeof candidates === "function") ? candidates() : (candidates || []);
-          if (!cands.length) continue;
-
-          // strongest match via helper
-          const idx = (H.matchOptionIndex ? H.matchOptionIndex(sel, cands) : -1);
-          if (idx >= 0) {
-            sel.selectedIndex = idx;
-            sel.dispatchEvent(new Event("input",  { bubbles: true }));
-            sel.dispatchEvent(new Event("change", { bubbles: true }));
-            return true;
-          }
-          // loose fallback: try setSelectValueSmart per candidate
-          if (typeof setSelectValueSmart === "function") {
-            for (const c of cands) {
-              if (setSelectValueSmart(sel, c, lbl)) return true;
-            }
-          }
+      // strongest match via helper
+      const idx = (H.matchOptionIndex ? H.matchOptionIndex(sel, cands) : -1);
+      if (idx >= 0) {
+        sel.selectedIndex = idx;
+        sel.dispatchEvent(new Event("input",  { bubbles: true }));
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+      // loose fallback: try setSelectValueSmart per candidate
+      if (typeof setSelectValueSmart === "function") {
+        for (const c of cands) {
+          if (setSelectValueSmart(sel, c, lbl)) return true;
         }
       }
-      return false;
-    };
+    }
+  }
+  return false;
+};
 
-    // Fill the six questions (match by wording on your test page)
-    setBy(/\bdisab/i,             () => H.buildDisabilityCandidates?.(disability) || []);
-    setBy(/\blgbtq/i,             () => H.buildLGBTQCandidates?.(lgbtq) || []);
-    setBy(/\bveteran/i,           () => H.buildVeteranCandidates?.(veteran) || []);
-    setBy(/\bethnic/i,            () => H.buildEthnicityCandidates?.(ethnicity) || []);
-    setBy(/\brace\b/i,            () => H.buildRaceCandidates?.(race) || []);
-    setBy(/hispanic.*latinx/i,    () => H.buildYesNoCandidates?.(hispanicLatinx) || []);
+// --- Built-in fallbacks so this works even when SFFHelpers (H.*) isn’t present ---
+const yesNoPref = (v) => {
+  const lo = String(v || "").toLowerCase();
+  const yn = lo.startsWith("y") ? "Yes" : lo.startsWith("n") ? "No" : "";
+  return [v, yn, "Decline to state", "Prefer not to answer", "Prefer not to say"].filter(Boolean);
+};
+const passthruOr = (v, ...alts) => [v, ...alts].filter(Boolean);
+
+// Fill the six questions (wording matches your test page)
+setBy(/\bdisab/i,             () => H?.buildDisabilityCandidates?.(disability) || passthruOr(disability, "Yes", "No", "Prefer not to answer"));
+setBy(/\blgbtq/i,             () => H?.buildLGBTQCandidates?.(lgbtq)          || yesNoPref(lgbtq));
+setBy(/\bveteran/i,           () => H?.buildVeteranCandidates?.(veteran)      || passthruOr(veteran, "Yes", "No", "Prefer not to answer"));
+setBy(/\bethnic/i,            () => H?.buildEthnicityCandidates?.(ethnicity)  || passthruOr(ethnicity));
+setBy(/\brace\b/i,            () => H?.buildRaceCandidates?.(race)            || passthruOr(race));
+setBy(/hispanic.*(latinx|latino|latina|latine|latin)/i,
+  () => H?.buildYesNoCandidates?.(hispanicLatinx) || yesNoPref(hispanicLatinx));
 
   } catch (e) {
     console.warn("[filler] fillVoluntarySelfID error:", e);
@@ -1482,15 +1538,15 @@ async function fillSkillsAndScalars(profile) {
       }
     });
 
-    // Load matched skills saved by popup for the SELECTED resume
-    const { matchedSkills } = await new Promise(res =>
-      chrome.storage.local.get(["matchedSkills"], res)
+    // STRICT: only use skills from the selected resume; if none, skip this pass.
+    const { selectedResume } = await new Promise(res =>
+      chrome.storage.local.get(["selectedResume"], res)
     );
-    const req  = Array.isArray(matchedSkills?.required)  ? matchedSkills.required  : [];
-    const pref = Array.isArray(matchedSkills?.preferred) ? matchedSkills.preferred : [];
-    const normSet = new Set([...req, ...pref].map(normSkill).filter(Boolean));
+
+    const sourceSkills = Array.isArray(selectedResume?.skills) ? selectedResume.skills : [];
+    const normSet = new Set(sourceSkills.map(sffNormSkillToken).filter(Boolean));
     if (!normSet.size) {
-      console.log("[filler] No matchedSkills in storage; skipping Key Skills.");
+      console.log("[filler] No selectedResume.skills; skipping Key Skills.");
       return;
     }
 
@@ -1508,11 +1564,12 @@ async function fillSkillsAndScalars(profile) {
       const raw =
         (box.value ||
         box.getAttribute("aria-label") ||
-        labelForCheckbox(box) || ""   // uses the helper above
-        ).trim();
+        (typeof deriveCheckboxLabel === "function" ? deriveCheckboxLabel(box) : labelForCheckbox(box)) ||
+        ""
+        ).trim();    
 
-      const key = normSkill(raw);      // lower + strip non-alphanumerics
-      if (key && normSet.has(key)) {
+        const key = sffNormSkillToken(raw);
+        if (key && normSet.has(key)) {
         if (!box.checked) {
           box.checked = true;
           // Fire both events to satisfy custom listeners
@@ -1718,7 +1775,7 @@ async function clickAddExperienceOnce(root = document) {
 // 3) Ensure + Fill orchestrator — line-for-line like ensureAndFillEducation
 async function ensureAndFillExperience(profile, root = document) {
   const exps  = Array.isArray(profile?.experience) ? profile.experience : [];
-  if(!exps.length);
+  if(!exps.length) return;
 
   // mirror the edu selectors
   const listEl  = root.querySelector('#expList') || root;
@@ -1765,7 +1822,7 @@ async function ensureExperienceRowsExpOnly(profile, root = document) {
     if (!exps.length) return;
 
     const listEl   = root.querySelector('#expList'); // present on your test
-    const countNow = () => (listEl ? listEl.querySelectorAll('.item').length : getEducationRows(root).length);
+    const countNow = () => (listEl ? listEl.querySelectorAll('.item').length : getExperienceRows(root).length);
     const target   = exps.length;
 
     if (countNow() >= target) return;
@@ -1864,76 +1921,306 @@ function setEndMonthYearIn(row, dateStr) {
   if (endYearEl  && y != null) setSelectValueSmart(endYearEl,  String(y));
 }
 
-// Fill each experience block from profile.experience[i]
-async function fillExperienceBlocksFromProfile(profile, root = document) {
-  const exps = Array.isArray(profile?.experience) ? profile.experience : [];
-  if (!exps.length) return;
+// Robustly toggle the "current/present" control inside an experience row
+function toggleCurrentFlagInRow(row, want = true) {
+  try {
+    // 1) Prefer the explicit test control first
+    let direct =
+      row.querySelector('[data-k="isCurrent"]') ||
+      row.querySelector('input[type="checkbox"][name*="current" i]') ||
+      row.querySelector('input[type="checkbox"][id*="current" i]');
 
-  const rows = getExperienceRows(root);
-  for (let i = 0; i < Math.min(rows.length, exps.length); i++) {
-    const row = rows[i];
-    const e   = exps[i] || {};
-
-    // Company / Employer
-    const companyEl =
-      row.querySelector('[data-k="company"]') ||
-      row.querySelector('[name*="company" i]') ||
-      null;
-    if (companyEl) setTextLike(companyEl, e.company || e.employer || "");
-    else setByLabelTextIn(row, /(company|employer|organization)/i, e.company || e.employer || "");
-
-    // Job Title / Position
-    const jobEl =
-      row.querySelector('[data-k="jobTitle"]') ||
-      row.querySelector('[name*="job" i], [name*="title" i], [name*="position" i]') ||
-      null;
-    if (jobEl) setTextLike(jobEl, e.jobTitle || e.job_title || e.title || "");
-    else setByLabelTextIn(row, /(job\s*title|position|role)/i, e.jobTitle || e.job_title || e.title || "");
-
-    // Location (optional)
-    const locEl =
-      row.querySelector('[data-k="location"]') ||
-      row.querySelector('[name*="location" i], [name*="city" i], [name*="town" i]') ||
-      null;
-    if (locEl) setTextLike(locEl, e.location || "");
-    else setByLabelTextIn(row, /(location|city|town)/i, e.location || "");
-
-    // Description / Responsibilities
-    const descEl =
-      row.querySelector('[data-k="description"], [data-k="roleDescription"]') ||
-      row.querySelector('[name*="description" i], [name*="responsibil" i]') ||
-      null;
-    if (descEl) setTextLike(descEl, e.description || e.role_description || e.roleDescription || "");
-    else setByLabelTextIn(row, /(description|responsibilit)/i, e.description || e.role_description || e.roleDescription || "");
-
-    // Dates (prefer data-k selectors inside the block)
-    const sMonth = row.querySelector('select[data-k="startMonth"]') ||
-                   [...row.querySelectorAll('select')].find(el => /start\s*month/i.test(labelTextFor(el)));
-    const sYear  = row.querySelector('select[data-k="startYear"]')  ||
-                   [...row.querySelectorAll('select')].find(el => /start\s*year/i.test(labelTextFor(el)));
-    const eMonth = row.querySelector('select[data-k="endMonth"]')   ||
-                   [...row.querySelectorAll('select')].find(el => /end\s*month/i.test(labelTextFor(el)));
-    const eYear  = row.querySelector('select[data-k="endYear"]')    ||
-                   [...row.querySelectorAll('select')].find(el => /end\s*year/i.test(labelTextFor(el)));
-
-    // support split or combined forms from profile.json
-    if (e.startMonth || e.startYear) {
-      if (sMonth) setMonthValueSmart(sMonth, String(e.startMonth));
-      if (sYear)  setSelectValueSmart(sYear,  String(e.startYear));
-    } else if (e.start_date) {
-      setStartMonthYearIn(row, e.start_date);
+    // 2) If not found, try label text heuristics inside this row
+    if (!direct) {
+      direct = Array.from(row.querySelectorAll('input[type="checkbox"],input[type="radio"]')).find(inp => {
+        const lbl = (inp.id && row.querySelector(`label[for="${inp.id}"]`)) || inp.closest('label');
+        const txt = (lbl?.textContent || inp.getAttribute('aria-label') || '').toLowerCase().replace(/\s+/g, ' ');
+        return /(present|current|currently work|i currently work here)/.test(txt);
+      });
     }
 
-    if (e.endMonth || e.endYear) {
-      if (eMonth) setMonthValueSmart(eMonth, String(e.endMonth));
-      if (eYear)  setSelectValueSmart(eYear,  String(e.endYear));
-    } else if (e.end_date) {
-      setEndMonthYearIn(row, e.end_date);
+    // 3) If still nothing, try ARIA role fallbacks
+    if (!direct) {
+      const roleToggle = Array.from(row.querySelectorAll('[role="checkbox"],[role="switch"]')).find(el => {
+        const txt = (el.getAttribute('aria-label') || el.textContent || '').toLowerCase();
+        return /(present|current|currently)/.test(txt);
+      });
+      if (roleToggle) {
+        const cur = roleToggle.getAttribute('aria-checked') === 'true';
+        if (cur !== !!want) {
+          roleToggle.click?.();
+          if (roleToggle.getAttribute('aria-checked') !== String(!!want)) {
+            roleToggle.setAttribute('aria-checked', String(!!want));
+            roleToggle.dispatchEvent(new Event('input',  { bubbles: true }));
+            roleToggle.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+        return roleToggle.getAttribute('aria-checked') === 'true';
+      }
+      return false;
     }
+
+    // 4) Strongly assert the state on the explicit checkbox
+    const target = !!want;
+    if (direct.checked !== target) {
+      // set property and fire events first (works on most custom listeners)
+      direct.checked = target;
+      direct.dispatchEvent(new Event('input',  { bubbles: true }));
+      direct.dispatchEvent(new Event('change', { bubbles: true }));
+      // if a framework immediately flipped it back, tap click as a fallback
+      if (direct.checked !== target) direct.click?.();
+    }
+
+    // 5) Re-assert once on the next frame in case DOM listeners run late
+    requestAnimationFrame(() => {
+      if (direct.checked !== target) {
+        direct.checked = target;
+        direct.dispatchEvent(new Event('input',  { bubbles: true }));
+        direct.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    return !!direct.checked;
+  } catch {
+    return false;
   }
 }
 
+// Fill End Month/Year to the current month/year (fallback when no checkbox exists)
+function setEndToCurrentMY(row) {
+  try {
+    const { m, y } = SFF_nowMonthYearTZ('America/New_York');
+    const eMonth =
+      row.querySelector('select[data-k="endMonth"]') ||
+      [...row.querySelectorAll('select')].find(el => /end\s*month/i.test(labelTextFor(el)));
+    const eYear  =
+      row.querySelector('select[data-k="endYear"]') ||
+      [...row.querySelectorAll('select')].find(el => /end\s*year/i.test(labelTextFor(el)));
+    if (eMonth) setMonthValueSmart(eMonth, String(m));
+    if (eYear)  setSelectValueSmart(eYear,  String(y));
+  } catch (_) {}
+}
+
+// === Stateful helper: set the "current job" checkbox to a desired state; fallback to end M/Y if no box and want=true ===
+function stickCurrentTo(row, want) {
+  // Try to locate a current/present checkbox in this row
+  let cb =
+    row.querySelector('[data-k="isCurrent"]') ||
+    row.querySelector('input[type="checkbox"][name*="current" i]') ||
+    row.querySelector('input[type="checkbox"][id*="current" i]') ||
+    null;
+
+  // If an older build left a sticky guard on this element, drop all handlers by cloning once.
+  if (cb && cb.dataset.stickyCurrent) {
+    const clone = cb.cloneNode(true);
+    cb.replaceWith(clone);
+    cb = clone;
+  }
+
+  const setState = () => {
+    if (cb) {
+      // Use canonical toggler first (fires correct events / handles frameworks)
+      toggleCurrentFlagInRow(row, !!want);
+
+      // Hard assert if the site swallowed the click
+      if (cb.checked !== !!want) {
+        cb.checked = !!want;
+        cb.dispatchEvent(new Event('input',  { bubbles: true }));
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } else if (want) {
+      // No checkbox exists: fallback = set End Month/Year to current M/Y
+      setEndToCurrentMY(row);
+    }
+  };
+
+  // Immediate and staggered re-asserts (short window only; no permanent guards)
+  setState();
+  requestAnimationFrame(setState);
+  setTimeout(setState, 0);
+  setTimeout(setState, 150);
+  setTimeout(setState, 600);
+}
+
+// === Fill each experience block from profile.experience[i] (ML-friendly current-flag rhythm) ===
+async function fillExperienceBlocksFromProfile(profile, root = document) {
+  const exps = Array.isArray(profile?.experience) ? profile.experience : [];
+
+  // Ensure enough rows exist (reuses your row-adder)
+  try {
+    if (exps.length) {
+      const listEl = root.querySelector('#expList') || root;
+      const countRows = () => (
+        (typeof getExperienceRows === "function")
+          ? getExperienceRows(root).length
+          : (listEl.querySelectorAll('#expList .item, [data-exp-item]').length)
+      );
+      let have = countRows();
+      if (have < exps.length) {
+        const addBtn =
+          root.querySelector('#addExp') ||
+          root.querySelector('#addExperience') ||
+          root.querySelector('.add-experience') ||
+          root.querySelector('[data-add="experience"]') ||
+          root.querySelector('[data-action="add-experience"]');
+        if (addBtn) {
+          while (have++ < exps.length) addBtn.click?.();
+        } else if (typeof ensureExperienceRowsExpOnly === "function") {
+          await ensureExperienceRowsExpOnly(profile, root);
+        }
+      }
+    }
+  } catch (_) {}
+
+  if (!exps.length) return;
+
+  const rows = (typeof getExperienceRows === "function") ? getExperienceRows(root) : [];
+  for (let i = 0; i < Math.min(rows.length, exps.length); i++) {
+    const row = rows[i];
+    const e   = exps[i] || {};
+    const wantCurrent = normalizeIsCurrent(e); // reads isCurrent / is_current / current
+
+    // --- Warmup: briefly toggle ON then OFF so frameworks unlock date widgets
+    try {
+      stickCurrentTo(row, true);
+      await new Promise(r => requestAnimationFrame(r));
+      stickCurrentTo(row, false);
+      await new Promise(r => requestAnimationFrame(r));
+    } catch {}
+
+    // 1) Company / Employer
+    {
+      const companyEl =
+        row.querySelector('[data-k="company"]') ||
+        row.querySelector('[name*="company" i]');
+      if (companyEl) setTextLike(companyEl, e.company || e.employer || "");
+      else setByLabelTextIn(row, /(company|employer|organization)/i, e.company || e.employer || "");
+    }
+
+    // 2) Job Title / Position
+    {
+      const jobEl =
+        row.querySelector('[data-k="jobTitle"]') ||
+        row.querySelector('[name*="job" i], [name*="title" i], [name*="position" i]');
+      if (jobEl) setTextLike(jobEl, e.jobTitle || e.job_title || e.title || "");
+      else setByLabelTextIn(row, /(job\s*title|position|role)/i, e.jobTitle || e.job_title || e.title || "");
+    }
+
+    // 3) Location (optional)
+    {
+      const locEl =
+        row.querySelector('[data-k="location"]') ||
+        row.querySelector('[name*="location" i], [name*="city" i], [name*="town" i]');
+      if (locEl) setTextLike(locEl, e.location || "");
+      else setByLabelTextIn(row, /(location|city|town)/i, e.location || "");
+    }
+
+    // 4) Description / Responsibilities
+    {
+      const descEl =
+        row.querySelector('[data-k="description"], [data-k="roleDescription"]') ||
+        row.querySelector('[name*="description" i], [name*="responsibil" i]');
+      if (descEl) setTextLike(descEl, e.description || e.role_description || e.roleDescription || "");
+      else setByLabelTextIn(row, /(description|responsibilit)/i, e.description || e.role_description || e.roleDescription || "");
+    }
+
+    // 5) Start dates (profile-driven if present, else string fallback)
+    {
+      const sMonth =
+        row.querySelector('select[data-k="startMonth"]') ||
+        [...row.querySelectorAll('select')].find(el => /start\s*month/i.test(labelTextFor(el)));
+      const sYear  =
+        row.querySelector('select[data-k="startYear"]') ||
+        [...row.querySelectorAll('select')].find(el => /start\s*year/i.test(labelTextFor(el)));
+
+      if (e.startMonth || e.startYear) {
+        if (sMonth && e.startMonth) setMonthValueSmart(sMonth, String(e.startMonth));
+        if (sYear  && e.startYear)  setSelectValueSmart(sYear,  String(e.startYear));
+      } else if (e.start_date) {
+        setStartMonthYearIn(row, e.start_date);
+      }
+    }
+
+    // 6) End dates — ALWAYS write before the final current-flag assert
+    {
+      const eMonth =
+        row.querySelector('select[data-k="endMonth"]') ||
+        [...row.querySelectorAll('select')].find(el => /end\s*month/i.test(labelTextFor(el)));
+      const eYear  =
+        row.querySelector('select[data-k="endYear"]') ||
+        [...row.querySelectorAll('select')].find(el => /end\s*year/i.test(labelTextFor(el)));
+
+      if (wantCurrent) {
+        // Your requested behavior: for current roles, set end M/Y to NOW
+        setEndToCurrentMY(row);
+      } else {
+        if (e.endMonth || e.endYear) {
+          if (eMonth && e.endMonth) setMonthValueSmart(eMonth, String(e.endMonth));
+          if (eYear  && e.endYear)  setSelectValueSmart(eYear,  String(e.endYear));
+        } else if (e.end_date) {
+          setEndMonthYearIn(row, e.end_date);
+        }
+      }
+    }
+
+    // 7) FINAL assert the "Currently work here" checkbox state
+    stickCurrentTo(row, wantCurrent);
+    await new Promise(r => requestAnimationFrame(r));
+  }
+}
 window.fillExperienceBlocksFromProfile = fillExperienceBlocksFromProfile;
+
+// --- Final pass: assert each Experience row's "Present/Currently" checkbox to match profile ---
+function enforceExperienceCurrentFromProfile(profile, root = document) {
+  try {
+    const exps = Array.isArray(profile?.experience) ? profile.experience : [];
+    if (!exps.length) return;
+
+    // Prefer explicit test list; otherwise fall back to generic grouping
+    const rows = (typeof getExperienceRows === "function")
+      ? getExperienceRows(root)
+      : Array.from(root.querySelectorAll('#expList .item, [data-exp-item], .experience-item, .employment-item, .work-block, .experience-row, .item'));
+
+    const n = Math.min(rows.length, exps.length);
+    for (let i = 0; i < n; i++) {
+      const row = rows[i];
+      const e   = exps[i] || {};
+      const want = normalizeIsCurrent(e);
+
+      // explicit data-k hook first
+      let box = row.querySelector('[data-k="isCurrent"]');
+      if (!box) {
+        // try common fallbacks by label text within this row
+        box = Array.from(row.querySelectorAll('input[type="checkbox"]')).find(inp => {
+          const lbl = (inp.id && row.querySelector(`label[for="${inp.id}"]`)) || inp.closest('label');
+          const txt = (lbl?.textContent || inp.getAttribute('aria-label') || '').toLowerCase();
+          return /(present|current|currently\s*work)/.test(txt);
+        }) || null;
+      }
+      if (!box) continue;
+
+      // use our robust checkbox setter (already fires input/change)
+      if (typeof setCheckboxByBool === "function") {
+        setCheckboxByBool(box, want);
+      } else {
+        box.checked = want;
+        box.dispatchEvent(new Event("input",  { bubbles:true }));
+        box.dispatchEvent(new Event("change", { bubbles:true }));
+      }
+
+      // If checked, mirror the test page behavior by disabling end date controls
+      if (want) {
+        const endMonthEl = row.querySelector('[data-k="endMonth"]');
+        const endYearEl  = row.querySelector('[data-k="endYear"]');
+        if (endMonthEl) endMonthEl.disabled = true;
+        if (endYearEl)  endYearEl.disabled  = true;
+      }
+    }
+  } catch (e) {
+    console.warn("[filler] enforceExperienceCurrentFromProfile error:", e);
+  }
+}
+window.enforceExperienceCurrentFromProfile = enforceExperienceCurrentFromProfile;
 
 // Set a text/select/textarea within a given container by label regex
 function setByLabelTextIn(container, rx, value) {
@@ -2208,20 +2495,18 @@ function setNodeValue(el, val, labelText = ""){
     return { ok: true, inputs: pairs.length, detected };
   }
 
-  // ---------- background messaging ----------
-  async function getUserData() {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ action: "getUserData" }, (resp) => {
-        if (!resp || resp.success === false) {
-          console.error("[content] getUserData failed:", resp && resp.error);
-          return resolve({});
-        }
-        resolve(resp.userData || {});
-      });
-    });
-  }
+// ---------- background messaging ----------
+async function getUserData(){
+  // Prefer freshly mirrored storage (profile editor writes this)
+  try {
+    const { userData } = await chrome.storage.local.get("userData");
+    if (userData && typeof userData === "object") return userData;
+  } catch {}
+  // Fallback: runtime (background) cache
+  return await new Promise(r => chrome.runtime.sendMessage({ action: "getUserData" }, r));
+}  
+  
 /* ================= NORMALIZED PREDICTIONS ================= */
-
 function _normalizeKey(k) {
   if (!k) return null;
   const s = String(k).trim();
@@ -2248,39 +2533,80 @@ function _normalizeKey(k) {
   return s;
 }
 
-/* === KEY SKILLS HELPER BLOCK (content.js) === */
-function sffNormSkill(s) {
-  return String(s || "").toLowerCase().replace(/\s+/g, "").trim(); // only lower + remove spaces
+function normalizeIsCurrent(e) {
+  const v = (e && (e.isCurrent ?? e.is_current ?? e.current));
+  if (typeof v === "boolean") return v;
+  if (v == null) return false;
+  const s = String(v).trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "y";
 }
+
+/* === KEY SKILLS HELPER BLOCK === */
+function sffNormSkill(s) {
+  const t  = String(s || "").toLowerCase().replace(/\s+/g, "").trim();
+  const al = t.replace(/[^a-z]/g,"");
+  if (al === "skills" || al === "highesteducation" || al === "skillshighesteducation") return "";
+  return t;
+}
+
+function SFF_nowMonthYearTZ(tz = 'America/New_York') {
+  let now = new Date();
+  try { now = new Date(new Date().toLocaleString('en-US', { timeZone: tz })); } catch {}
+  return { m: now.getMonth() + 1, y: now.getFullYear() };
+}
+
+// Fallback: set end date selects in a row to the current month/year
+function setEndToCurrentMY(row) {
+  try {
+    const { m, y } = SFF_nowMonthYearTZ('America/New_York');
+    const eMonth =
+      row.querySelector('select[data-k="endMonth"]') ||
+      [...row.querySelectorAll('select')].find(el => /end\s*month/i.test(labelTextFor(el)));
+    const eYear  =
+      row.querySelector('select[data-k="endYear"]') ||
+      [...row.querySelectorAll('select')].find(el => /end\s*year/i.test(labelTextFor(el)));
+
+    if (eMonth) setMonthValueSmart(eMonth, String(m));
+    if (eYear)  setSelectValueSmart(eYear,  String(y));
+  } catch (_) {}
+}
+
 
 function sffGetCheckboxNodes(root = document) {
   const pairs = [];
 
-  // Common pattern: <label> <input type="checkbox"> Skill </label>
+  // Prefer tight per-option labels
   const labels = Array.from(root.querySelectorAll("label"));
   for (const lab of labels) {
+    const inputs = Array.from(lab.querySelectorAll('input[type="checkbox"]'));
+    // If this label wraps multiple checkboxes, it's a container -> skip (we’ll handle inputs below)
+    if (inputs.length > 1) continue;
+
     const input =
-      lab.querySelector('input[type="checkbox"]') ||
+      inputs[0] ||
       (lab.htmlFor ? root.getElementById(lab.htmlFor) : null);
 
     if (input && input.type === "checkbox") {
-      const raw = lab.textContent || lab.innerText || "";
-      const txt = raw.replace(/\s+/g, " ").trim();
-      pairs.push({ input, label: txt });
+      // use smarter extractor instead of whole lab.textContent
+      let txt = deriveCheckboxLabel(input);
+      if (!txt) {
+        const raw = lab.textContent || lab.innerText || "";
+        txt = raw.replace(/\s+/g, " ").trim();
+      }
+      if (txt) pairs.push({ input, label: txt });
     }
   }
 
-  // Standalone checkboxes with aria-label/name (rare but safe)
-  const lone = root.querySelectorAll(
-    'input[type="checkbox"][aria-label], input[type="checkbox"][name]'
-  );
-  for (const inp of lone) {
-    const has = pairs.some(p => p.input === inp);
-    if (!has) {
-      const txt = inp.getAttribute("aria-label") || inp.name || "";
-      if (txt) pairs.push({ input: inp, label: txt });
-    }
+  // Second pass: any checkbox not already paired (e.g., inside container labels)
+  const seen = new Set(pairs.map(p => p.input));
+  for (const inp of root.querySelectorAll('input[type="checkbox"]')) {
+    if (seen.has(inp)) continue;
+    const txt = deriveCheckboxLabel(inp);
+    if (txt) pairs.push({ input: inp, label: txt });
   }
+
+  // Final tidy: collapse spaces
+  for (const p of pairs) p.label = (p.label || "").replace(/\s+/g," ").trim();
   return pairs;
 }
 
@@ -2351,11 +2677,153 @@ function sffNormSkillToken(s) {
 }
 
 function deriveCheckboxLabel(input) {
-  // Prefer associated <label>, then aria-label, then value/text
-  const lab = (input.id && document.querySelector(`label[for="${input.id}"]`)) || input.closest("label");
-  const aria = input.getAttribute("aria-label");
-  const txt = (lab?.textContent || aria || input.value || input.textContent || "").trim();
+  const byFor = input.id ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`) : null;
+  const wrap  = input.closest("label");
+  const lab   = byFor || wrap;
+
+  // Obvious group/section headings we never want as option labels
+  const NEG = /\bskills?\b|\bhighest\s*education\b/i;
+
+  // pull the text nearest to the checkbox
+  const nearText = () => {
+    const texts = [];
+
+    const read = n => (n && n.textContent ? n.textContent.trim() : "");
+    // immediate siblings
+    texts.push(read(input.nextSibling));
+    texts.push(read(input.previousSibling));
+    if (input.nextElementSibling)   texts.push(read(input.nextElementSibling));
+    if (input.previousElementSibling) texts.push(read(input.previousElementSibling));
+
+    // small inline elements inside the label, often the true option text
+    if (lab) {
+      for (const el of lab.querySelectorAll('span,b,strong,i,em,small')) {
+        const t = read(el);
+        if (t) texts.push(t);
+      }
+    }
+
+    // choose the first non-heading short bit
+    return texts
+      .map(t => t.replace(/\s+/g, " "))
+      .filter(t => t && !NEG.test(t))
+      .find(t => t.length <= 60) || "";
+  };
+
+  // priority: aria-label → nearby text → explicit label text → value/name
+  let txt =
+    (input.getAttribute("aria-label") || "").trim() ||
+    nearText() ||
+    (lab ? (lab.textContent || "").trim() : "") ||
+    (input.value || "").trim() ||
+    (input.name  || "").trim();
+
+  txt = (txt || "").replace(/\s+/g, " ").trim();
+
+  // if the result is still just a heading, blank it so caller can ignore
+  const onlyLetters = txt.toLowerCase().replace(/[^a-z]/g,"");
+  if (onlyLetters === "skills" || onlyLetters === "highesteducation" || onlyLetters === "skillshighesteducation") {
+    return "";
+  }
   return txt;
+}
+
+// === NEW: get the human-readable label for a single radio/checkbox option ===
+function getChoiceLabel(input) {
+  if (!input) return "";
+
+  // 1) <label for="id">
+  if (input.id) {
+    const lab = input.ownerDocument.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+    if (lab && lab.textContent.trim()) return lab.textContent.trim();
+  }
+
+  // 2) Wrapped by a <label>...</label>
+  const wrap = input.closest("label");
+  if (wrap) {
+    const clone = wrap.cloneNode(true);
+    clone.querySelectorAll("input, textarea, select").forEach(n => n.remove());
+    const t = (clone.textContent || "").replace(/\s+/g, " ").trim();
+    if (t) return t;
+  }
+
+  // 3) aria-label
+  const aria = input.getAttribute("aria-label");
+  if (aria && aria.trim()) return aria.trim();
+
+  // 4) Nearby text node (common on some sites)
+  let sib = input.nextSibling;
+  while (sib && sib.nodeType === Node.TEXT_NODE && !sib.textContent.trim()) sib = sib.nextSibling;
+  if (sib && sib.nodeType === Node.TEXT_NODE && sib.textContent.trim()) {
+    return sib.textContent.trim();
+  }
+
+  // 5) Fallback: value attribute
+  const v = input.value || input.getAttribute("value");
+  return (v || "").trim();
+}
+
+// Click any Terms/Privacy/Consent-style checkbox (native + role="checkbox")
+function enforceConsentChecks() {
+  const POS = /\b(i\s+)?agree\b|\bconsent\b|\bterms(?:\s*&\s*conditions|\s+of\s+service)?\b|\btos\b|\bprivacy\b|\bpolicy\b/i;
+  const NEG = /\b(do\s*not|don['’]t|no)\s+(agree|consent)\b|\bdo\s*not\s+sell\b/i;
+
+  const inputs = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+  const roles  = Array.from(document.querySelectorAll('[role="checkbox"]'));
+
+  const getLbl = (el) => {
+    try {
+      // Prefer your own helper if present
+      return (typeof deriveCheckboxLabel === "function"
+        ? deriveCheckboxLabel(el)
+        : (el.getAttribute?.("aria-label") || el.closest("label")?.textContent || "")
+      ).trim();
+    } catch { return ""; }
+  };
+
+  let tried = 0, checked = 0;
+  const total = inputs.length + roles.length;
+
+  // Native checkboxes
+  for (const box of inputs) {
+    const txt = (getLbl(box) || "").replace(/\s+/g, " ");
+    if (!txt) continue;
+    const hit = POS.test(txt) && !NEG.test(txt);
+    if (hit && !box.checked) {
+      tried++;
+      // 1) try clicking the input
+      box.click?.();
+      // 2) if still not checked, try clicking the label (for UIs wired to the label)
+      if (!box.checked) {
+        const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
+        lbl?.click?.();
+      }
+      // 3) if still not checked, force state and fire events (no label click afterwards!)
+      if (!box.checked) {
+        box.checked = true;
+        box.dispatchEvent(new Event("input",  { bubbles: true }));
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (box.checked) checked++;
+    }
+  }
+
+  // ARIA role="checkbox" widgets
+  for (const el of roles) {
+    const txt = (getLbl(el) || el.textContent || "").replace(/\s+/g, " ");
+    if (!txt) continue;
+    const hit = POS.test(txt) && !NEG.test(txt);
+    const isChecked = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
+    if (hit && !isChecked) {
+      tried++;
+      el.click?.();
+      el.dispatchEvent(new Event("input",  { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      if ((el.getAttribute("aria-checked") || "").toLowerCase() === "true") checked++;
+    }
+  }
+
+  return { ok:true, checked, tried, total };
 }
 
 function findSkillsRoot() {
@@ -2364,7 +2832,7 @@ function findSkillsRoot() {
   for (const sec of containers) {
     const head = sec.querySelector("h1,h2,h3,h4,h5,h6,legend,.section-title,.header");
     const t = (head?.textContent || "").toLowerCase();
-    if ((/\bkey\s*skills\b/.test(t) || /\bskills\b/.test(t)) && !/\beducation\b/.test(t)) {
+    if ((/\bkey\s*skills\b/.test(t) || /\bskills\b/.test(t)) && !/\beducation\b/.test(t)  && !/\experience\b/.test(t)) {
       return sec;
     }
   }
@@ -2385,59 +2853,164 @@ async function getMatchedSkillsFromStorage() {
   return { req, pref };
 }
 
+// Build a normalized set strictly from the selected resume skills (no fallback).
+async function getSelectedResumeSkillsSet(){
+  const data = await new Promise(res => chrome.storage.local.get(["selectedResume"], res));
+  const picked = (data?.selectedResume?.skills || []).map(sffNormSkillToken).filter(Boolean);
+  return new Set(picked);
+}
+
+// Strictly use selected resume skills. Never use matchedSkills.
+// Uncheck only elements we previously checked (marked via data-sff-skill="1").
 async function checkKeySkillsFromSelectedResume() {
-  // 1) Get resume matched skills from storage
-  const data = await new Promise(res => chrome.storage.local.get(["matchedSkills"], res));
-  const ms = data?.matchedSkills || {};
-  const union = new Set([...(ms.required||[]), ...(ms.preferred||[])].map(sffNormSkillToken));
-  if (!union.size) return { ok:false, reason:"no matchedSkills", checked:0, tried:0, total:0 };
+  try {
+    // 1) Pull skills only from the selected resume (keySkills preferred, skills legacy)
+    const { selectedResume } = await new Promise(res =>
+      chrome.storage.local.get(["selectedResume"], res)
+    );
+    const src = Array.isArray(selectedResume?.keySkills)
+      ? selectedResume.keySkills
+      : (Array.isArray(selectedResume?.skills) ? selectedResume.skills : []);
 
-  // 2) Find boxes
-  const root = findSkillsRoot();
-  const { inputs, roles } = pickSkillCheckboxes(root);
+    const allowed = new Set((src || []).map(sffNormSkillToken).filter(Boolean));
 
-  let checked = 0, tried = 0;
+    // 2) Find the Skills section only; if none, do nothing to avoid collateral toggles
+    const root = findSkillsRoot();
+    if (!root) {
+      return { ok:false, reason:"no skills section", checked:0, tried:0, total:0 };
+    }
 
-  // native inputs
-  for (const box of inputs) {
-    const key = sffNormSkillToken(deriveCheckboxLabel(box));
-    if (!key || !union.has(key)) continue;
-    tried++;
-    if (!box.checked) {
-      box.click?.();
-      if (!box.checked) {
-        box.checked = true;
-        box.dispatchEvent(new Event("input",  { bubbles: true }));
-        box.dispatchEvent(new Event("change", { bubbles: true }));
-        const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
-        lbl?.click?.();
+    // 3) Collect candidate checkboxes inside the Skills section
+    const { inputs: rawInputs, roles: rawRoles } = pickSkillCheckboxes(root);
+
+    // Guard against non-skill items by label keywords
+    const NEG_RX = /\b(current|present|currently|agree|consent|terms|privacy|policy|authorized|authorization|citizen|citizenship|sponsorship|sponsor|gender|sex|ethnicity|race|hispanic|latinx|lgbtq|disability|veteran|eoe|age|over\s*18)\b/i;
+
+    const inputs = rawInputs.filter(box => {
+      const label = (deriveCheckboxLabel(box) || "").trim();
+      if (!label || NEG_RX.test(label)) return false;
+      return !!sffNormSkillToken(label);
+    });
+
+    const roles = rawRoles.filter(el => {
+      const label = ((el.getAttribute("aria-label") || el.textContent || "") + "").trim();
+      if (!label || NEG_RX.test(label)) return false;
+      return !!sffNormSkillToken(label);
+    });
+
+    let checked = 0, tried = 0;
+
+    // 4) Native <input type="checkbox">
+    for (const box of inputs) {
+      const label = deriveCheckboxLabel(box);
+      const key   = sffNormSkillToken(label);
+      if (!key) continue;
+
+      const should = allowed.has(key);
+      const isOn   = !!box.checked;
+      const wasOurs = box.getAttribute("data-sff-skill") === "1";
+
+      if (should && !isOn) {
+        tried++;
+        // turn ON
+        box.click?.();
+        if (!box.checked) {
+          box.checked = true;
+          box.dispatchEvent(new Event("input",  { bubbles:true }));
+          box.dispatchEvent(new Event("change", { bubbles:true }));
+          const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
+          lbl?.click?.();
+        }
+        if (box.checked) {
+          box.setAttribute("data-sff-skill", "1"); // mark as our skill
+          checked++;
+        }
+      } else if (!should && isOn && wasOurs) {
+        // only uncheck if we previously marked it as a skill
+        box.click?.();
+        if (box.checked) {
+          const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
+          lbl?.click?.();
+        }
+        if (box.checked) {
+          box.checked = false;
+          box.dispatchEvent(new Event("input",  { bubbles:true }));
+          box.dispatchEvent(new Event("change", { bubbles:true }));
+        }
+        if (!box.checked) {
+          box.removeAttribute("data-sff-skill");
+        }
+      } else if (should && isOn) {
+        // ensure marked if it matches our resume set
+        box.setAttribute("data-sff-skill", "1");
+        checked++;
       }
     }
-    if (box.checked) checked++;
-  }
 
-  // role="checkbox" custom widgets
-  for (const el of roles) {
-    const key = sffNormSkillToken((el.getAttribute("aria-label") || el.textContent || "").trim());
-    if (!key || !union.has(key)) continue;
-    tried++;
-    const before = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
-    if (!before) {
-      el.click?.();
-      el.dispatchEvent(new Event("input",  { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
+    // 5) Custom widgets: [role="checkbox"]
+    for (const el of roles) {
+      const key = sffNormSkillToken((el.getAttribute("aria-label") || el.textContent || "").trim());
+      if (!key) continue;
+
+      const should = allowed.has(key);
+      const isOn   = ((el.getAttribute("aria-checked") || "").toLowerCase() === "true");
+      const wasOurs = el.getAttribute("data-sff-skill") === "1";
+
+      if (should && !isOn) {
+        tried++;
+        el.click?.();
+        el.dispatchEvent(new Event("input",  { bubbles:true }));
+        el.dispatchEvent(new Event("change", { bubbles:true }));
+        if ((el.getAttribute("aria-checked") || "").toLowerCase() === "true") {
+          el.setAttribute("data-sff-skill", "1");
+          checked++;
+        }
+      } else if (!should && isOn && wasOurs) {
+        el.click?.();
+        el.dispatchEvent(new Event("input",  { bubbles:true }));
+        el.dispatchEvent(new Event("change", { bubbles:true }));
+        const now = ((el.getAttribute("aria-checked") || "").toLowerCase() === "true");
+        if (!now) el.removeAttribute("data-sff-skill");
+      } else if (should && isOn) {
+        el.setAttribute("data-sff-skill", "1");
+        checked++;
+      }
     }
-    const after = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
-    if (after) checked++;
-  }
 
-  return { ok:true, checked, tried, total: inputs.length + roles.length };
+    return { ok:true, checked, tried, total: inputs.length + roles.length };
+  } catch (e) {
+    return { ok:false, error:String(e), checked:0, tried:0, total:0 };
+  }
+}
+
+// Keep a fresh in-tab copy of the profile after profile-editor saves
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === "SFF_PROFILE_UPDATED" && msg.profile) {
+    window.SFF_PROFILE = msg.profile;
+    window.SFF_PROFILE_TS = Date.now();
+    try { chrome.storage.local.set({ userData: msg.profile, profileVersion: window.SFF_PROFILE_TS }); } catch {}
+    console.log("[content] SFF_PROFILE_UPDATED received; in-tab cache refreshed");
+  }
+});
+
+// Avoid double-register
+if (!window.__SFF_CONSENT_LISTENER__) {
+  window.__SFF_CONSENT_LISTENER__ = true;
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.action !== "EXT_CHECK_CONSENT") return;
+    try {
+      const res = enforceConsentChecks();
+      sendResponse(res);
+    } catch (e) {
+      sendResponse({ ok:false, error:String(e) });
+    }
+    return true;
+  });
 }
 
 // Prevent double-registering skills listeners (popup reloads/ reinjections)
 if (!window.__SFF_SKILLS_LISTENERS__) {
   window.__SFF_SKILLS_LISTENERS__ = true;
-
   // ---- put BOTH skills listeners inside this block only once ----
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === "EXT_CHECK_KEY_SKILLS") {
@@ -2451,11 +3024,9 @@ if (!window.__SFF_SKILLS_LISTENERS__) {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === "EXT_CHECK_PREDICTED_KEY_SKILLS") {
       (async () => {
-        const data = await new Promise(res => chrome.storage.local.get(["matchedSkills"], res));
-        const ms = data?.matchedSkills || {};
-        const resumeSet = new Set([...(ms.required||[]), ...(ms.preferred||[])].map(sffNormSkillToken));
+        const allowed = await getSelectedResumeSkillsSet();
         const predicted = Array.isArray(msg.skills) ? msg.skills : [];
-        const wanted = new Set(predicted.map(sffNormSkillToken).filter(t => resumeSet.has(t)));
+        const wanted = new Set(predicted.map(sffNormSkillToken).filter(t => allowed.has(t)));
         if (!wanted.size) return sendResponse({ ok:true, checked:0, tried:0, total:0 });
 
         const root = findSkillsRoot();
@@ -2498,61 +3069,6 @@ if (!window.__SFF_SKILLS_LISTENERS__) {
   });
 }
 
-// Predicted key skills → intersect with resume skills, then check
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.action !== "EXT_CHECK_PREDICTED_KEY_SKILLS") return;
-  (async () => {
-    // 1) union of resume skills
-    const data = await new Promise(res => chrome.storage.local.get(["matchedSkills"], res));
-    const ms = data?.matchedSkills || {};
-    const resumeSet = new Set([...(ms.required||[]), ...(ms.preferred||[])].map(sffNormSkillToken));
-
-    // 2) filter predicted by intersection
-    const predicted = Array.isArray(msg.skills) ? msg.skills : [];
-    const wanted = new Set(predicted.map(sffNormSkillToken).filter(t => resumeSet.has(t)));
-    if (!wanted.size) return sendResponse({ ok:true, checked:0, tried:0, total:0 });
-
-    // 3) find + click
-    const root = findSkillsRoot();
-    const { inputs, roles } = pickSkillCheckboxes(root);
-
-    let checked = 0, tried = 0;
-
-    for (const box of inputs) {
-      const key = sffNormSkillToken(deriveCheckboxLabel(box));
-      if (!key || !wanted.has(key)) continue;
-      tried++;
-      if (!box.checked) {
-        box.click?.();
-        if (!box.checked) {
-          box.checked = true;
-          box.dispatchEvent(new Event("input",  { bubbles: true }));
-          box.dispatchEvent(new Event("change", { bubbles: true }));
-          const lbl = (box.id && document.querySelector(`label[for="${box.id}"]`)) || box.closest("label");
-          lbl?.click?.();
-        }
-      }
-      if (box.checked) checked++;
-    }
-
-    for (const el of roles) {
-      const key = sffNormSkillToken((el.getAttribute("aria-label") || el.textContent || "").trim());
-      if (!key || !wanted.has(key)) continue;
-      tried++;
-      const before = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
-      if (!before) {
-        el.click?.();
-        el.dispatchEvent(new Event("input",  { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      const after = (el.getAttribute("aria-checked") || "").toLowerCase() === "true";
-      if (after) checked++;
-    }
-
-    sendResponse({ ok:true, checked, tried, total: inputs.length + roles.length });
-  })();
-  return true; // async
-});
 
 function _pickTopKeyFromAny(x) {
   // Accept: string | {prediction, confidence} | {topk:[...]} | null
@@ -2672,13 +3188,7 @@ window.getPredictions = getPredictions;
     };
 
     // Get the full profile (arrays!) so we know how many educations to add
-    const fullProfile = await new Promise(res => {
-      try {
-        chrome.runtime.sendMessage({ action: "getProfile" }, (resp) => res((resp && resp.profile) || {}));
-      } catch {
-        res({});
-      }
-    });
+    const fullProfile = await new Promise(r => chrome.runtime.sendMessage({ action: "getProfile" }, r));
 
     // Click “+ Add Education” enough times to reveal all edu blocks,
     // then wait a tick so new inputs are in the DOM BEFORE we scan fields.
@@ -2697,7 +3207,8 @@ window.getPredictions = getPredictions;
       }
       await fillExperienceBlocksFromProfile(fullProfile, document);
     }   
-        
+       
+    await fillVoluntarySelfID(fullProfile, document);
     await fillSkillsAndScalars(fullProfile);
 
     const pairs = collectPairs();
@@ -2736,7 +3247,10 @@ window.getPredictions = getPredictions;
       const { inputEl, labelText } = pairs[i];
       let { prediction, confidence } = res || {};
       let mappedKey = MODEL_TO_USERDATA[prediction] || prediction;
-
+      // Skip ML overwrites inside multi-block sections we already filled precisely
+      if (inputEl.closest('#eduList, [data-edu-item], .education-item, .edu-block, #expList, [data-exp-item], .experience-item, .employment-item, .work-item')) {
+        return; // do not touch edu/exp rows with ML
+      }
       if (!mappedKey) {
         const guess = heuristicKey(inputEl, labelText);
         if (guess) { mappedKey = guess; confidence = confidence || 0.55; }
@@ -2798,13 +3312,63 @@ window.getPredictions = getPredictions;
     return { ok: true, inputs: inputsCount, detected };
   }
 
-async function _sffDetectFieldsCore() {
-  // Use your existing detector. Examples:
-  // const res = await detectAllInputsOnPage();  // <-- your function
-  // return Array.isArray(res) ? res : (res?.detected || []);
-  // If you already have an EXT_DETECT_FIELDS handler that assembles the array,
-  // just reuse its core routine here.
+// --- Minimal, page-based detector used by popup ---
+// small safe helpers (use helpers.js if available)
+const _sffGetLabel = (el) => {
+  try {
+    if (typeof getLabelText === "function") return (getLabelText(el) || "").trim();
+  } catch {}
+  const byFor = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
+  const fromWrap = el.closest && el.closest("label");
+  const txt = (byFor?.innerText || fromWrap?.innerText || el.getAttribute("aria-label") || el.placeholder || el.name || el.id || "").trim();
+  return txt;
+};
 
+const _sffSel = (el) => {
+  try { if (typeof cssPath === "function") return cssPath(el); } catch {}
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  if (el.name) return `${el.tagName.toLowerCase()}[name="${el.name}"]`;
+  return el.tagName.toLowerCase();
+};
+
+// Scan all inputs on the current page and return a uniform list
+function scanPageForFields() {
+  const nodes = Array.from(document.querySelectorAll("input, select, textarea"));
+  return nodes.map(el => {
+    const tagName   = (el.tagName || "").toUpperCase();
+    const inputType = (el.type || "").toLowerCase();
+
+    // Default label from your compact helper
+    let labelText = _sffGetLabel(el);
+
+    // For checkboxes, prefer the individual option's own text
+    if (inputType === "checkbox") {
+      try {
+        const alt = deriveCheckboxLabel(el);
+        if (alt && alt.trim()) labelText = alt.trim();
+      } catch {}
+    }
+
+    return {
+      selector   : _sffSel(el),
+      tagName,
+      inputType,
+      id         : el.id || null,
+      name       : el.name || null,
+      placeholder: el.placeholder || null,
+      labelText,
+      detectedBy : "page-scan"
+    };
+  });
+}
+
+// Build a debug-style snapshot for the popup "Detected" box
+function sffBuildPageSnapshot() {
+  const items = scanPageForFields();
+  return { ok: true, items };
+}
+
+async function _sffDetectFieldsCore() {
   // Minimal fallback skeleton (replace with your real detector):
   const nodes = Array.from(document.querySelectorAll('input, select, textarea'));
   return nodes.map(n => ({
@@ -2864,6 +3428,84 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // (keep your other handlers here)
 });
 
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg && msg.action === "EXT_PAGE_SNAPSHOT") {
+      try {
+        const items = scanPageForFields(); // must include selector + labelText
+        sendResponse({ ok: true, items });
+      } catch (e) {
+        console.error("[content] EXT_PAGE_SNAPSHOT error:", e);
+        sendResponse({ ok: false, error: String(e) });
+      }
+      return; // sync response; do not return true
+    }    
+
+    if (msg && msg.action === "EXT_SNAPSHOT_BUCKETS") {
+      try {
+        const rows = (typeof detectAllFields === "function" ? detectAllFields() : scanPageForFields());
+        // Track radio groups so we only emit one logical field per group
+        const seenRadio = new Set();
+
+        const filled = [];
+        const notFilled = [];
+
+        for (const r of rows) {
+          const el = document.querySelector(r.selector);
+          if (!el) { notFilled.push({ key: r.name || r.id || null, name: r.name || null, label: r.labelText, selector: r.selector }); continue; }
+
+          const tag = (el.tagName || "").toUpperCase();
+          const t   = (el.type || "").toLowerCase();
+
+          // derive current value + filled-ness (with radio grouping by name)
+          let value = "";
+          let isFilled = false;
+
+          if (t === "radio") {
+            const nm = el.name || r.name || "";
+            if (nm) {
+              if (seenRadio.has(nm)) continue; // only one entry per radio group
+              seenRadio.add(nm);
+            }
+            const group = nm
+              ? document.querySelectorAll(`input[type="radio"][name="${CSS.escape(nm)}"]`)
+              : [el];
+            const checked = Array.from(group).find(g => g.checked);
+            isFilled = !!checked;
+            // ← show the selected option's visible label (e.g., "Yes"/"No")
+            value = checked ? (getChoiceLabel(checked) || checked.value || "") : "";
+          } else if (tag === "SELECT") {
+            value = (el.value || "").trim();
+            isFilled = !!value;
+          } else if (t === "checkbox") {
+            isFilled = !!el.checked;
+            value = el.checked ? "checked" : "unchecked";
+          } else {
+            value = (el.value || "").trim();
+            isFilled = !!value;
+          }
+
+          const base = {
+            key      : r.name || r.id || null,
+            name     : r.name || null,
+            label    : r.labelText || r.placeholder || r.name || r.id || "(unlabeled)",
+            selector : r.selector,
+            inputType: t || r.inputType || "",
+            tagName  : tag
+          };          
+
+          if (isFilled) filled.push({ ...base, value });
+          else          notFilled.push({ ...base });
+        }
+
+        sendResponse({ ok: true, filled, notFilled });
+      } catch (e) {
+        console.error("[content] EXT_SNAPSHOT_BUCKETS error:", e);
+        sendResponse({ ok: false, error: String(e) });
+      }
+      return true;
+    }
+  });
+
 
   chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     try {
@@ -2876,16 +3518,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const catalog = Object.entries(ALL_FIELDS).map(([key, label]) => ({ key, label }));
         sendResponse({ ok: true, catalog, v: CONTENT_VERSION }); return;
       }
-      // === Add these cases in content.js message handler ===
-      if (req.action === "EXT_DETECT_FIELDS_SIMPLE") {
+      // === Page field detection (used by popup + debug) ===
+      // Must be synchronous or call sendResponse before returning true to avoid runtime.lastError.
+      if (req && (req.action === "EXT_DETECT_FIELDS" || req.action === "EXT_DETECT_FIELDS_SIMPLE")) {
         try {
-          // Uses the built-in detectFieldsOnPage(), which already returns N/A confidence
-          const r = detectFieldsOnPage(); // { ok, inputs, detected:[{key,label,confidence:"N/A"}] }
-          sendResponse(r);
+          const detected = detectAllFields();  // your existing, working detector
+          sendResponse({ ok: true, detected });          
         } catch (e) {
-          sendResponse({ ok:false, error:String(e), detected:[] });
+          console.error("[content] detect error:", e);
+          sendResponse({ ok: false, error: String(e) });
         }
-        return; // no async
+        return; // sync response; DO NOT return true
       }
 
       if (req.action === "EXT_CHECK_FORM_EMPTY") {
@@ -3065,11 +3708,29 @@ function chooseRadioByValue(name, want) {
 }
 
 function setCheckboxByBool(el, on) {
-  if (!el) return { ok:false, reason:"no element" };
-  if (el.type !== "checkbox") return { ok:false, reason:"not checkbox" };
-  if (!!el.checked !== !!on) el.click();
-  return { ok:true };
+  if (!el || el.type !== "checkbox") return { ok:false, reason:"not checkbox" };
+  const want = !!on;
+
+  // already correct
+  if (!!el.checked === want) return { ok:true, changed:false, verified:true };
+
+  // 1) try the input
+  el.click?.();
+  if (!!el.checked === want) return { ok:true, changed:true, verified:true };
+
+  // 2) try the associated label
+  const lbl = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest("label");
+  lbl?.click?.();
+  if (!!el.checked === want) return { ok:true, changed:true, verified:true };
+
+  // 3) force state + events (do NOT click the label after this)
+  el.checked = want;
+  el.dispatchEvent(new Event("input",  { bubbles:true }));
+  el.dispatchEvent(new Event("change", { bubbles:true }));
+
+  return { ok: (!!el.checked === want), changed:true, verified:(!!el.checked === want) };
 }
+
 
 function fmtMMYYYY(m, y) {
   if (!m || !y) return null;
@@ -3303,6 +3964,18 @@ async function fillDetected(items, profile, resumeId) {
       continue;
     }
 
+    // Never let the generic detector overwrite structured rows we already filled
+    if (el.closest('#eduList, #expList')) {
+      report.push({
+        label,
+        prediction: pred,
+        confidence: row.confidence,
+        status: 'skipped',
+        reason: 'structured section handled by deterministic filler'
+      });
+      continue;
+    }
+
     // handle file inputs (resume upload)
     if (el.tagName.toLowerCase() === "input" && (el.type || "").toLowerCase() === "file") {
       if (pred !== "document") {
@@ -3483,6 +4156,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           
           await fillVoluntarySelfID(profile);
 
+                  // Final assert: make sure each Experience row's Present/Current matches profile
+        try {
+          if (typeof enforceExperienceCurrentFromProfile === "function") {
+            enforceExperienceCurrentFromProfile(profile, document);
+          } else if (typeof window.enforceExperienceCurrentFromProfile === "function") {
+            window.enforceExperienceCurrentFromProfile(profile, document);
+          }
+        } catch (e) {
+          console.warn("[content] enforceExperienceCurrentFromProfile (EXT_FILL) failed:", e);
+        }
+
+
         } catch (e) {
           console.warn("[content] add/fill edu/exp failed:", e);
         }    
@@ -3499,6 +4184,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           const key = `${r.label ?? ""}::${r.prediction ?? ""}::${r.status ?? ""}`;
           if (!seen.has(key)) { seen.add(key); merged.push(r); }
         }
+
+        // One more assert to avoid any late listeners flipping the current-flag back
+        try { enforceExperienceCurrentFromProfile(profile, document); } catch (e) { console.warn("[filler] final enforce exp current failed:", e); }
 
         // --- Build a fresh detect+predict snapshot AFTER adding/filling rows ---
         const detectedNow = (typeof detectAllFields === "function") ? detectAllFields() : [];

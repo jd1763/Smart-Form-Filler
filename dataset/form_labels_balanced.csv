@@ -176,6 +176,9 @@ Date Born,birth_date
 Birth Details,birth_date
 Birth Record,birth_date
 Date of Birth Field,birth_date
+Company,company
+Company / Employer,company
+Employer,company
 Organization,company
 Employer,company
 Hiring Company,company
@@ -252,6 +255,18 @@ Corporation,company
 Firm,company
 Office,company
 Employer,company
+Gender,demographics
+Pronouns,demographics
+Male,demographics
+Female,demographics
+Non-Binary,demographics
+Prefer not to say,demographics
+Disability,demographics
+Veteran Status,demographics
+Do you identify as LGBTQ+?,demographics
+Ethnicity,demographics
+Race,demographics
+Are you Hispanic or of Latinx descent?,demographics
 Male,demographics
 Female,demographics
 Non-binary,demographics
@@ -300,24 +315,13 @@ What is your ethnicity?,demographics
 What is your gender?,demographics
 Do you have a disability?,demographics
 Upload Resume,document
+Upload Resume (Resume / CV),document
+Resume / CV,document
+Upload CV,document
+Attach Resume,document
+Upload Cover Letter,document
 Cover Letter / Additional Information,document
-Resume Upload,document
-Supporting Document,document
-Application Document,document
-Upload Resume,document
-Cover Letter / Additional Information,document
-Resume Upload,document
-Supporting Document,document
-Application Document,document
-CV Upload,document
-Job Application File,document
-Resume File,document
-Cover Letter,document
-Supporting Files,document
-Attachment,document
-Required Document,document
-Application Materials,document
-Resume Attachment,document
+Cover Letter (Text),document
 Upload Resume,document
 Cover Letter / Additional Information,document
 Resume Upload,document
@@ -339,6 +343,31 @@ Application Materials,document
 Resume Attachment,document
 Upload Resume,document
 Cover Letter / Additional Information,document
+Resume Upload,document
+Supporting Document,document
+Application Document,document
+Upload Resume,document
+Cover Letter / Additional Information,document
+Resume Upload,document
+Supporting Document,document
+Application Document,document
+CV Upload,document
+Job Application File,document
+Resume File,document
+Cover Letter,document
+Supporting Files,document
+Attachment,document
+Required Document,document
+Application Materials,document
+Resume Attachment,document
+Upload Resume,document
+Cover Letter / Additional Information,document
+School / University,education
+University,education
+College,education
+Degree,education
+Field of Study,education
+GPA,education
 Highest Degree,education
 University / College / Institute,education
 Field of Study,education
@@ -517,6 +546,10 @@ End date of your latest role,end_date
 Employment End,end_date
 Date Left,end_date
 Job Title,job_title
+Job Title / Position,job_title
+Position,job_title
+Title,job_title
+Job Title,job_title
 Previous Job Title,job_title
 Your Job Title,job_title
 Position Title,job_title
@@ -636,6 +669,11 @@ Work Phone,phone
 Home Phone,phone
 Primary Phone,phone
 Secondary Phone,phone
+How did you hear about this job?,referral_source
+How did you hear about this job? (Referral Source),referral_source
+Referral Source,referral_source
+How did you hear about us?,referral_source
+Source of application,referral_source
 Referral Source,referral_source
 How did you learn about us?,referral_source
 Where did you hear about us?,referral_source
@@ -676,6 +714,9 @@ Advertisement,referral_source
 Online Ad,referral_source
 Social Media Ad,referral_source
 Employee Referral,referral_source
+Role Description / Responsibilities,role_description
+Responsibilities,role_description
+Describe your responsibilities...,role_description
 Role Description,role_description
 Description of Responsibilities,role_description
 Duties,role_description
@@ -716,6 +757,21 @@ Employment Duties,role_description
 Daily Tasks,role_description
 Main Role,role_description
 Primary Duties,role_description
+Website,social
+Website (optional),social
+Personal Website,social
+Portfolio,social
+Portfolio URL,social
+GitHub,social
+GitHub URL,social
+GitHub / Portfolio / Personal Website,social
+LinkedIn,social
+LinkedIn URL,social
+LinkedIn Profile,social
+Profile URL,social
+Online presence,social
+Social profile,social
+Social link,social
 LinkedIn,social
 LinkedIn URL,social
 GitHub,social
@@ -795,6 +851,12 @@ Work Samples,social
 LinkedIn Profile,social
 Online Resume,social
 Career Profile,social
+Start Month,start_date
+Start Year,start_date
+Start Date,start_date
+End Month,end_date
+End Year,end_date
+End Date,end_date
 Start Date,start_date
 When did you start at your latest role?,start_date
 Employment Start,start_date
@@ -850,6 +912,13 @@ Course Start,start_date
 Course End,end_date
 Degree Awarded Date,end_date
 University Start,start_date
+I agree to the Terms & Privacy Policy,terms_consent
+I agree to the Terms and Conditions,terms_consent
+Agree to Terms,terms_consent
+Terms & Conditions consent,terms_consent
+Privacy Policy consent,terms_consent
+Consent to privacy policy,terms_consent
+I accept the Terms,terms_consent
 Terms Agreement,terms_consent
 I agree to the Terms & Conditions,terms_consent
 Accept Terms & Conditions,terms_consent
@@ -890,6 +959,12 @@ Accept Terms & Conditions,terms_consent
 Agree to Terms of Service,terms_consent
 I agree to the Privacy Policy,terms_consent
 I agree to the Terms & Conditions and Privacy Policy,terms_consent
+Are you authorized to work in the US?,work_auth
+Will you now or in the future require sponsorship?,work_auth
+Work Authorization,work_auth
+Require immigration sponsorship,work_auth
+Require visa sponsorship,work_auth
+Sponsorship requirement,work_auth
 Visa Sponsorship,work_auth
 Are you authorized to work in the US?,work_auth
 Are you authorized to work in Canada?,work_auth
@@ -946,6 +1021,15 @@ Experience Level (Years),years_of_experience
 Years of total experience,years_of_experience
 Total Yrs Exp,years_of_experience
 Professional exp (yrs),years_of_experience
+Years of Professional Experience,years_of_experience
+Total years of experience,years_of_experience
+Years of experience,years_of_experience
+How many years of experience do you have?,years_of_experience
+Highest Education,highest_education
+Highest level of education,highest_education
+Education level,highest_education
+What is your highest degree?,highest_education
+Highest degree,highest_education
 Highest Education,highest_education
 Highest Degree,highest_education
 Highest Level of Education,highest_education
@@ -968,6 +1052,17 @@ Skills,skills
 Your Skills,skills
 Skills (Select all that apply),skills
 Skills & Highest Education,skills
+Python,key_skill
+Java,key_skill
+SQL,key_skill
+AWS,key_skill
+Kafka,key_skill
+Spark,key_skill
+Airflow,key_skill
+Docker,key_skill
+Terraform,key_skill
+React,key_skill
+TypeScript,key_skill
 Python,key_skill
 Java,key_skill
 C,key_skill
@@ -1188,6 +1283,9 @@ C Plus Plus,key_skill
 C-Plus-Plus,key_skill
 C Sharp,key_skill
 C-Sharp,key_skill
+C++,key_skill
+C,key_skill
+C#,key_skill
 Nodejs,key_skill
 Reactjs,key_skill
 Nextjs,key_skill
@@ -1198,3 +1296,335 @@ K8S,key_skill
 CI/CD,key_skill
 CI CD,key_skill
 CICD,key_skill
+Python,key_skill
+Java,key_skill
+JavaScript,key_skill
+TypeScript,key_skill
+C,key_skill
+C++,key_skill
+C#,key_skill
+Go,key_skill
+Rust,key_skill
+Kotlin,key_skill
+Swift,key_skill
+Objective C,key_skill
+Ruby,key_skill
+PHP,key_skill
+Scala,key_skill
+Haskell,key_skill
+Perl,key_skill
+R,key_skill
+MATLAB,key_skill
+Julia,key_skill
+Dart,key_skill
+Lua,key_skill
+Solidity,key_skill
+SQL,key_skill
+NoSQL,key_skill
+Bash,key_skill
+PowerShell,key_skill
+HTML,key_skill
+CSS,key_skill
+HTML5,key_skill
+CSS3,key_skill
+SASS,key_skill
+LESS,key_skill
+Tailwind CSS,key_skill
+Bootstrap,key_skill
+jQuery,key_skill
+React,key_skill
+React Native,key_skill
+Next.js,key_skill
+Redux,key_skill
+Zustand,key_skill
+MobX,key_skill
+Vue,key_skill
+Nuxt.js,key_skill
+Angular,key_skill
+Svelte,key_skill
+SvelteKit,key_skill
+Node.js,key_skill
+Express,key_skill
+FastAPI,key_skill
+Flask,key_skill
+Django,key_skill
+Spring,key_skill
+Spring Boot,key_skill
+ASP.NET,key_skill
+ASP.NET Core,key_skill
+Laravel,key_skill
+Rails,key_skill
+Phoenix,key_skill
+Gin,key_skill
+Fiber,key_skill
+Ktor,key_skill
+REST,key_skill
+GraphQL,key_skill
+gRPC,key_skill
+WebSockets,key_skill
+OAuth2,key_skill
+OpenID Connect,key_skill
+JWT,key_skill
+MySQL,key_skill
+PostgreSQL,key_skill
+SQLite,key_skill
+MariaDB,key_skill
+Oracle,key_skill
+SQL Server,key_skill
+MongoDB,key_skill
+Redis,key_skill
+Cassandra,key_skill
+DynamoDB,key_skill
+CouchDB,key_skill
+Neo4j,key_skill
+Elasticsearch,key_skill
+Solr,key_skill
+ClickHouse,key_skill
+Snowflake,key_skill
+BigQuery,key_skill
+Redshift,key_skill
+Firestore,key_skill
+Firebase Realtime Database,key_skill
+Firebase,key_skill
+Supabase,key_skill
+Prisma,key_skill
+Mongoose,key_skill
+Drizzle,key_skill
+TypeORM,key_skill
+Sequelize,key_skill
+Pandas,key_skill
+NumPy,key_skill
+SciPy,key_skill
+scikit-learn,key_skill
+TensorFlow,key_skill
+Keras,key_skill
+PyTorch,key_skill
+XGBoost,key_skill
+LightGBM,key_skill
+CatBoost,key_skill
+spaCy,key_skill
+NLTK,key_skill
+Transformers,key_skill
+Hugging Face,key_skill
+OpenCV,key_skill
+Matplotlib,key_skill
+Plotly,key_skill
+Seaborn,key_skill
+D3.js,key_skill
+Airflow,key_skill
+Prefect,key_skill
+Dagster,key_skill
+dbt,key_skill
+Apache Spark,key_skill
+Hadoop,key_skill
+Hive,key_skill
+Kafka,key_skill
+Flink,key_skill
+Storm,key_skill
+Beam,key_skill
+Delta Lake,key_skill
+Iceberg,key_skill
+LakeFS,key_skill
+Great Expectations,key_skill
+Soda Core,key_skill
+Jest,key_skill
+Mocha,key_skill
+Chai,key_skill
+Vitest,key_skill
+React Testing Library,key_skill
+Cypress,key_skill
+Playwright,key_skill
+Selenium,key_skill
+JUnit,key_skill
+TestNG,key_skill
+Mockito,key_skill
+PyTest,key_skill
+unittest,key_skill
+Postman,key_skill
+Newman,key_skill
+Locust,key_skill
+JMeter,key_skill
+Git,key_skill
+GitHub,key_skill
+GitLab,key_skill
+Bitbucket,key_skill
+GitHub Actions,key_skill
+GitLab CI,key_skill
+Jenkins,key_skill
+CircleCI,key_skill
+Travis CI,key_skill
+Argo CD,key_skill
+Spinnaker,key_skill
+Docker,key_skill
+Docker Compose,key_skill
+Kubernetes,key_skill
+Helm,key_skill
+Kustomize,key_skill
+OpenShift,key_skill
+ECS,key_skill
+EKS,key_skill
+AKS,key_skill
+Fargate,key_skill
+Serverless,key_skill
+AWS,key_skill
+Azure,key_skill
+GCP,key_skill
+CloudFormation,key_skill
+Terraform,key_skill
+Ansible,key_skill
+Packer,key_skill
+Vault,key_skill
+Consul,key_skill
+S3,key_skill
+EC2,key_skill
+RDS,key_skill
+CloudWatch,key_skill
+API Gateway,key_skill
+Lambda,key_skill
+Cloud Run,key_skill
+App Engine,key_skill
+Cloud Functions,key_skill
+Pub Sub,key_skill
+Vercel,key_skill
+Netlify,key_skill
+Cloudflare,key_skill
+DigitalOcean,key_skill
+Heroku,key_skill
+Nginx,key_skill
+Apache HTTP Server,key_skill
+Caddy,key_skill
+Vite,key_skill
+Webpack,key_skill
+Rollup,key_skill
+esbuild,key_skill
+Babel,key_skill
+Storybook,key_skill
+Figma,key_skill
+Design Systems,key_skill
+Responsive Design,key_skill
+Accessibility,key_skill
+Microservices,key_skill
+Monorepo,key_skill
+NX,key_skill
+Turborepo,key_skill
+Event Driven Architecture,key_skill
+CQRS,key_skill
+Domain Driven Design,key_skill
+Twelve Factor App,key_skill
+TDD,key_skill
+BDD,key_skill
+Agile,key_skill
+Scrum,key_skill
+Kanban,key_skill
+Design Patterns,key_skill
+Clean Architecture,key_skill
+Refactoring,key_skill
+Code Review,key_skill
+Secure Coding,key_skill
+OWASP,key_skill
+TLS,key_skill
+HTTPS,key_skill
+SAST,key_skill
+DAST,key_skill
+Burp Suite,key_skill
+ZAP,key_skill
+Linux,key_skill
+Unix,key_skill
+macOS,key_skill
+Windows,key_skill
+VS Code,key_skill
+IntelliJ,key_skill
+Android Studio,key_skill
+Xcode,key_skill
+Vim,key_skill
+Emacs,key_skill
+Android,key_skill
+Android SDK,key_skill
+Jetpack Compose,key_skill
+iOS,key_skill
+SwiftUI,key_skill
+Flutter,key_skill
+Unity,key_skill
+Unreal Engine,key_skill
+Three.js,key_skill
+WebGL,key_skill
+OpenGL,key_skill
+OpenTelemetry,key_skill
+Prometheus,key_skill
+Grafana,key_skill
+ELK Stack,key_skill
+Loki,key_skill
+Jaeger,key_skill
+Sentry,key_skill
+Datadog,key_skill
+New Relic,key_skill
+Honeycomb,key_skill
+Papertrail,key_skill
+Sumo Logic,key_skill
+RabbitMQ,key_skill
+ActiveMQ,key_skill
+NATS,key_skill
+ZeroMQ,key_skill
+Amazon SQS,key_skill
+Amazon SNS,key_skill
+Azure Service Bus,key_skill
+Kafka Streams,key_skill
+KSQL,key_skill
+WebRTC,key_skill
+PWA,key_skill
+Service Workers,key_skill
+Internationalization,key_skill
+Localization,key_skill
+i18n,key_skill
+l10n,key_skill
+CSV Parsing,key_skill
+PDF Parsing,key_skill
+Web Scraping,key_skill
+Sitemap Parsing,key_skill
+Beautiful Soup,key_skill
+Selenium WebDriver,key_skill
+Playwright Testing,key_skill
+Helmet,key_skill
+CSRF Protection,key_skill
+Rate Limiting,key_skill
+Caching,key_skill
+Redis Streams,key_skill
+Contentful,key_skill
+Sanity,key_skill
+Strapi,key_skill
+WordPress,key_skill
+Shopify,key_skill
+Magento,key_skill
+Stripe,key_skill
+Braintree,key_skill
+PayPal,key_skill
+Square,key_skill
+OAuth,key_skill
+OpenAPI,key_skill
+Swagger,key_skill
+AsyncIO,key_skill
+Multithreading,key_skill
+Multiprocessing,key_skill
+Concurrency,key_skill
+Parallelism,key_skill
+Message Queue,key_skill
+Job Scheduler,key_skill
+Cron,key_skill
+Present / Currently work here,is_current
+Present,is_current
+Currently work here,is_current
+I currently work here,is_current
+I am currently employed here,is_current
+Current role,is_current
+Current employment,is_current
+This is my current job,is_current
+Present (still employed),is_current
+Still working here,is_current
+I still work here,is_current
+Current position,is_current
+Currently employed,is_current
+Currently working here,is_current
+Do you currently work here?,is_current
+Mark as current,is_current
+Is this your current job?,is_current
+Current job checkbox,is_current

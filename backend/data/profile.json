@@ -1,39 +1,12 @@
 {
-  "personal": {
-    "firstName": "Jorgeluis",
-    "lastName": "Done",
-    "email": "jd1763@scarletmail.rutgers.edu",
-    "phoneNumber": "8482035238",
-    "dob": "2002-08-20",
-    "gender": "Male"
-  },
   "address": {
-    "street": "598 Elizabeth St",
     "city": "Perth Amboy",
+    "country": "United States",
     "county": "Middlesex",
     "state": "NJ",
-    "zip": "08861",
-    "country": "United States"
+    "street": "598 Elizabeth St",
+    "zip": "08861"
   },
-  "links": {
-    "linkedin": "https://www.linkedin.com/in/jorgeluis-done/",
-    "github": "https://github.com/jd1763",
-    "website": "https://example.com"
-  },
-  "eligibility": {
-    "authUS": "Yes",
-    "authCA": "No",
-    "authUK": "No",
-    "sponsorship": "No",
-    "disability": "No",
-    "lgbtq": "No",
-    "veteran": "No",
-    "ethnicity": "Hispanic/Latinx",
-    "race": "Black",
-    "hispanicLatinx": "Yes"
-  },
-  "highestEducation": "Bachelor's",
-  "yearsOfExperience": "4",
   "education": [
     {
       "school": "Rutgers University",
@@ -58,31 +31,70 @@
       "degreeLong": "Associate of Science"
     }
   ],
+  "eligibility": {
+    "authCA": "No",
+    "authUK": "No",
+    "authUS": "Yes",
+    "disability": "No",
+    "ethnicity": "Hispanic/Latinx",
+    "hispanicLatinx": "Yes",
+    "lgbtq": "No",
+    "race": "Black",
+    "sponsorship": "No",
+    "veteran": "No"
+  },
   "experience": [
     {
       "company": "Target",
-      "jobTitle": "Team Member Trainer",
+      "jobTitle": "Learnig Ambassador",
       "description": "▪ Delivered training programs for new hires, accelerating onboarding and improving team performance.\n▪ Used in-store systems to schedule shipments, track trailer arrivals, and manage inventory operations.\n▪ Maintained communication with leadership teams to support logistics and resolve operational issues.\n▪ Supported daily warehouse operations by assisting with inventory movement, equipment handling, and task coordination to ensure smooth workflows.",
       "startMonth": "2",
       "startYear": "2021",
       "endMonth": "6",
-      "endYear": "2024"
+      "endYear": "2024",
+      "isCurrent": false
     },
     {
-      "company": "Example",
-      "jobTitle": "Example",
-      "description": "Example",
-      "startMonth": "1",
-      "startYear": "2024",
-      "endMonth": "7",
-      "endYear": "2025"
+      "company": "Amazon",
+      "jobTitle": "Warehouse Associate",
+      "description": "Daily warehouse operations.",
+      "startMonth": "8",
+      "startYear": "2025",
+      "endMonth": "9",
+      "endYear": "2025",
+      "isCurrent": true
     }
   ],
-  "selectedResumeId": "c5366db4-ed5f-4322-a3e3-376c32ae78f7",
-  "selectedResumeName": "mixed_some.pdf",
-  "selectedResumeSkills": [],
-  "matchedSkills": {
-    "required": [],
-    "preferred": []
-  }
+  "highestEducation": "Bachelor's",
+  "links": {
+    "github": "https://github.com/jd1763",
+    "linkedin": "https://www.linkedin.com/in/jorgeluis-done/",
+    "website": "https://jd1763.github.io/"
+  },
+  "personal": {
+    "dob": "2002-08-20",
+    "email": "jd1763@scarletmail.rutgers.edu",
+    "firstName": "Jorgeluis",
+    "gender": "Male",
+    "lastName": "Done",
+    "phoneNumber": "8482035240"
+  },
+  "selectedResumeId": "68a3f340-bb29-4d3a-9c99-858b731ef20c",
+  "selectedResumeName": "preferred_only.pdf",
+  "selectedResumeSkills": [
+    "airflow",
+    "aws",
+    "cloud",
+    "ecs",
+    "eks",
+    "graphql",
+    "iam",
+    "kafka",
+    "rbac",
+    "react",
+    "s3",
+    "spark",
+    "typescript"
+  ],
+  "yearsOfExperience": "0"
 }

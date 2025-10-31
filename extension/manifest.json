@@ -1,24 +1,25 @@
 {
   "manifest_version": 3,
   "name": "Smart Form Filler",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fill forms and show filled fields with confidence. Includes self-test tools.",
+
   "icons": {
     "16": "icon.png",
     "48": "icon.png",
     "128": "icon.png"
   },
-  
-  "action": { 
-    "default_popup": "popup.html", 
+
+  "action": {
+    "default_popup": "popup.html",
     "default_icon": "icon.png",
-    "default_title": "Smart Form Filler" 
+    "default_title": "Smart Form Filler"
   },
 
   "options_page": "resumes.html",
 
-  "background": { 
-    "service_worker": "background.js" 
+  "background": {
+    "service_worker": "background.js"
   },
 
   "permissions": [
@@ -30,16 +31,17 @@
   ],
 
   "host_permissions": [
-    "*://*/*",
+    "http://*/*",
+    "https://*/*",
     "file://*/*",
-    "http://127.0.0.1:5000/*",
-    "http://localhost:5000/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
 
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["helpers.js","content.js"],
+      "matches": ["http://*/*", "https://*/*", "file://*/*"],
+      "js": ["helpers.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true
@@ -48,8 +50,15 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["data/resumes/*.txt", "styles.css"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "styles.css",
+        "icon.png",
+        "profile.html",
+        "profile.js",
+        "resumes.html",
+        "resumes.js"
+      ],
+      "matches": ["http://*/*", "https://*/*", "file://*/*"]
     }
   ]
 }

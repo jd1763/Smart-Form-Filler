@@ -70,10 +70,83 @@ els.tbody.addEventListener("click", async (ev) => {
   }
   if (delId) {
     if (!confirm("Delete this resume? This cannot be undone.")) return;
+  
     const r = await fetch(`${BACKEND_BASE}/resumes/${delId}`, { method: "DELETE" });
-    if (r.ok) refresh();
-    else alert("Delete failed.");
-  }
+    if (!r.ok) { alert("Delete failed."); return; }
+  
+    // Refresh the table + internal `current` list first
+    await refresh();
+  
+    // If the deleted one was selected, pick a fallback and mirror the popup's behavior
+    try {
+      // Read current profile to see what's selected
+      const pr = await fetch(`${BACKEND_BASE}/profile`);
+      if (pr.ok) {
+        const prof = await pr.json();
+        const wasSelected = String(prof.selectedResumeId || "") === String(delId);
+  
+        if (wasSelected) {
+          // pick first remaining resume as fallback (if any)
+          const fallback = (current || []).find(r => String(r.id) !== String(delId));
+  
+          if (!fallback) {
+            // no resumes left → clear selection in backend + local cache
+            await fetch(`${BACKEND_BASE}/profile`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                selectedResumeId: "",
+                selectedResumeName: "",
+                selectedResumeSkills: []
+              })
+            });
+            try {
+              await chrome.storage.local.set({
+                lastResumeId: "",
+                selectedResume: { id: "", name: "", skills: [] }
+              });
+            } catch (_) {}
+          } else {
+            // fetch skills for the fallback (same approach popup.js uses)
+            let skills = [];
+            try {
+              const sr = await fetch(`${BACKEND_BASE}/skills/by_resume`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ resumeId: fallback.id })
+              });
+              const sj = await sr.json();
+              skills = Array.isArray(sj.skills) ? sj.skills : [];
+            } catch (_) {}
+  
+            const fallbackName = fallback.original_name || fallback.name || String(fallback.id);
+            const dedupSkills  = Array.from(new Set(skills)).sort();
+  
+            // patch backend profile
+            await fetch(`${BACKEND_BASE}/profile`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                selectedResumeId: String(fallback.id),
+                selectedResumeName: fallbackName,
+                selectedResumeSkills: dedupSkills
+              })
+            });
+  
+            // mirror to local cache so popup/content can use immediately
+            try {
+              await chrome.storage.local.set({
+                lastResumeId: String(fallback.id),
+                selectedResume: { id: String(fallback.id), name: fallbackName, skills: dedupSkills }
+              });
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[resumes] post-delete selection repair failed:", e);
+    }
+  }  
 });
 
 els.uploadBtn.addEventListener("click", async () => {
