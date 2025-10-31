@@ -1,4 +1,4 @@
-# AI Job Application Assistant
+# Smart Form Filler
 
 This project combines two ideas into one end-to-end tool that helps job seekers apply smarter:
 
@@ -10,7 +10,9 @@ This project combines two ideas into one end-to-end tool that helps job seekers 
    A natural language processing (NLP) engine that compares resumes against job descriptions.  
    It produces a match score and highlights missing keywords or skills so applicants can quickly tailor their resumes before submission.
 
-Together, these components form the **AI Job Application Assistant**, a project that applies real-world ML/NLP in a highly relevant and practical way.
+Together, these components form the **Smart Form Filler**, a project that applies real-world ML/NLP in a highly relevant and practical way.
+
+For a visual representation of the project watch this video attached: [DEMO]([https://drive.google.com/file/d/13RjDz6MZJtdsJKhQ3lYS9Wm-TSdW2zn2/view?usp=sharing](https://drive.google.com/file/d/1Hz1tvYp8fivobtalJ0PJ5slyo_Caw2rC/view))
 
 ---
 
