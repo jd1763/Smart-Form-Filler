@@ -12,8 +12,7 @@ This project combines two ideas into one end-to-end tool that helps job seekers 
 
 Together, these components form the **Smart Form Filler**, a project that applies real-world ML/NLP in a highly relevant and practical way.
 
-For a visual representation of the project watch this video attached: [DEMO]
-([https://drive.google.com/file/d/1Hz1tvYp8fivobtalJ0PJ5slyo_Caw2rC/view])
+For a visual representation of the project, watch this video: [DEMO](https://drive.google.com/file/d/1Hz1tvYp8fivobtalJ0PJ5slyo_Caw2rC/view)
 
 ---
 
