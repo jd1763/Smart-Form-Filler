@@ -201,10 +201,15 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
 ---
 ## Setup
 
+## Setup (Quickstart)
+
+> For the full, always-up-to-date guide, see **[run_instructions.txt](./run_instructions.txt)**.  
+> That file is the source of truth; update it when steps change.
+
 1. Clone this repository:
    ```bash
-   git clone https://github.com/jd1763/AI-job-application-assistant.git
-   cd AI-job-application-assistant
+   git clone https://github.com/jd1763/Smart-Form-Filler.git
+   cd Smart-Form-Filler
 
 2. Create a virtual environment:
     python3 -m venv .venv
@@ -220,9 +225,9 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
     pip install -r requirements-dev.txt   # optional dev tool
 
 ## Usage
-Run the Matcher API
-    python -m backend.matcher_api
-    # The API runs on http://127.0.0.1:5001
+Run the core API
+    python -m backend.api
+    # Default: http://127.0.0.1:5000
 
 Health check
     curl http://127.0.0.1:5001/health
@@ -251,12 +256,6 @@ Example output:
         "missing_keywords": ["django"],
         "method": "embedding"
     }
-
-Note: TF-IDF returns weighted keyword tuples (word, importance).
-Embedding-based matcher returns a semantic similarity score (%) and a simpler list of missing skills.
-
-Run preprocessing to clean raw text:
-    python ml/preprocess.py
 
 Run tests:
     pytest -v

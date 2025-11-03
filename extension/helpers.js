@@ -1,4 +1,15 @@
-// helpers.js — Smart Form Filler shared, pure helpers (no DOM here)
+/* Node/Browser compat shim so tests can `require()` this file */
+/* eslint-disable no-var */
+var __root__ = (typeof globalThis !== 'undefined') ? globalThis
+            : (typeof window !== 'undefined') ? window
+            : (typeof global !== 'undefined') ? global
+            : this;
+
+if (!__root__.H) { __root__.H = {}; }   // ensure global H exists
+var H = __root__.H;                      // local alias used by the rest of the file
+if (typeof __root__.window !== 'undefined') { __root__.window.H = H; }
+/* eslint-enable no-var */
+
 (function(){
     window.SFFHelpers = window.SFFHelpers || {};
     window.H = window.H || window.SFFHelpers;
@@ -256,7 +267,8 @@
   })();
   
   window.H = window.SFFHelpers; // optional alias so content.js can always find helpers
-
+  H = window.SFFHelpers;        // <-- keep Node/CommonJS alias in sync with the real API
+  
  // ===== helpers.js additions =====
 window.SFFHelpers = window.SFFHelpers || {};
 (function(H){
@@ -926,3 +938,9 @@ H.buildStateCandidates = H.buildStateCandidates || function buildStateCandidates
     };
   }
 })();
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = (typeof window !== 'undefined' && window.SFFHelpers)
+    ? window.SFFHelpers
+    : (typeof H !== 'undefined' ? H : globalThis.H);
+}

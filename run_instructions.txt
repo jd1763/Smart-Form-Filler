@@ -2,7 +2,7 @@
 # Setup & Run Instructions (User)
 # ----------------------------
 
-# 1) Create a virtual environment with Python 3.12
+# 1) Create a virtual environment with Python 3.12 (on the terminal)
 #    • Apple Silicon macOS (Homebrew):
 #      /opt/homebrew/bin/python3.12 -m venv .venv
 #    • Intel macOS (Homebrew):
@@ -10,21 +10,26 @@
 #    • Fallback (whatever 'python3' resolves to 3.12):
 python3 -m venv .venv
 
-# 2) Activate the virtual environment (every new shell)
+# 2) Activate the virtual environment (every new shell) (on the terminal)
 source .venv/bin/activate
 
-# 3) Upgrade pip and install runtime dependencies
+# 3) Upgrade pip and install runtime dependencies (on the terminal)
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-# 4) (Optional) Verify spaCy model is present if the wheel failed for any reason
+# 4) (Optional) Verify spaCy model is present if the wheel failed for any reason (on the terminal)
 python -m spacy download en_core_web_sm
 
-# 5) Start the backend API
+# 5) Start the backend API (on the terminal and keep terminal open)
 python -m backend.api
 
-# 6) Load the Chrome extension from ./extension in Developer Mode, open the popup on
-a job posting and click "Fill Form"
+# 6) Load the Chrome extension from ./extension in Developer Mode
+- Open chrome://extensions
+- Enable Developer mode
+- Then click "Load unpacked"
+- Go to the folder smart-form-filler/extension and click select
+- The extension is now added, you are good to go! Just keep the api running
+- Open the popup on a job posting and click "Fill Form"
 
 Note: 
 After you do step 1-4 for the first time locally
