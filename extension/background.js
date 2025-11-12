@@ -3,8 +3,42 @@
 const TEST_MODE  = true;   // enables bg.selftest route
 const FAKE_MODEL = false;  // deterministic predictions instead of calling Flask
 
-// --- Unified local API base (both endpoints live in one Flask app) ---
-const API_BASE = "http://127.0.0.1:5000";
+// ===================== Backend base resolver (Docker-first) =====================
+// Prefer Docker (8000) when available, else local (5000).
+let API_BASE_CACHE = null;
+
+async function probe(base, timeoutMs = 900) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${base}/health?t=${Date.now()}`, { signal: ctl.signal, mode: "no-cors" });
+    return !!r;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function resolveAPIBase(force = false) {
+  if (!force && API_BASE_CACHE) return API_BASE_CACHE;
+  const candidates = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
+  for (const base of candidates) {
+    if (await probe(base)) {
+      API_BASE_CACHE = base;
+      try { await chrome.storage.local.set({ backend_base: base }); } catch {}
+      return base;
+    }
+  }
+  // default to local if nothing probed (lets requests try anyway)
+  API_BASE_CACHE = "http://127.0.0.1:5000";
+  return API_BASE_CACHE;
+}
+
+async function reprobeAndSwap() {
+  API_BASE_CACHE = null;
+  return resolveAPIBase(true);
+}
 
 // --- Heuristics for fake predictions (dev only) ---
 const FAKE_MAP = {
@@ -26,13 +60,25 @@ const toFakePred = (s) => {
 
 // --- Generic POST helper to the local API ---
 async function callApi(path, payload) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload || {})
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
-  return res.json();
+  let base = await resolveAPIBase();
+  try {
+    const res = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+    return res.json();
+  } catch (e) {
+    base = await reprobeAndSwap();              // <— reprobe on error
+    const res2 = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    if (!res2.ok) throw new Error(`HTTP ${res2.status} on ${path} (after failover)`);
+    return res2.json();
+  }
 }
 
 // --- Field-type batch predictor (for filler) ---
@@ -43,13 +89,25 @@ async function callPredictAPI(labels) {
       return { label: lab, prediction: p, confidence: p ? 0.95 : 0.0 };
     });
   }
-  const res = await fetch(`${API_BASE}/predict_batch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ labels })
-  });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
+  let base = await resolveAPIBase();
+  try {
+    const res = await fetch(`${base}/predict_batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ labels })
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    return res.json();
+  } catch (e) {
+    base = await reprobeAndSwap();              // <— reprobe on error
+    const res2 = await fetch(`${base}/predict_batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ labels })
+    });
+    if (!res2.ok) throw new Error(`API error ${res2.status} (after failover)`);
+    return res2.json();
+  }
 }
 
 function canonicalize(pred) {
@@ -224,13 +282,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         } catch (e) {
           // Optional: fallback to API if local read fails
           try {
-            const r = await fetch(`${API_BASE}/profile`, { credentials: "include" });
+            const base = await resolveAPIBase();
+            const r = await fetch(`${base}/profile`, { credentials: "include" });
             if (!r.ok) throw new Error(`Profile HTTP ${r.status}`);
             const data = await r.json();
             sendResponse({ success:true, profile:data || {} });
           } catch (e2) {
             sendResponse({ success:false, error:String(e2) });
-          }
+          }          
         }
       })();
       return true; // async
@@ -242,10 +301,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (!rid) { sendResponse({ ok:false, error:"missing resume id" }); return; }
     
       try {
-        const r = await fetch(`${API_BASE}/resumes/${encodeURIComponent(rid)}/file?t=${Date.now()}`, {
+        const base = await resolveAPIBase();
+        const r = await fetch(`${base}/resumes/${encodeURIComponent(rid)}/file?t=${Date.now()}`, {
           cache: "no-store",
           headers: { "Cache-Control": "no-cache" }
-        });
+        });        
         if (!r.ok) throw new Error(`resume file HTTP ${r.status}`);
     
         const buf = await r.arrayBuffer();
@@ -289,7 +349,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // ===== Week-5 messages (action-based) =====
     if (msg?.action === "getUserData") {
       try {
-        const res = await fetch(`${API_BASE}/profile`, { credentials: "include" });
+        const base = await resolveAPIBase();
+        const res = await fetch(`${base}/profile`, { credentials: "include" });
         let data = {};
         if (res.ok) {
           const raw = await res.json();
@@ -323,15 +384,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       let data = null;
 
       try {
-        const r = await fetch(`${API_BASE}/predict_batch`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ labels })
-        });
-        if (r.ok) data = await r.json();
+        data = await callPredictAPI(labels);
       } catch (e) {
         data = null;
-      }
+      }    
 
       // Normalize to an array of results aligned to `labels`
       // Accept either {results:[...]} or a raw array
@@ -370,4 +426,3 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })().catch(e => sendResponse({ error: String(e) }));
   return true; // keep async channel open
 });
-

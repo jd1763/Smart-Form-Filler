@@ -1,8 +1,9 @@
-import os
 import json
-import pickle
+import os
 import pathlib
+import pickle
 from pathlib import Path
+
 import joblib
 import pytest
 from sklearn.feature_extraction.text import TfidfVectorizer

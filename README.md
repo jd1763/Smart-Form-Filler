@@ -197,14 +197,59 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
 - Tests:
   - Added second Employment section with a “Present/Current” checkbox to exercise dynamic end-date logic.
 
+## What’s new (Nov 2025)
+
+> **Dockerized backend (Flask + Gunicorn)**
+> - **One-command startup**: `docker compose up --build backend` (API on `http://localhost:8000`).
+> - **Health checks**: container reports **healthy** once the API responds (`/health` or `/resumes`), so `docker ps` and CI/CD can gate on readiness.
+> - **Persistent data**: named volumes keep `data/`, `models/`, and (if used) `db.sqlite3` across rebuilds.
+> - **Prod-like process model**: Gunicorn workers (`gthread`) behind `0.0.0.0:8000` mirrors a realistic deployment.
+> - **Make targets (optional)**: `make up`, `make dev`, `make logs`, `make down`, `make rebuild`, `make sh`.
+>
+> **Automatic failover in the Chrome extension**
+> - **Candidate order**: `127.0.0.1:8000` → `localhost:8000` → `127.0.0.1:5000` → `localhost:5000`.
+> - **Sticky base**: first alive base is persisted and reused; if it dies, the extension re-probes and switches automatically.
+> - **Robust liveness probe**: tolerant of **403** (auth) and **CORS**; falls back to `no-cors` so it still detects a listening server even without permissive headers.
+> - **No console spam**: while connecting, backend calls are gated to avoid repeated `/resumes` errors; logs remain clean.
+>
+> **Graceful loading overlay in the popup**
+> - **Full-screen “Connecting to API…” overlay** appears if no backend is reachable yet and **keeps listening** (polling every ~1s).
+> - **Gated initialization**: a small global flag prevents data loads and auto-match work until a backend is confirmed alive.
+> - **Seamless handoff**: once connected, the overlay hides, the popup initializes (resumes list, detections, matching), and normal UX resumes without user action.
+
 
 ---
 ## Setup
 
-## Setup (Quickstart)
+## Quick Start — Docker (recommended)
+    Build + run:
+    ```bash
+    docker compose up --build backend
+    # or, if your compose uses a single service name:
+    docker compose up --build
+
+Health check
+    curl http://127.0.0.1:8000/health
+    # Should be -> { "status": "ok" }
+
+Tip: If you added the Makefile, you can also use:
+make up (build+run), make dev (hot-reload), make logs, make down, make rebuild.
+
+## Backend Failover (Extension)
+
+The popup tries these bases in order and “sticks” to the first alive one:
+1. `http://127.0.0.1:8000`
+2. `http://localhost:8000`
+3. `http://127.0.0.1:5000`
+4. `http://localhost:5000`
+
+If none are alive, the popup shows a **“Connecting to API…”** loading overlay and
+keeps listening until one becomes available. Liveness checks tolerate 403/CORS.
+
+## Setup (locally)
 
 > For the full, always-up-to-date guide, see **[run_instructions.txt](./run_instructions.txt)**.  
-> That file is the source of truth; update it when steps change.
+> That file is the source of truth; It's updated when steps change.
 
 1. Clone this repository:
    ```bash
@@ -223,6 +268,7 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
 4. Install dependencies:
     pip install -r requirements.txt
     pip install -r requirements-dev.txt   # optional dev tool
+
 
 ## Usage
 Run the core API
@@ -266,4 +312,4 @@ This project uses GitHub Actions to run tests on every push.
 CI workflow: `.github/workflows/ci.yml`
 
 **Build Status:**  
-![CI](https://github.com/jd1763/AI-job-application-assistant/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/jd1763/Smart-Form-Filler/actions/workflows/ci.yml/badge.svg)

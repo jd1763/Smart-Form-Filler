@@ -40,9 +40,30 @@
     #status { margin: 8px 0; min-height: 18px; color: #333; }
     .section-header { margin-top: 8px; font-weight: 600; cursor: pointer; user-select: none; }
     .field-list { border: 1px solid #eee; padding: 8px; border-radius: 6px; max-height: 240px; overflow: auto; }
+
+    /* --- Loading overlay --- */
+    #loadingView{
+      position: fixed; inset: 0; z-index: 9999;
+      background:#ffffff;
+      display:none;            /* shown by JS while connecting */
+      align-items:center; justify-content:center; flex-direction:column; gap:10px;
+    }
+    .loader{
+      width:28px; height:28px; border-radius:50%;
+      border:3px solid #e5e7eb; border-top-color:#111827;
+      animation: sffSpin 1s linear infinite;
+    }
+    @keyframes sffSpin { to { transform: rotate(360deg); } }
+    #loadingMsg{ color:#6b7280; font-size:12px; }
   </style>
 </head>
 <body>
+  <div id="loadingView" aria-live="polite">
+    <div class="loader" aria-hidden="true"></div>
+    <div id="loadingMsg" class="muted">Connecting to API…</div>
+    <div class="muted mono" style="font-size:11px;">Listening on 127.0.0.1:8000 or :5000</div>
+  </div>
+  
   <h1>Smart Form Filler</h1>
 
   <!-- Tabs -->

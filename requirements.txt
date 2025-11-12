@@ -1,9 +1,12 @@
+--only-binary=:all:
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 # Core ML + NLP
 scikit-learn
 nltk
 pandas
 sentence-transformers
-spacy
+spacy>=3.8,<3.9
 numpy<2  # lock to 1.26.x for compatibility with PyTorch & spaCy
 
 # spaCy English model (wheel)
@@ -12,6 +15,8 @@ en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_
 # Web API
 flask
 flask-cors
+
+gunicorn
 
 # Backend dependencies
 -r backend/requirements.txt

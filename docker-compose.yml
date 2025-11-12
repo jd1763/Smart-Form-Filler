@@ -1,0 +1,57 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-form-filler-backend
+    environment:
+      - APP_ENV=production
+      - PORT=8000
+      - SKILL_TERMS_FILE=/app/backend/data/skill_terms.txt
+      - USE_S3=true
+      - AWS_REGION=us-east-1
+      - S3_BUCKET=smart-form-filler-resumes-jd1763
+      # For local dev only — prefer AWS IAM roles in cloud
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    ports:
+      - "8000:8000"
+    # prod-like: no code bind; only data/db mounts
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./backend/db.sqlite3:/app/backend/db.sqlite3
+      - ./models:/app/models:ro  
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-form-filler-backend-dev
+    environment:
+      - APP_ENV=development
+      - PORT=8000
+      - SKILL_TERMS_FILE=/app/backend/data/skill_terms.txt
+      - USE_S3=true
+      - AWS_REGION=us-east-1
+      - S3_BUCKET=smart-form-filler-resumes-jd1763
+      # For local dev only — prefer AWS IAM roles in cloud
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    ports:
+      - "8000:8000"
+    # dev: bind code for instant edits
+    volumes:
+      - ./backend:/app/backend:delegated
+      - ./ml:/app/ml:delegated            
+      - ./matcher:/app/matcher:delegated 
+      - ./backend/data:/app/backend/data
+      - ./backend/db.sqlite3:/app/backend/db.sqlite3
+      - ./models:/app/models:ro  
+    # dev: hot reload but reachable from host
+    command: bash -lc "gunicorn --reload backend.api:app -b 0.0.0.0:8000 --workers=1 --threads=4 --timeout=120"

@@ -1,8 +1,78 @@
-const BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
+let BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
+let API_BASE = BACKEND_BASE;
+
+// Prefer Docker (8000) if /resumes responds with JSON; else local (5000)
+(async function preferDockerOnProfilePage(){
+  const candidates = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
+  for (const base of candidates) {
+    try {
+      const r = await fetch(`${base}/resumes?t=${Date.now()}`, {
+        credentials: "omit",
+        headers: { "Accept": "application/json" },
+        cache: "no-store"
+      });
+      if (r.ok) {
+        BACKEND_BASE = base;
+        API_BASE = base;
+        try { localStorage.setItem("backend_base", base); } catch {}
+        break;
+      }
+    } catch {}
+  }
+})();
+
+async function _probe(base, timeoutMs = 900) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${base}/resumes?t=${Date.now()}`, {
+      signal: ctl.signal,
+      credentials: "omit",
+      headers: { "Accept": "application/json" },
+      cache: "no-store"
+    });
+    return r.ok;
+  } catch { return false; }
+  finally { clearTimeout(t); }
+}
+
+async function _failoverBase() {
+  const order = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
+  for (const b of order) if (await _probe(b)) return b;
+  return "http://127.0.0.1:5000";
+}
+async function fetchWithFailoverP(path, opts) {
+  const baseHeaders = Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {});
+  opts = Object.assign({ credentials: "omit", cache: "no-store", headers: baseHeaders }, opts || {});
+  const method = (opts.method || "GET").toUpperCase();
+
+  try {
+    const r = await fetch(`${BACKEND_BASE}${path}`, opts);
+    if (r.ok) return r;
+
+    if (r.status === 403 && method === "GET") {
+      const r0 = await fetch(`${BACKEND_BASE}${path}`, Object.assign({}, opts, { credentials: "omit" }));
+      if (r0.ok) return r0;
+    }
+    throw new Error(`HTTP ${r.status}`);
+  } catch {
+    BACKEND_BASE = await _failoverBase();
+    API_BASE = BACKEND_BASE;
+    try { localStorage.setItem("backend_base", BACKEND_BASE); } catch {}
+
+    const r2 = await fetch(`${BACKEND_BASE}${path}`, opts);
+    if (r2.ok) return r2;
+
+    if (r2.status === 403 && method === "GET") {
+      const r3 = await fetch(`${BACKEND_BASE}${path}`, Object.assign({}, opts, { credentials: "omit" }));
+      if (r3.ok) return r3;
+    }
+    throw new Error(`HTTP ${r2.status} (after failover)`);
+  }
+}
+
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
-// Use a single base everywhere to avoid drift
-const API_BASE = BACKEND_BASE;
 
 // light canonicalization + whitelist (keep in sync with popup/content)
 const _ALIASES = { "c++":"cpp","c#":"csharp",".net":"dotnet","node.js":"nodejs","react.js":"react","next.js":"nextjs","express.js":"express","k8s":"kubernetes","js":"javascript","ts":"typescript" };
@@ -25,8 +95,12 @@ function _extractSkillsFromText(text){
   return Array.from(out).sort();
 }
 async function _getProfile(){
-  try { const r = await fetch(`${API_BASE}/profile`); return r.ok ? await r.json() : {}; } catch { return {}; }
+  try {
+    const r = await fetchWithFailoverP(`/profile`);
+    return r.ok ? await r.json() : {};
+  } catch { return {}; }
 }
+
 async function _saveProfileSelected({ id, name, skills }){
   const patch = {
     selectedResumeId: String(id || ""),
@@ -34,11 +108,11 @@ async function _saveProfileSelected({ id, name, skills }){
     selectedResumeSkills: Array.from(new Set(skills || [])).sort()
   };
   try {
-    await fetch(`${API_BASE}/profile`, {
+    await fetchWithFailoverP(`/profile`, {
       method: "PATCH",
       headers: { "Content-Type":"application/json" },
       body: JSON.stringify(patch)
-    });
+    });    
   } catch (e) {
     console.warn("[profile] PATCH /profile failed", e);
   }
@@ -47,8 +121,8 @@ async function _saveProfileSelected({ id, name, skills }){
 }
 async function _listResumes(){
   try {
-    const r = await fetch(`${API_BASE}/resumes`);
-    const js = r.ok ? await r.json() : {};
+    const r = await fetchWithFailoverP(`/resumes`);
+    const js = r.ok ? await r.json() : {};    
     const items = Array.isArray(js.items) ? js.items : [];
     return items.map(it => ({ id: String(it.id), name: it.original_name || it.name || it.filename || String(it.id) }));
   } catch (e) {
@@ -58,28 +132,26 @@ async function _listResumes(){
 // Replace the old _getResumeText with this robust, no-/resumes/:id version
 async function _getResumeText(id){
   const safePick = (obj) => (obj?.plain_text || obj?.text || obj?.content || "");
-  const tryJson = async (url, pickFn) => {
+  const tryJson = async (path, pickFn) => {
     try {
-      const r = await fetch(url);
+      const r = await fetchWithFailoverP(path);
       if (!r.ok) return "";
       const js = await r.json();
       return pickFn(js) || "";
-    } catch {
-      return "";
-    }
-  };
+    } catch { return ""; }
+  };  
 
   // 1) Try a common single-item endpoint shape
-  let text = await tryJson(`${API_BASE}/resume?id=${encodeURIComponent(id)}`, safePick);
+  let text = await tryJson(`/resume?id=${encodeURIComponent(id)}`, safePick);
   if (text) return text;
 
   // 2) Another common name
-  text = await tryJson(`${API_BASE}/resume_text?id=${encodeURIComponent(id)}`, (js)=> js?.text || js?.plain_text || js?.content || "");
+  text = await tryJson(`/resume_text?id=${encodeURIComponent(id)}`, (js)=> js?.text || js?.plain_text || js?.content || "");
   if (text) return text;
 
   // 3) Some backends expose POST /resume_text { id }
   try {
-    const r = await fetch(`${API_BASE}/resume_text`, {
+    const r = await fetchWithFailoverP(`/resume_text`, {
       method: "POST",
       headers: { "Content-Type":"application/json" },
       body: JSON.stringify({ id })
@@ -92,7 +164,8 @@ async function _getResumeText(id){
   } catch { /* ignore */ }
 
   // 4) Fallback: GET /resumes (list) and find the matching item by id
-  const items = await tryJson(`${API_BASE}/resumes`, (js) => Array.isArray(js?.items) ? js.items : []);
+  const items = await tryJson(`/resumes`, (js) => Array.isArray(js?.items) ? js.items : []);
+
   if (Array.isArray(items) && items.length) {
     const it = items.find(x => String(x.id) === String(id));
     if (it) {
@@ -144,11 +217,11 @@ async function initProfileResumeDropdown(profileData = {}) {
     // 2) ask backend to extract skills (NEW)
     let skills = [];
     try {
-      const r = await fetch(`${BACKEND_BASE}/skills/extract`, {
+      const r = await fetchWithFailoverP(`/skills/extract`, {
         method: "POST",
         headers: { "Content-Type":"application/json" },
         body: JSON.stringify({ text })
-      });
+      });      
       const j = await r.json();
       skills = Array.isArray(j.skills) ? j.skills : [];
     } catch (e) {
@@ -559,7 +632,7 @@ function renderArray(container, arr, itemView){
 async function load(){
     let data = {};
     try {
-      const r = await fetch(`${BACKEND_BASE}/profile`);
+      const r = await fetchWithFailoverP("/profile");
       if (r.ok) data = await r.json();
     } catch (e) {
       console.warn("[profile] backend /profile error:", e);
@@ -755,11 +828,11 @@ $("addExp").addEventListener("click", ()=>{
       if (sr && sr.id) {
         try {
           // 1) Try backend/data/text/<id>.txt via /skills/by_resume
-          const r1 = await fetch(`${BACKEND_BASE}/skills/by_resume`, {
+          const r1 = await fetchWithFailoverP(`/skills/by_resume`, {
             method: "POST",
             headers: { "Content-Type":"application/json" },
             body: JSON.stringify({ resumeId: sr.id })
-          });
+          });          
           if (r1.ok) {
             const j1 = await r1.json();
             const k1 = Array.isArray(j1.skills) ? j1.skills : [];
@@ -769,11 +842,11 @@ $("addExp").addEventListener("click", ()=>{
           // 2) Fallback: extract from raw text if still empty
           if (!Array.isArray(sr.skills) || !sr.skills.length) {
             const textRes = await _getResumeText(sr.id);
-            const r2 = await fetch(`${BACKEND_BASE}/skills/extract`, {
+            const r2 = await fetchWithFailoverP(`/skills/extract`, {
               method: "POST",
               headers: { "Content-Type":"application/json" },
               body: JSON.stringify({ text: textRes || "" })
-            });
+            });            
             if (r2.ok) {
               const j2 = await r2.json();
               sr.skills = Array.isArray(j2.skills) ? j2.skills : [];
@@ -817,11 +890,11 @@ $("addExp").addEventListener("click", ()=>{
     
       // ===== Save to backend (/profile) — MERGE, don't replace =====
       try{
-        const r = await fetch(`${BACKEND_BASE}/profile`, {
+        const r = await fetchWithFailoverP(`/profile`, {
           method: "PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify(out)   // deep-merged server-side
-        });
+          body: JSON.stringify(out)
+        });        
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         setStatus("Saved to backend!");
         flashStatus("Saved to backend.", 1500);

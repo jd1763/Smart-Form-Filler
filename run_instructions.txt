@@ -2,6 +2,15 @@
 # Setup & Run Instructions (User)
 # ----------------------------
 
+# (NEW) Quick Start — Makefile (preferred)
+# These shortcuts wrap docker compose so I don't have to remember long commands.
+#   make up        -> build + start prod-like (Gunicorn @ http://localhost:8000)
+#   make dev       -> start dev hot-reload (http://localhost:8000)
+#   make logs      -> tail logs
+#   make rebuild   -> rebuild image clean
+#   make sh        -> shell into the container
+#   make down      -> stop everything
+
 # 1) Create a virtual environment with Python 3.12 (on the terminal)
 #    • Apple Silicon macOS (Homebrew):
 #      /opt/homebrew/bin/python3.12 -m venv .venv
@@ -21,6 +30,7 @@ pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 
 # 5) Start the backend API (on the terminal and keep terminal open)
+#    Local dev default: http://127.0.0.1:5000
 python -m backend.api
 
 # 6) Load the Chrome extension from ./extension in Developer Mode
@@ -29,12 +39,43 @@ python -m backend.api
 - Then click "Load unpacked"
 - Go to the folder smart-form-filler/extension and click select
 - The extension is now added, you are good to go! Just keep the api running
+- While the API is starting:
+- The popup shows a "Connecting to API..." screen and keeps listening until a backend is alive.
+- Failover order: 127.0.0.1:8000 -> localhost:8000 -> 127.0.0.1:5000 -> localhost:5000.
 - Open the popup on a job posting and click "Fill Form"
 
-Note: 
-After you do step 1-4 for the first time locally
-To run just do the following:
-step 4:
-    source .venv/bin/activate
-step 6:
-    python -m backend.api
+# Subsequent runs (local):
+source .venv/bin/activate
+python -m backend.api
+
+# ----------------------------
+# Run with Docker (one command)
+# ----------------------------
+# Preferred: use the Makefile shortcuts
+#   make up        # build + start prod-like (@ http://localhost:8000)
+#   make dev       # start dev hot-reload (@ http://localhost:8000)
+#   make down      # stop
+#   make logs      # tail logs
+#   make rebuild   # clean rebuild
+
+# Raw docker compose (alternative if I don't want to use make):
+# Build + start
+docker compose up --build backend        # prod-like (Gunicorn @ 8000)
+# or:
+docker compose up --build backend-dev    # dev hot-reload (@ 8000)
+
+# Health check (should return {"ok": true}):
+curl http://localhost:8000/health
+
+# Stop
+docker compose down
+
+# Edit skills whitelist (no code changes needed):
+#   - Edit backend/data/skill_terms.txt
+#   - Restart the container (choose ONE):
+#       docker compose up --build backend        # prod-like
+#       # or:
+#       docker compose up --build backend-dev    # dev hot-reload
+#
+# Dev hot-reload inside the container (alternative raw command):
+# docker compose run --service-ports backend-dev bash -lc 'gunicorn --reload backend.api:app -b 0.0.0.0:8000 --workers=1 --threads=4 --timeout=120'

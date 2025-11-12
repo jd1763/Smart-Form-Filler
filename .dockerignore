@@ -1,0 +1,21 @@
+# bytecode & caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+*.egg-info/
+
+# venvs
+.venv/
+venv/
+env/
+
+# OS & git
+.DS_Store
+.git/
+.gitignore
+
+# runtime data (we mount these instead)
+backend/data/
+backend/db.sqlite3

@@ -79,22 +79,27 @@
     "lastName": "Done",
     "phoneNumber": "8482035240"
   },
-  "selectedResumeId": "68a3f340-bb29-4d3a-9c99-858b731ef20c",
-  "selectedResumeName": "preferred_only.pdf",
+  "selectedResumeId": "6d7a8beb-1d5d-4c7c-9ba6-930c3f1895fb",
+  "selectedResumeName": "Resume - Jorgeluis Done.pdf",
   "selectedResumeSkills": [
-    "airflow",
-    "aws",
-    "cloud",
-    "ecs",
-    "eks",
-    "graphql",
-    "iam",
-    "kafka",
-    "rbac",
-    "react",
-    "s3",
-    "spark",
-    "typescript"
+    "android",
+    "android sdk",
+    "c",
+    "c++",
+    "css",
+    "git",
+    "github",
+    "gradle",
+    "html",
+    "java",
+    "javascript",
+    "junit",
+    "ml",
+    "mysql",
+    "oop",
+    "python",
+    "r",
+    "sql"
   ],
-  "yearsOfExperience": "0"
+  "yearsOfExperience": "3"
 }

@@ -4,7 +4,131 @@
 const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[popup]", ...a);
 const err = (...a) => console.error("[popup]", ...a);
-const BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
+window.SFF_CONNECTING = true; // start in "connecting" mode; cleared after we find a backend
+
+let BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
+let RESUME_API_BASE = BACKEND_BASE; // /resumes
+let MATCH_API_BASE  = BACKEND_BASE; // /match
+
+// Prefer Docker (8000) if it works; else local (5000), both hostnames.
+const CANDIDATE_BASES = [
+  "http://127.0.0.1:8000", "http://localhost:8000",
+  "http://127.0.0.1:5000", "http://localhost:5000",
+];
+
+// Try a JSON probe first; if blocked (CORS/403/timeout), fall back to no-cors.
+// Any network success counts as "alive" – we just need to know something is listening.
+async function probeJson(base, path = "/resumes", timeoutMs = 2500) {
+  // Phase 1: JSON probe (best case: proper CORS and JSON)
+  {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const r = await fetch(`${base}${path}?t=${Date.now()}`, {
+        signal: ctl.signal,
+        credentials: "omit",
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+      });
+      if (r.ok) {
+        // It responded – parse if possible, but success means alive either way.
+        try { await r.json(); } catch {}
+        return base;
+      }
+      // 403 means "auth required" – still proves the server is up.
+      if (r.status === 403) return base;
+    } catch (_) {
+      // ignore; try fallback
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  // Phase 2: no-cors probe (avoids CORS blocks; success → opaque but "alive")
+  try {
+    await fetch(`${base}${path}?t=${Date.now()}`, { mode: "no-cors", cache: "no-store" });
+    return base; // opaque response, but server is reachable
+  } catch {
+    return null; // still not reachable
+  }
+}
+
+// Return a base only if it actually responds with JSON; otherwise return null
+async function pickAliveBaseStrict() {
+  for (const b of CANDIDATE_BASES) {
+    const okBase = await probeJson(b);
+    if (okBase) return okBase;
+  }
+  return null; // <-- important: signal "no backend alive"
+}
+
+// Run once when popup opens: set/repair backend_base
+(async function preferDockerInPopup(){
+  const chosen = await pickAliveBaseStrict();
+  if (chosen) { try { localStorage.setItem("backend_base", chosen); } catch {} }
+})();
+
+async function waitForBackendAlive({ timeoutMs = 20000, pollMs = 1000, onTick } = {}) {
+  // timeoutMs <= 0 → wait forever
+  const deadline = (typeof timeoutMs === "number" && timeoutMs > 0)
+    ? (Date.now() + timeoutMs)
+    : Infinity;
+
+  while (Date.now() < deadline) {
+    const b = await pickAliveBaseStrict();
+    if (b) {
+      try { localStorage.setItem("backend_base", b); } catch {}
+      return b;
+    }
+    if (typeof onTick === "function") {
+      try { onTick(); } catch {}
+    }
+    await new Promise(r => setTimeout(r, pollMs));
+  }
+  throw new Error("Backend not reachable");
+}
+
+async function fetchWithFailover(path, opts) {
+  const baseDefaults = {
+    credentials: "include", // was "omit"
+    cache: "no-store",
+    headers: Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {})
+  };
+  opts = Object.assign({}, baseDefaults, opts || {});
+
+  let base = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
+
+  const tryOnce = async (b, forceNoCookies = false) => {
+    const finalOpts = forceNoCookies ? Object.assign({}, opts, { credentials: "omit" }) : opts;
+    const r = await fetch(`${b}${path}`, finalOpts);
+    if (r.ok) return r;
+
+    if (r.status === 403 && !forceNoCookies) {
+      // one more shot without cookies
+      const r2 = await fetch(`${b}${path}`, Object.assign({}, finalOpts, { credentials: "omit" }));
+      if (r2.ok) return r2;
+      throw new Error(`HTTP 403`);
+    }
+    throw new Error(`HTTP ${r.status}`);
+  };
+
+  try {
+    // first attempt WITH cookies
+    return await tryOnce(base, /*forceNoCookies*/ false); // was true
+  } catch (e) {
+    // re-probe and swap base
+    const newBase = await pickAliveBaseStrict();
+    if (!newBase) throw e;                // nothing alive yet
+    base = newBase;
+    try { localStorage.setItem("backend_base", base); } catch {}
+    try {
+      return await tryOnce(base, /*forceNoCookies*/ false);
+    } catch (e2) {
+      if (/HTTP 403/.test(String(e2))) throw new Error("HTTP 403 (after failover)");
+      throw e2;
+    }
+  }
+}
 
 // --- global shims so legacy pieces don't crash ---
 if (typeof window.getActiveTab === "undefined") {
@@ -101,6 +225,14 @@ function ensureDiagPanel() {
   return DIAG;
 }
 
+function setLoading(visible, msg){
+  const overlay = document.getElementById("loadingView");
+  const label   = document.getElementById("loadingMsg");
+  if (overlay) overlay.style.display = visible ? "flex" : "none";
+  if (label && msg) label.textContent = msg;
+  window.SFF_CONNECTING = !!visible; // ← this bit gates all backend work
+}
+
 function initTabs() {
   const tabs = Array.from(document.querySelectorAll(".tab"));
   const panels = {
@@ -141,8 +273,6 @@ function diagError(step, message, extra={}) {
 }
 
 /* ===================== MATCHER CONFIG ===================== */
-const MATCH_API_BASE = "http://127.0.0.1:5000"; // api.py host/port
-const RESUME_API_BASE = MATCH_API_BASE; 
 const MATCH_ROUTE = "/match";
 
 // Combined + expanded whitelist (mirrors SKILL_TERMS). Keep lowercase; your normalizer can map symbols.
@@ -1124,14 +1254,14 @@ function computeDisplayScore({ jdText, missing }) {
 
 /* ===================== API CALLS ===================== */
 async function callMethod(method, job_text, resume_id) {
-  const r = await fetch(MATCH_API_BASE + MATCH_ROUTE, {
+  const r = await fetchWithFailover(MATCH_ROUTE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ resume_id, job_description: job_text, method })
   });
-  if (!r.ok) throw new Error(`match ${method} ${r.status}`);
   return r.json();
 }
+
 async function callBoth(job_text, resume_id){
   const [t, e] = await Promise.allSettled([
     callMethod("tfidf", job_text, resume_id),
@@ -1293,20 +1423,22 @@ async function getJobDescription(){
 /* ===================== RESUME STORAGE ===================== */
 async function loadAllResumesFromBackend(){
   try{
-    const r = await fetch(`${RESUME_API_BASE}/resumes`);
+    const r = await fetchWithFailover("/resumes");
     const data = await r.json();
-    // Return minimal objects used by the UI
     return (data.items||[]).map(it => ({
       id: it.id,
       name: it.original_name,
-      // we don’t need text; /match will read by id
       createdAt: it.created_at
     }));
   }catch(e){
-    console.error("[popup] backend /resumes error:", e);
+    // While connecting, stay quiet so the console doesn't spam
+    if (!window.SFF_CONNECTING) {
+      console.error("[popup] backend /resumes error:", e);
+    }
     return [];
   }
 }
+
 async function getLastResumeId(){
   return (await chrome.storage.local.get("lastResumeId")).lastResumeId || null;
 }
@@ -1342,11 +1474,11 @@ function setEndMonthYearPair(monthStr, yearStr, root=document) {
 async function setSelectedResumeById(resumeId, resumeName){
   try {
     // 1) Get skills for this resume
-    const r = await fetch(`${BACKEND_BASE}/skills/by_resume`, {
+    const r = await fetchWithFailover(`/skills/by_resume`, {
       method: "POST",
       headers: { "Content-Type":"application/json" },
       body: JSON.stringify({ resumeId })
-    });
+    });    
     const j = await r.json();
     const skills = Array.isArray(j.skills) ? j.skills : [];
     const name   = resumeName || j.name || String(resumeId) || "";
@@ -1360,9 +1492,11 @@ async function setSelectedResumeById(resumeId, resumeName){
     // 3) Guard: only touch backend if it's reachable (prevents wipes if down/misconfigured)
     let backendOk = false;
     try {
-      const pr = await fetch(`${BACKEND_BASE}/profile`);
-      backendOk = !!(pr && pr.ok);
-    } catch (_) { backendOk = false; }
+      await fetchWithFailover(`/profile`);
+      backendOk = true;
+    } catch (_) {
+      backendOk = false;
+    }    
     if (!backendOk) {
       console.warn("[popup] GET /profile failed; skip PATCH to avoid corrupting profile.json");
       console.log("[popup] Cached selection locally only.");
@@ -1375,11 +1509,11 @@ async function setSelectedResumeById(resumeId, resumeName){
       selectedResumeName: String(name || ""),
       selectedResumeSkills: Array.from(new Set(skills)).sort()
     };
-    await fetch(`${BACKEND_BASE}/profile`, {
+    await fetchWithFailover(`/profile`, {
       method: "PATCH",
       headers: { "Content-Type":"application/json" },
       body: JSON.stringify(patch)
-    });
+    });    
 
     console.log("[popup] selectedResume updated with skills:", resumeId, skills.length);
   } catch (e) {
@@ -1455,6 +1589,8 @@ function ensureInlineResumePicker(resumes){
 
 /* ===================== MATCHER: AUTO RUN ON OPEN (Week-6 multi-resume) ===================== */
 async function autoMatch(){
+  // while connecting, skip; we'll call autoMatch again after connect
+  if (window.SFF_CONNECTING) return;
   // Hook UI
   elsM.arc = document.getElementById("arc");
   elsM.scoreNum = document.getElementById("scoreNum");
@@ -1823,6 +1959,8 @@ function renderDetected(container, arr){
 }
 
 async function preloadAndRestore(){
+  // while connecting, do nothing — we'll run again after the overlay hides
+  if (window.SFF_CONNECTING) return;
   const tab = await getActiveTab();
   if (!tab) { setStatus("❌ No active tab."); return; }
 
@@ -1992,6 +2130,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   initTabs();
   try { await preloadAndRestore(); } catch(e){ err(e); }
   autoMatch(); // run matcher immediately
+});
+
+document.addEventListener("DOMContentLoaded", async () => {
+  setLoading(true, "Connecting to API…");
+  try {
+    await waitForBackendAlive({ timeoutMs: 0, pollMs: 1000 });
+  } catch (_) {
+    // timeoutMs:0 means "wait forever" – we normally won't land here
+  }
+  setLoading(false); // flips SFF_CONNECTING → false
+
+  // Now it’s safe to run the real work
+  try { await preloadAndRestore(); } catch(e){ err(e); }
+  try { await autoMatch(); } catch(e){ err(e); }
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -2634,4 +2786,3 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
-

@@ -4,8 +4,9 @@ import os
 import pathlib
 
 import pytest
-from tests.value_resolver import flatten_profile
+
 from tests.golden_form_mapping import GOLDEN_EXPECTED_KEYS
+from tests.value_resolver import flatten_profile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROFILE_JSON = os.environ.get("PROFILE_JSON") or str((ROOT / "backend" / "data" / "profile.json"))
