@@ -4,129 +4,124 @@
 const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[popup]", ...a);
 const err = (...a) => console.error("[popup]", ...a);
-window.SFF_CONNECTING = true; // start in "connecting" mode; cleared after we find a backend
 
-let BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
-let RESUME_API_BASE = BACKEND_BASE; // /resumes
-let MATCH_API_BASE  = BACKEND_BASE; // /match
+// Mutable base; background.js is the single source of truth.
+let BACKEND_BASE =
+  (typeof localStorage !== "undefined" && localStorage.getItem("backend_base")) ||
+  "http://127.0.0.1:5000";
 
-// Prefer Docker (8000) if it works; else local (5000), both hostnames.
-const CANDIDATE_BASES = [
-  "http://127.0.0.1:8000", "http://localhost:8000",
-  "http://127.0.0.1:5000", "http://localhost:5000",
-];
-
-// Try a JSON probe first; if blocked (CORS/403/timeout), fall back to no-cors.
-// Any network success counts as "alive" – we just need to know something is listening.
-async function probeJson(base, path = "/resumes", timeoutMs = 2500) {
-  // Phase 1: JSON probe (best case: proper CORS and JSON)
-  {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), timeoutMs);
-    try {
-      const r = await fetch(`${base}${path}?t=${Date.now()}`, {
-        signal: ctl.signal,
-        credentials: "omit",
-        headers: { "Accept": "application/json" },
-        cache: "no-store",
-      });
-      if (r.ok) {
-        // It responded – parse if possible, but success means alive either way.
-        try { await r.json(); } catch {}
-        return base;
-      }
-      // 403 means "auth required" – still proves the server is up.
-      if (r.status === 403) return base;
-    } catch (_) {
-      // ignore; try fallback
-    } finally {
-      clearTimeout(t);
-    }
-  }
-
-  // Phase 2: no-cors probe (avoids CORS blocks; success → opaque but "alive")
-  try {
-    await fetch(`${base}${path}?t=${Date.now()}`, { mode: "no-cors", cache: "no-store" });
-    return base; // opaque response, but server is reachable
-  } catch {
-    return null; // still not reachable
+function setBackendBase(base) {
+  if (typeof base === "string" && base.startsWith("http")) {
+    BACKEND_BASE = base;
+    try { localStorage.setItem("backend_base", base); } catch (_) {}
   }
 }
 
-// Return a base only if it actually responds with JSON; otherwise return null
-async function pickAliveBaseStrict() {
-  for (const b of CANDIDATE_BASES) {
-    const okBase = await probeJson(b);
-    if (okBase) return okBase;
-  }
-  return null; // <-- important: signal "no backend alive"
-}
+// Track backend availability so we don't keep hammering it if it's down
+let BACKEND_AVAILABLE = null; // null = unknown, true = up, false = down
 
-// Run once when popup opens: set/repair backend_base
-(async function preferDockerInPopup(){
-  const chosen = await pickAliveBaseStrict();
-  if (chosen) { try { localStorage.setItem("backend_base", chosen); } catch {} }
-})();
-
-async function waitForBackendAlive({ timeoutMs = 20000, pollMs = 1000, onTick } = {}) {
-  // timeoutMs <= 0 → wait forever
-  const deadline = (typeof timeoutMs === "number" && timeoutMs > 0)
-    ? (Date.now() + timeoutMs)
-    : Infinity;
-
-  while (Date.now() < deadline) {
-    const b = await pickAliveBaseStrict();
-    if (b) {
-      try { localStorage.setItem("backend_base", b); } catch {}
-      return b;
-    }
-    if (typeof onTick === "function") {
-      try { onTick(); } catch {}
-    }
-    await new Promise(r => setTimeout(r, pollMs));
-  }
-  throw new Error("Backend not reachable");
-}
-
+// Minimal backend helper: single base, no health checks, no failover
 async function fetchWithFailover(path, opts) {
   const baseDefaults = {
-    credentials: "include", // was "omit"
     cache: "no-store",
-    headers: Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {})
+    credentials: "omit", // no cookies/sessions involved
+    headers: Object.assign(
+      { "Accept": "application/json" },
+      (opts && opts.headers) || {}
+    ),
   };
-  opts = Object.assign({}, baseDefaults, opts || {});
+  const finalOpts = Object.assign({}, baseDefaults, opts || {});
 
-  let base = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
+  let resp;
+  try {
+    resp = await fetch(`${BACKEND_BASE}${path}`, finalOpts);
+  } catch (e) {
+    // True network error (backend not running / blocked)
+    const err = new Error(`network-failed: ${e && e.message}`);
+    err.kind = "network";
+    throw err;
+  }
 
-  const tryOnce = async (b, forceNoCookies = false) => {
-    const finalOpts = forceNoCookies ? Object.assign({}, opts, { credentials: "omit" }) : opts;
-    const r = await fetch(`${b}${path}`, finalOpts);
-    if (r.ok) return r;
-
-    if (r.status === 403 && !forceNoCookies) {
-      // one more shot without cookies
-      const r2 = await fetch(`${b}${path}`, Object.assign({}, finalOpts, { credentials: "omit" }));
-      if (r2.ok) return r2;
-      throw new Error(`HTTP 403`);
+  if (!resp.ok) {
+    let bodyText = "";
+    try {
+      bodyText = await resp.text();
+    } catch (_) {
+      // ignore
     }
-    throw new Error(`HTTP ${r.status}`);
-  };
+    const err = new Error(
+      `http-${resp.status}${bodyText ? `: ${bodyText}` : ""}`
+    );
+    err.kind = "http";
+    err.status = resp.status;
+    err.body = bodyText;
+    throw err;
+  }
+
+  return resp;
+}
+
+// Ask background.js for backend base + health so everything uses the same port.
+async function queryBackendStatus(forceReprobe = false) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(
+        { action: "getBackendStatus", forceReprobe: !!forceReprobe },
+        (resp) => {
+          if (!resp || resp.success === false) {
+            log("[popup] getBackendStatus failed:", resp && resp.error);
+            resolve({
+              ok: false,
+              base: BACKEND_BASE,
+              lastChecked: Date.now(),
+            });
+            return;
+          }
+          if (resp.base) {
+            setBackendBase(resp.base);
+          }
+          log("[popup] getBackendStatus:", resp.ok, "base:", resp.base);
+          resolve(resp);
+        }
+      );
+    } catch (e) {
+      err("[popup] getBackendStatus sendMessage error:", e);
+      resolve({
+        ok: false,
+        base: BACKEND_BASE,
+        lastChecked: Date.now(),
+      });
+    }
+  });
+}
+
+// Health check: delegate to background.getBackendStatus (single source of truth)
+async function ensureBackendHealthy(forceReprobe = false) {
+  if (!forceReprobe && BACKEND_AVAILABLE === true) {
+    log("[popup] ensureBackendHealthy/bg: using cached OK");
+    return true;
+  }
 
   try {
-    // first attempt WITH cookies
-    return await tryOnce(base, /*forceNoCookies*/ false); // was true
-  } catch (e) {
-    // re-probe and swap base
-    const newBase = await pickAliveBaseStrict();
-    if (!newBase) throw e;                // nothing alive yet
-    base = newBase;
-    try { localStorage.setItem("backend_base", base); } catch {}
-    try {
-      return await tryOnce(base, /*forceNoCookies*/ false);
-    } catch (e2) {
-      if (/HTTP 403/.test(String(e2))) throw new Error("HTTP 403 (after failover)");
-      throw e2;
+    const st = await queryBackendStatus(forceReprobe);
+    const ok = !!st.ok;
+
+    BACKEND_AVAILABLE = ok;
+    if (st.base) {
+      setBackendBase(st.base);
     }
+
+    log(
+      "[popup] ensureBackendHealthy/bg:",
+      ok ? "UP" : "DOWN",
+      "base:",
+      BACKEND_BASE
+    );
+    return ok;
+  } catch (e) {
+    BACKEND_AVAILABLE = false;
+    err("[popup] ensureBackendHealthy/bg error:", e);
+    return false;
   }
 }
 
@@ -230,7 +225,6 @@ function setLoading(visible, msg){
   const label   = document.getElementById("loadingMsg");
   if (overlay) overlay.style.display = visible ? "flex" : "none";
   if (label && msg) label.textContent = msg;
-  window.SFF_CONNECTING = !!visible; // ← this bit gates all backend work
 }
 
 function initTabs() {
@@ -1422,19 +1416,48 @@ async function getJobDescription(){
 
 /* ===================== RESUME STORAGE ===================== */
 async function loadAllResumesFromBackend(){
-  try{
+  // If we've already decided the backend is down, don't even try again
+  if (BACKEND_AVAILABLE === false) {
+    return [];
+  }
+
+  try {
     const r = await fetchWithFailover("/resumes");
     const data = await r.json();
-    return (data.items||[]).map(it => ({
-      id: it.id,
-      name: it.original_name,
+
+    BACKEND_AVAILABLE = true; // mark as healthy
+
+    return (data.items || []).map(it => ({
+      id:        it.id,
+      name:      it.original_name,
       createdAt: it.created_at
     }));
-  }catch(e){
-    // While connecting, stay quiet so the console doesn't spam
-    if (!window.SFF_CONNECTING) {
-      console.error("[popup] backend /resumes error:", e);
+  } catch (e) {
+    // If it's a network failure *or* a 403 from your backend, treat it as "unusable"
+    if (e.kind === "network" || e.status === 403) {
+      BACKEND_AVAILABLE = false;
+
+      const statusEl = document.getElementById("status");
+      if (statusEl) {
+        statusEl.textContent =
+          "Smart Form Filler API is offline or unavailable. " +
+          "Start the backend if you want resume matching.";
+      }
+
+      // Quietly fall back to "no resumes" (and no noisy console error)
+      console.warn("[popup] backend /resumes unavailable:", e.message || e);
+      return [];
     }
+
+    // Other unexpected HTTP errors: log once but still don't blow up the UI
+    console.error("[popup] backend /resumes error:", e);
+
+    const statusEl = document.getElementById("status");
+    if (statusEl) {
+      statusEl.textContent =
+        "❌ Error talking to Smart Form Filler API. See console for details.";
+    }
+
     return [];
   }
 }
@@ -1589,8 +1612,6 @@ function ensureInlineResumePicker(resumes){
 
 /* ===================== MATCHER: AUTO RUN ON OPEN (Week-6 multi-resume) ===================== */
 async function autoMatch(){
-  // while connecting, skip; we'll call autoMatch again after connect
-  if (window.SFF_CONNECTING) return;
   // Hook UI
   elsM.arc = document.getElementById("arc");
   elsM.scoreNum = document.getElementById("scoreNum");
@@ -1605,6 +1626,21 @@ async function autoMatch(){
   setArc(0);
   if (elsM.hint) elsM.hint.textContent = "detecting…";
   if (elsM.status) elsM.status.textContent = "";
+
+  // BACKEND HEALTH GATE: never hit /resumes if backend isn't healthy
+  if (BACKEND_AVAILABLE === false) {
+    hideMatch();
+    showNoResumesCard();
+    return;
+  }
+  if (BACKEND_AVAILABLE === null) {
+    const ok = await ensureBackendHealthy();
+    if (!ok) {
+      hideMatch();
+      showNoResumesCard();
+      return;
+    }
+  }
 
   // Ensure resumes + inline picker (always visible)
   const resumes = await loadAllResumesFromBackend();
@@ -1780,20 +1816,29 @@ async function saveLast(url,lastObj){ const {lastKey}=stateKeysFor(url); await c
 async function saveToggles(url,tog){ const {toggKey}=stateKeysFor(url); await chrome.storage.local.set({ [toggKey]: tog }); }
 
 // UI utilities
-const setStatus = (msg)=> (statusEl && (statusEl.textContent=msg));
+const setStatus = (msg) => {
+  const el = document.getElementById("status");
+  if (el) el.textContent = msg;
+};
+
 // --- flash status (auto-clear after a moment, then show an "after" message) ---
 let _statusTimer = null;
 function flashStatus(msg, ms = 2500, after = "") {
-  if (!statusEl) return;
-  statusEl.textContent = msg;
+  const el = document.getElementById("status");
+  if (!el) return;
+
+  el.textContent = msg;
+
   if (_statusTimer) clearTimeout(_statusTimer);
   _statusTimer = setTimeout(() => {
-    if (!statusEl) return;
+    const el2 = document.getElementById("status");
+    if (!el2) return;
     // Only replace if nobody changed the status in the meantime
-    if (statusEl.textContent === msg) statusEl.textContent = after;
+    if (el2.textContent === msg && after) {
+      el2.textContent = after;
+    }
   }, ms);
 }
-
 
 // --- make Try Again match Fill Form (with graceful fallback) ---
 function harmonizeTryAgainStyle() {
@@ -1959,11 +2004,18 @@ function renderDetected(container, arr){
 }
 
 async function preloadAndRestore(){
-  // while connecting, do nothing — we'll run again after the overlay hides
-  if (window.SFF_CONNECTING) return;
   const tab = await getActiveTab();
   if (!tab) { setStatus("❌ No active tab."); return; }
 
+  // BACKEND HEALTH GATE: don't even try /resumes if backend is down
+  if (BACKEND_AVAILABLE === false) {
+    return;
+  }
+  if (BACKEND_AVAILABLE === null) {
+    const ok = await ensureBackendHealthy();
+    if (!ok) return;
+  }
+  
   // Keep inline resume picker available
   const resumes = await loadAllResumesFromBackend();
   ensureInlineResumePicker(resumes);
@@ -2125,29 +2177,143 @@ async function runFill(){
   setStatus("ℹ️ Unexpected response (see console).");
 }
 
-/* ===================== INIT ===================== */
-document.addEventListener("DOMContentLoaded", async () => {
-  initTabs();
-  try { await preloadAndRestore(); } catch(e){ err(e); }
-  autoMatch(); // run matcher immediately
-});
-
-document.addEventListener("DOMContentLoaded", async () => {
-  setLoading(true, "Connecting to API…");
-  try {
-    await waitForBackendAlive({ timeoutMs: 0, pollMs: 1000 });
-  } catch (_) {
-    // timeoutMs:0 means "wait forever" – we normally won't land here
-  }
-  setLoading(false); // flips SFF_CONNECTING → false
-
-  // Now it’s safe to run the real work
-  try { await preloadAndRestore(); } catch(e){ err(e); }
-  try { await autoMatch(); } catch(e){ err(e); }
-});
-
+/* ===================== INIT (backend-aware) ===================== */
 document.addEventListener("DOMContentLoaded", () => {
-  harmonizeTryAgainStyle();
+  const matchCard      = document.getElementById("matchCard");
+  const suggestorCard  = document.getElementById("resumeSuggestorCard");
+  const statusEl       = document.getElementById("status");
+  const retryBtn       = document.getElementById("retryConnectionBtn");
+
+  async function runInitialLoad() {
+    // Always start with the full-screen loading overlay
+    setLoading(true, "Connecting to API…");
+
+    const ok = await ensureBackendHealthy();
+
+    if (!ok) {
+      log("[popup] backend appears offline on open");
+
+      // Keep the overlay visible, but change the copy
+      const label = document.getElementById("loadingMsg");
+      if (label) {
+        label.textContent =
+          "❌ Could not reach API." +
+          " Start the backend, then click “Retry connection”.";
+      }
+
+      // Show the retry button on the overlay
+      if (retryBtn) {
+        retryBtn.style.display = "";
+        retryBtn.disabled = false;
+      }
+
+      // Optionally also update the inline status (behind the overlay)
+      if (statusEl) {
+        statusEl.textContent =
+          "❌ Could not reach Smart Form Filler API on " + BACKEND_BASE + ".";
+      }
+
+      // Do NOT hide loadingView here and do NOT load resumes or show main UI.
+      // The popup stays in "offline" overlay mode until the backend is healthy.
+      return;
+    }
+
+    // Backend is healthy → hide overlay and show normal UI
+    setLoading(false);
+
+    if (retryBtn) {
+      retryBtn.style.display = "none";
+      retryBtn.disabled = false;
+    }
+    if (statusEl) {
+      statusEl.textContent = "✅ Connected to Smart Form Filler API.";
+    }
+    if (matchCard)     matchCard.style.display = "";
+    if (suggestorCard) suggestorCard.style.display = "";
+    hideNoResumesCard();
+
+    try {
+      await preloadAndRestore();
+      await autoMatch();
+    } catch (e) {
+      err("[popup] error on preload/autoMatch:", e);
+      if (statusEl) {
+        statusEl.textContent =
+          "❌ Error while loading resumes or matching. See console for details.";
+      }
+    }
+  }
+
+  // Optional: “Retry connection” button
+  if (retryBtn) {
+    retryBtn.addEventListener("click", async () => {
+      if (retryBtn.disabled) return;
+  
+      retryBtn.disabled = true;
+  
+      const label = document.getElementById("loadingMsg");
+  
+      // Show "re-connecting..." in both the overlay and status line
+      if (label) {
+        label.textContent = "Re-connecting to Smart Form Filler API…";
+      }
+      if (statusEl) {
+        statusEl.textContent = "Re-connecting to Smart Form Filler API…";
+      }
+  
+      // Make sure the loading overlay is visible during the check
+      setLoading(true, "Re-connecting to API…");
+  
+      const ok = await ensureBackendHealthy(true); // force background to re-probe
+  
+      if (!ok) {
+        // Still offline — keep overlay visible, just change the message
+        retryBtn.disabled = false;
+  
+        if (label) {
+          label.textContent =
+            "❌ Still cannot reach Smart Form Filler API on " +
+            BACKEND_BASE +
+            ". Make sure it’s running, then click Retry connection again.";
+        }
+        if (statusEl) {
+          statusEl.textContent =
+            "❌ Still cannot reach Smart Form Filler API on " +
+            BACKEND_BASE +
+            ". Make sure it’s running, then try again.";
+        }
+  
+        // IMPORTANT: do NOT call setLoading(false) here → overlay stays
+        return;
+      }
+  
+      // Now online — hide overlay and restore the normal UI
+      setLoading(false);
+  
+      if (statusEl) {
+        statusEl.textContent = "✅ Connected to Smart Form Filler API.";
+      }
+      if (matchCard)     matchCard.style.display = "";
+      if (suggestorCard) suggestorCard.style.display = "";
+      hideNoResumesCard();
+  
+      retryBtn.style.display = "none";
+      retryBtn.disabled = false;
+  
+      try {
+        await preloadAndRestore();
+        await autoMatch();
+      } catch (e) {
+        err("[popup] error after reconnect:", e);
+        if (statusEl) {
+          statusEl.textContent =
+            "❌ Error while loading resumes or matching after reconnect. See console for details.";
+        }
+      }
+    });
+  }
+  // Kick things off once DOM is ready
+  runInitialLoad();
 });
 
 // Buttons
@@ -2725,13 +2891,6 @@ function renderFillReport(report) {
   sum.textContent = `${filledCount} filled, ${skippedCount} skipped`;
   pre.textContent = rows.map(x => x.line).join("\n");
 }
-
-// popup.js — add at bottom (after function definitions)
-document.addEventListener("DOMContentLoaded", () => {
-  try { initTabs(); } catch {}
-  try { /* seeds lists + buttons */ preloadAndRestore(); } catch {}
-  try { /* runs JD detection + scoring + suggestor */ autoMatch(); } catch (e) { console.error(e); }
-});
 
 // Wire the new button
 document.addEventListener("DOMContentLoaded", () => {

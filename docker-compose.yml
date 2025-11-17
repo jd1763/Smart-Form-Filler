@@ -9,8 +9,12 @@ services:
       - PORT=8000
       - SKILL_TERMS_FILE=/app/backend/data/skill_terms.txt
       - USE_S3=true
-      - AWS_REGION=us-east-1
+      - USE_S3_TEXT=true              # text in S3 on now
+      - USE_S3_PROFILE=true           # store profile.json in S3
+      - KEEP_LOCAL_TEXT_CACHE=false   # keep a local .txt cache for dev
+      - AWS_REGION=us-east-2
       - S3_BUCKET=smart-form-filler-resumes-jd1763
+      - PROFILE_OBJECT_KEY=profiles/default.json   # where profile.json lives in S3
       # For local dev only — prefer AWS IAM roles in cloud
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
@@ -38,8 +42,12 @@ services:
       - PORT=8000
       - SKILL_TERMS_FILE=/app/backend/data/skill_terms.txt
       - USE_S3=true
-      - AWS_REGION=us-east-1
+      - USE_S3_TEXT=true              # text in S3 on now
+      - USE_S3_PROFILE=true           # store profile.json in S3
+      - KEEP_LOCAL_TEXT_CACHE=false   # keep a local .txt cache for dev
+      - AWS_REGION=us-east-2
       - S3_BUCKET=smart-form-filler-resumes-jd1763
+      - PROFILE_OBJECT_KEY=profiles/default.json   # where profile.json lives in S3
       # For local dev only — prefer AWS IAM roles in cloud
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}

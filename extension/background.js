@@ -1,4 +1,3 @@
-
 // --- DEBUG / SELF-TEST SWITCHES ---
 const TEST_MODE  = true;   // enables bg.selftest route
 const FAKE_MODEL = false;  // deterministic predictions instead of calling Flask
@@ -7,13 +6,36 @@ const FAKE_MODEL = false;  // deterministic predictions instead of calling Flask
 // Prefer Docker (8000) when available, else local (5000).
 let API_BASE_CACHE = null;
 
-async function probe(base, timeoutMs = 900) {
+// Simple shared status cache so popup/content can see what background probed
+let BACKEND_STATUS = {
+  ok: null,        // true / false / null (unknown)
+  base: null,      // last known base
+  lastChecked: 0,  // Date.now()
+};
+
+// Ports the backend might listen on in local dev.
+// api.py chooses a free one from this pool on startup.
+const LOCAL_PORTS = [5000, 5001, 5002, 5003, 5004];
+
+// Fixed host port used by Docker backend.
+const DOCKER_PORT = 8000;
+
+
+// Probe a base URL by hitting /health. Only 2xx counts as "alive".
+async function probe(base, timeoutMs = 800) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const r = await fetch(`${base}/health?t=${Date.now()}`, { signal: ctl.signal, mode: "no-cors" });
-    return !!r;
-  } catch {
+    console.log("[bg] probe /health ->", base);
+    const r = await fetch(`${base}/health?t=${Date.now()}`, {
+      signal: ctl.signal,
+      cache: "no-store",
+      credentials: "omit",
+    });
+    console.log("[bg] probe result:", base, "ok:", r.ok, "status:", r.status);
+    return !!r && r.ok;
+  } catch (e) {
+    console.warn("[bg] probe failed:", base, e && e.message);
     return false;
   } finally {
     clearTimeout(t);
@@ -22,22 +44,49 @@ async function probe(base, timeoutMs = 900) {
 
 async function resolveAPIBase(force = false) {
   if (!force && API_BASE_CACHE) return API_BASE_CACHE;
-  const candidates = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
-  for (const base of candidates) {
+
+  // 1) Prefer any local dev server in our known pool.
+  for (const port of LOCAL_PORTS) {
+    const base = `http://127.0.0.1:${port}`;
     if (await probe(base)) {
       API_BASE_CACHE = base;
       try { await chrome.storage.local.set({ backend_base: base }); } catch {}
       return base;
     }
   }
-  // default to local if nothing probed (lets requests try anyway)
-  API_BASE_CACHE = "http://127.0.0.1:5000";
-  return API_BASE_CACHE;
+
+  // 2) Fallback to Docker container (fixed host port)
+  const dockerBase = `http://127.0.0.1:${DOCKER_PORT}`;
+  if (await probe(dockerBase)) {
+    API_BASE_CACHE = dockerBase;
+    try { await chrome.storage.local.set({ backend_base: dockerBase }); } catch {}
+    return dockerBase;
+  }
+
+  // 3) Nothing listening: clear cache + stored base.
+  API_BASE_CACHE = null;
+  try { await chrome.storage.local.remove("backend_base"); } catch {}
+  return null;
 }
 
-async function reprobeAndSwap() {
-  API_BASE_CACHE = null;
-  return resolveAPIBase(true);
+async function getBackendStatus(force = false) {
+  const now = Date.now();
+
+  if (!force && BACKEND_STATUS.ok !== null && (now - BACKEND_STATUS.lastChecked) < 5000) {
+    return BACKEND_STATUS;
+  }
+
+  const base = await resolveAPIBase(force); // already probed
+  const alive = !!base;
+
+  BACKEND_STATUS = {
+    ok: alive,
+    base,
+    lastChecked: now,
+  };
+
+  console.log("[bg] getBackendStatus:", BACKEND_STATUS);
+  return BACKEND_STATUS;
 }
 
 // --- Heuristics for fake predictions (dev only) ---
@@ -265,6 +314,21 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ score });
       } catch (e) {
         sendResponse({ error: String(e) });
+      }
+      return;
+    }
+
+    if (msg?.action === "getBackendStatus") {
+      try {
+        const st = await getBackendStatus(!!msg.forceReprobe);
+        sendResponse({
+          success: true,
+          ok: !!st.ok,
+          base: st.base,
+          lastChecked: st.lastChecked,
+        });
+      } catch (e) {
+        sendResponse({ success: false, error: String(e) });
       }
       return;
     }

@@ -10,5 +10,5 @@ SQLAlchemy
 pdfminer.six
 python-docx
 boto3>=1.35.0
+botocore
 python-dotenv>=1.0.0
-- torch==2.5.1+cpu ; platform_system=="Linux" and platform_machine=="x86_64"

@@ -53,15 +53,33 @@
       border:3px solid #e5e7eb; border-top-color:#111827;
       animation: sffSpin 1s linear infinite;
     }
+
     @keyframes sffSpin { to { transform: rotate(360deg); } }
-    #loadingMsg{ color:#6b7280; font-size:12px; }
+
+    #loadingMsg{
+      color:#374151;
+      font-size:13px;
+      text-align:center;
+      max-width:280px;
+      line-height:1.4;
+      padding:0 16px;
+    }
+
+    #loadingView .muted {
+      text-align:center;
+    }
+
   </style>
 </head>
 <body>
   <div id="loadingView" aria-live="polite">
     <div class="loader" aria-hidden="true"></div>
     <div id="loadingMsg" class="muted">Connecting to API…</div>
-    <div class="muted mono" style="font-size:11px;">Listening on 127.0.0.1:8000 or :5000</div>
+    <button id="retryConnectionBtn"
+      class="btn btn-ghost"
+      style="display:none; margin-top:4px;">
+      Retry connection
+    </button>
   </div>
   
   <h1>Smart Form Filler</h1>

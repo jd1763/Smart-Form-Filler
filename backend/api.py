@@ -11,25 +11,29 @@ The extension sends a label -> this API sends back prediction + confidence.
 
 import datetime as dt
 import glob
+import io  # for streaming S3 bytes back to the browser
 import json
 import mimetypes
 import os
+import random
 import re
+import socket
 import sys  # helps build file paths
 import uuid
-from pathlib import Path
-
 import joblib  # used to load my saved ML model
 from docx import Document
+from pathlib import Path
+from dotenv import load_dotenv
 
 # Flask basics for building APIs
-from flask import Flask, abort, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS  # lets my Chrome extension call this API without CORS errors
 
 # --------- Text extractors ----------
 from pdfminer.high_level import extract_text as pdf_extract_text
 from sqlalchemy import Column, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from werkzeug.exceptions import HTTPException
 
 # === Import matchers ===
 # - BaselineMatcher: TF-IDF + cosine similarity
@@ -38,9 +42,11 @@ from ml.matcher_baseline import BaselineMatcher
 from ml.matcher_embeddings import MatcherEmbeddings
 
 from .matcher.resume_selector import select_best_resume
+from .storage.s3_storage import delete_object, get_bytes, put_bytes
 
 # Add the project root to Python path so we can import ml/ and backend/ modules
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+load_dotenv()  # load .env in local/dev
 
 
 def detect_mime(path: str) -> str:
@@ -83,9 +89,110 @@ DB_PATH = BASE_DIR / "db.sqlite3"
 PROFILE_PATH = UPLOADS_DIR / "profile.json"
 MAX_RESUMES = 5
 
+# --- S3 feature flags (local/dev still works if these are unset) ---
+USE_S3 = os.getenv("USE_S3", "false").lower() == "true"
+USE_S3_TEXT = os.getenv("USE_S3_TEXT", "false").lower() == "true"
+USE_S3_PROFILE = os.getenv("USE_S3_PROFILE", "false").lower() == "true"
+KEEP_LOCAL_TEXT_CACHE = os.getenv("KEEP_LOCAL_TEXT_CACHE", "false").lower() == "true"
+S3_BUCKET = os.getenv("S3_BUCKET")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+# Default user id if the caller doesn’t pass one (good for local/dev)
+DEFAULT_USER = os.getenv("DEFAULT_USER", "default")
+
+
+def _user_id_from_request() -> str:
+    """
+    Read the "userId" from querystring, form-data, or header (X-User-Id).
+    Falls back to DEFAULT_USER for dev.
+    """
+    return (
+        request.args.get("userId")
+        or request.form.get("userId")
+        or request.headers.get("X-User-Id")
+        or DEFAULT_USER
+    )
+
+
+def _is_s3_url(p) -> bool:
+    return isinstance(p, str) and p.startswith("s3://")
+
+
+def _split_s3_url(url: str) -> tuple[str, str]:
+    """Split 's3://bucket/key' -> (bucket, key)."""
+    tail = url[len("s3://"):]
+    bucket, _, key = tail.partition("/")
+    return bucket, key
+
+
+# --- Per-user S3 keys (keeps data separated by user) ---
+def _s3_key_pdf(user_id: str, rid: str, original_filename: str) -> str:
+    ext = os.path.splitext(original_filename)[1].lower()
+    if ext not in (".pdf", ".docx"):
+        ext = ".bin"
+    return f"users/{user_id}/resumes/{rid}{ext}"
+
+
+def _s3_key_text(user_id: str, rid: str) -> str:
+    return f"users/{user_id}/texts/{rid}.txt"
+
+
+def _s3_key_profile(user_id: str) -> str:
+    return f"users/{user_id}/profile.json"
+
+
+def _read_text_any(path_str: str) -> str:
+    """Return text whether stored locally or at s3://..."""
+    if _is_s3_url(path_str):
+        _, key = _split_s3_url(path_str)
+        return get_bytes(key).decode("utf-8", errors="replace")
+    with open(path_str, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read()
+
+
 # === Set up Flask app ===
 app = Flask(__name__)
 CORS(app)  # allow cross-origin requests (needed for Chrome extension -> API calls)
+
+# --- Global error handlers (always return JSON) ---
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e: HTTPException):
+    """
+    Convert all Werkzeug/Flask HTTPExceptions (abort(404), etc.)
+    into a consistent JSON shape so the popup can inspect error.code.
+    """
+    response = jsonify(
+        {
+            "error": e.description or str(e),
+            "code": e.code,
+            "type": e.name,
+        }
+    )
+    return response, e.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_exception(e: Exception):
+    """
+    Catch-all for any unhandled exception and return JSON 500.
+    This prevents HTML error pages from confusing the extension.
+    """
+    # Log full traceback to the server console for debugging
+    import traceback
+
+    traceback.print_exc()
+
+    response = jsonify(
+        {
+            "error": "Internal server error",
+            "code": 500,
+            "details": str(e),
+        }
+    )
+    return response, 500
+
 
 engine = create_engine(f"sqlite:///{DB_PATH}", future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -125,7 +232,7 @@ Base.metadata.create_all(engine)
 # I keep the skill terms in a plain .txt so I can update without touching code.
 def load_skill_terms() -> list[str]:
     # default location sits right next to the DB/data we already track
-    default_path = Path(__file__).resolve().parent / "data" / "skill_terms.txt"
+    default_path = Path(__file__).resolve().parent / "skill_terms.txt"
     terms_file = Path(os.getenv("SKILL_TERMS_FILE", str(default_path)))
 
     seen = set()
@@ -360,15 +467,17 @@ def skills_extract():
 def skills_by_resume():
     """
     POST { "resumeId": "<id>" } -> { "id": "<id>", "name": "<name>", "skills": [...] }
-    Tests monkeypatch api.get_resume_text_by_id / api.get_resume_name_by_id.
-    We call those if present; otherwise we gracefully fall back.
+    In production we load from DB/S3; tests can monkeypatch helpers.
     """
     data = request.get_json(silent=True) or {}
     rid = data.get("resumeId")
     if not rid:
         return jsonify({"error": "resumeId required"}), 400
 
-    # Use monkeypatched helpers if present (pytest sets them on this module).
+    text = ""
+    name = ""
+
+    # 1) Try monkeypatched helpers first (pytest may define these on this module).
     try:
         text = get_resume_text_by_id(rid)  # provided by tests via monkeypatch
     except NameError:
@@ -379,31 +488,77 @@ def skills_by_resume():
     except NameError:
         name = ""
 
+    # 2) Fallback to DB / S3 if text or name is still missing
+    if not text or not text.strip() or not name:
+        with SessionLocal() as s:
+            r = s.get(Resume, rid)
+            if not r:
+                return jsonify({"error": "Resume not found"}), 404
+
+            # Fill in missing name
+            if not name:
+                name = r.original_name or rid
+
+            # Fill in missing text
+            if not text or not text.strip():
+                text_path = r.text_path
+                # If no text_path yet, try to repair/generate locally
+                if not text_path or (not _is_s3_url(text_path) and not os.path.exists(text_path)):
+                    try:
+                        text_path = ensure_text_exists(s, r)
+                    except FileNotFoundError as e:
+                        return jsonify({"error": str(e)}), 404
+                    except Exception as e:
+                        return jsonify({"error": f"Failed to load resume text: {e}"}), 500
+
+                # Read from S3 or local
+                text = _read_text_any(text_path)
+
     skills = extract_skills_from_text(text or "")
     return jsonify({"id": rid, "name": name, "skills": skills}), 200
 
 
 @app.get("/profile")
 def get_profile():
+    user_id = _user_id_from_request()
+    if USE_S3_PROFILE and S3_BUCKET:
+        try:
+            key = _s3_key_profile(user_id)
+            data = get_bytes(key)
+            return jsonify(json.loads(data.decode("utf-8"))), 200
+        except Exception:
+            # If profile doesn’t exist yet in S3, return empty object
+            return jsonify({}), 200
+
+    # Local fallback (single shared file for dev)
     if not PROFILE_PATH.exists():
-        # empty profile by default
         return jsonify({})
-    try:
-        with open(PROFILE_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": f"Failed to read profile: {e}"}), 500
+    with open(PROFILE_PATH, "r", encoding="utf-8") as f:
+        return jsonify(json.load(f) or {})
 
 
 @app.post("/profile")
 @app.put("/profile")
-def save_profile():
+def put_profile():
     try:
-        data = request.get_json(force=True, silent=True) or {}
+        data = request.get_json(force=True, silent=False) or {}
     except Exception as e:
-        return jsonify({"error": f"Bad JSON: {e}"}), 400
+        return jsonify({"error": f"Invalid JSON: {e}"}), 400
 
+    user_id = _user_id_from_request()
+    if USE_S3_PROFILE and S3_BUCKET:
+        try:
+            key = _s3_key_profile(user_id)
+            put_bytes(
+                key,
+                json.dumps(data, ensure_ascii=False).encode("utf-8"),
+                content_type="application/json; charset=utf-8",
+            )
+            return jsonify({"ok": True, "updated_at": dt.datetime.utcnow().isoformat() + "Z"})
+        except Exception as e:
+            return jsonify({"error": f"Failed to write profile to S3: {e}"}), 500
+
+    # Local fallback
     try:
         PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(PROFILE_PATH, "w", encoding="utf-8") as f:
@@ -421,17 +576,38 @@ def patch_profile():
     except Exception as e:
         return jsonify({"error": f"Bad JSON: {e}"}), 400
 
-    # 2) read current profile.json (empty if missing)
-    try:
-        existing = {}
-        if PROFILE_PATH.exists():
-            with open(PROFILE_PATH, "r", encoding="utf-8") as f:
-                existing = json.load(f) or {}
-    except Exception as e:
-        return jsonify({"error": f"Failed to read profile: {e}"}), 500
+    user_id = _user_id_from_request()
+
+    # 2) read current profile
+    existing = {}
+    if USE_S3_PROFILE and S3_BUCKET:
+        try:
+            key = _s3_key_profile(user_id)
+            existing = json.loads(get_bytes(key).decode("utf-8")) or {}
+        except Exception:
+            existing = {}
+    else:
+        try:
+            if PROFILE_PATH.exists():
+                with open(PROFILE_PATH, "r", encoding="utf-8") as f:
+                    existing = json.load(f) or {}
+        except Exception as e:
+            return jsonify({"error": f"Failed to read profile: {e}"}), 500
 
     # 3) deep-merge + write
     merged = deep_merge(existing, patch)
+    if USE_S3_PROFILE and S3_BUCKET:
+        try:
+            key = _s3_key_profile(user_id)
+            put_bytes(
+                key,
+                json.dumps(merged, ensure_ascii=False).encode("utf-8"),
+                content_type="application/json; charset=utf-8",
+            )
+            return jsonify(merged)
+        except Exception as e:
+            return jsonify({"error": f"Failed to write profile to S3: {e}"}), 500
+
     try:
         PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(PROFILE_PATH, "w", encoding="utf-8") as f:
@@ -445,9 +621,24 @@ def patch_profile():
 # --------- List ----------
 @app.get("/resumes")
 def list_resumes():
-    with SessionLocal() as s:
-        items = [to_dict(r) for r in s.query(Resume).order_by(Resume.created_at.desc()).all()]
-    return jsonify({"items": items, "max": MAX_RESUMES})
+    """
+    Return all resumes in newest-first order.
+
+    Success:
+        200 { "items": [...], "max": <MAX_RESUMES> }
+
+    Failure:
+        500 { "error": "...", "code": 500 }
+    """
+    try:
+        with SessionLocal() as s:
+            items = [to_dict(r) for r in s.query(Resume).order_by(Resume.created_at.desc()).all()]
+        return jsonify({"items": items, "max": MAX_RESUMES}), 200
+    except Exception as e:
+        return (
+            jsonify({"error": f"Failed to list resumes: {e}", "code": 500}),
+            500,
+        )
 
 
 # --------- Upload ----------
@@ -498,21 +689,57 @@ def upload_resume():
         final_pdf_path = PDF_DIR / f"{rid}{orig_ext}"
         os.rename(tmp_path, final_pdf_path)
 
+        file_size = os.path.getsize(final_pdf_path)
+
         # extract text to .txt
         text_out = extract_text_any(str(final_pdf_path))
         text_path = TEXT_DIR / f"{rid}.txt"
         with open(text_path, "w", encoding="utf-8") as out:
             out.write(text_out)
 
-        # record
+        user_id = _user_id_from_request()
+
+        # ======== S3 UPLOADS ========
+        if USE_S3 and S3_BUCKET:
+
+            # Upload PDF
+            pdf_key = _s3_key_pdf(user_id, rid, f.filename)
+            put_bytes(pdf_key, open(final_pdf_path, "rb").read(), content_type=mime)
+
+            # Upload extracted text
+            if USE_S3_TEXT:
+                text_key = _s3_key_text(user_id, rid)
+                put_bytes(
+                    text_key, text_out.encode("utf-8"), content_type="text/plain; charset=utf-8"
+                )
+
+            # If KEEP_LOCAL_TEXT_CACHE=false ⇒ remove local files immediately
+            if not KEEP_LOCAL_TEXT_CACHE:
+                try:
+                    os.remove(final_pdf_path)
+                except Exception:
+                    pass
+                try:
+                    os.remove(text_path)
+                except Exception:
+                    pass
+
+            pdf_path_db = f"s3://{S3_BUCKET}/{pdf_key}"
+            text_path_db = f"s3://{S3_BUCKET}/{text_key}" if USE_S3_TEXT else ""
+        else:
+            # Local mode
+            pdf_path_db = str(final_pdf_path)
+            text_path_db = str(text_path)
+
+        # ======== DB RECORD ========
         with SessionLocal() as s:
             rec = Resume(
                 id=rid,
                 original_name=f.filename,
                 mime_type=mime,
-                pdf_path=str(final_pdf_path),
-                text_path=str(text_path),
-                size_bytes=os.path.getsize(final_pdf_path),
+                pdf_path=pdf_path_db,
+                text_path=text_path_db,
+                size_bytes=file_size,
             )
             s.add(rec)
             s.commit()
@@ -531,35 +758,107 @@ def upload_resume():
 # --------- View original file (PDF/DOCX) ----------
 @app.get("/resumes/<rid>/file")
 def get_file(rid):
+    """
+    Stream the original resume file (PDF/DOCX/etc.) back to the caller.
+
+    Success:
+        200 (binary file)
+
+    Errors:
+        404 JSON if resume/file not found
+        500 JSON if something unexpected goes wrong
+    """
     with SessionLocal() as s:
         r = s.get(Resume, rid)
         if not r:
-            abort(404)
-        # repair pdf_path if file was moved
+            return jsonify({"error": "Resume not found", "code": 404}), 404
+
         pdf_path = r.pdf_path
+
+        # ---------- S3 download path ----------
+        if _is_s3_url(pdf_path):
+            try:
+                bucket, key = _split_s3_url(pdf_path)
+                data = get_bytes(key)
+                return send_file(
+                    io.BytesIO(data),
+                    mimetype=r.mime_type,
+                    as_attachment=False,
+                    download_name=r.original_name,
+                )
+            except FileNotFoundError:
+                return jsonify({"error": "Resume file not found in S3", "code": 404}), 404
+            except Exception as e:
+                return jsonify({"error": f"Failed to read resume from S3: {e}", "code": 500}), 500
+
+        # ---------- Local file path ----------
+        # Try DB path first
         if not (pdf_path and os.path.exists(pdf_path)):
             cand = _find_pdf_for_id(r.id)
             if cand:
+                pdf_path = cand
                 r.pdf_path = cand
                 r.size_bytes = os.path.getsize(cand)
                 s.add(r)
                 s.commit()
-                pdf_path = cand
+
         if not (pdf_path and os.path.exists(pdf_path)):
-            abort(404)
-        return send_file(pdf_path, as_attachment=False, download_name=r.original_name)
+            return jsonify({"error": "Resume file not found", "code": 404}), 404
+
+        try:
+            return send_file(
+                pdf_path,
+                as_attachment=False,
+                download_name=r.original_name,
+            )
+        except Exception as e:
+            return jsonify({"error": f"Failed to send resume file: {e}", "code": 500}), 500
 
 
 # --------- Get extracted text ----------
 @app.get("/resumes/<rid>/text")
 def get_text(rid):
+    """
+    Return extracted text for resume <rid>.
+
+    Success:
+        200 { "id": "<id>", "text": "..." }
+
+    Errors:
+        404 JSON if resume or text not found
+        500 JSON if something unexpected fails
+    """
     with SessionLocal() as s:
         r = s.get(Resume, rid)
         if not r:
-            abort(404)
-        with open(r.text_path, "r", encoding="utf-8") as fh:
+            return jsonify({"error": "Resume not found", "code": 404}), 404
+
+    text_path = r.text_path
+
+    # ----- S3 remote text -----
+    if _is_s3_url(text_path):
+        try:
+            bucket, key = _split_s3_url(text_path)
+            data = get_bytes(key)
+            return jsonify({"id": r.id, "text": data.decode("utf-8")}), 200
+        except FileNotFoundError:
+            return jsonify({"error": "Resume text not found in S3", "code": 404}), 404
+        except Exception as e:
+            return jsonify({"error": f"Failed to read resume text from S3: {e}", "code": 500}), 500
+
+    # ----- Local fallback -----
+    if not text_path or not os.path.exists(text_path):
+        return jsonify({"error": "Resume text not found", "code": 404}), 404
+
+    try:
+        with open(text_path, "r", encoding="utf-8") as fh:
             content = fh.read()
-        return jsonify({"id": r.id, "text": content})
+    except FileNotFoundError:
+        return jsonify({"error": "Resume text not found", "code": 404}), 404
+    except Exception as e:
+        return jsonify({"error": f"Failed to read local text file: {e}", "code": 500}), 500
+
+    return jsonify({"id": r.id, "text": content}), 200
 
 
 # --------- Delete ----------
@@ -569,15 +868,29 @@ def delete_resume(rid):
         r = s.get(Resume, rid)
         if not r:
             return jsonify({"error": "Not found"}), 404
+
         try:
-            if os.path.exists(r.pdf_path):
+            # Delete PDF (S3 or local)
+            if _is_s3_url(r.pdf_path):
+                _, key = _split_s3_url(r.pdf_path)
+                delete_object(key)
+            elif r.pdf_path and os.path.exists(r.pdf_path):
                 os.remove(r.pdf_path)
-            if os.path.exists(r.text_path):
+
+            # Delete extracted text (S3 or local)
+            if _is_s3_url(r.text_path):
+                _, key = _split_s3_url(r.text_path)
+                delete_object(key)
+            elif r.text_path and os.path.exists(r.text_path):
                 os.remove(r.text_path)
         except Exception as e:
+            # Don’t delete DB row if file cleanup exploded
             return jsonify({"error": f"OS cleanup error: {e}"}), 500
+
+        # Only reached if file cleanup succeeded
         s.delete(r)
         s.commit()
+
     return jsonify({"ok": True})
 
 
@@ -639,9 +952,14 @@ def match():
             if not r:
                 return jsonify({"error": "Resume not found"}), 404
             try:
-                txt_path = ensure_text_exists(s, r)  # <- repair/migrate if needed
-                with open(txt_path, "r", encoding="utf-8") as fh:
-                    resume_text = fh.read()
+                # If we already have a text_path in DB, use that (S3 or local)
+                text_path = r.text_path
+                if not text_path or not _is_s3_url(text_path):
+                    # For old/local-only rows, repair/migrate if needed
+                    text_path = ensure_text_exists(s, r)
+
+                # Read text from either S3 or local
+                resume_text = _read_text_any(text_path)
             except FileNotFoundError as e:
                 return jsonify({"error": str(e)}), 404
             except Exception as e:
@@ -781,8 +1099,42 @@ def predict_batch():
     return jsonify(results)
 
 
+def choose_dev_port():
+    """
+    Pick a port for local dev that plays nicely with the Chrome extension.
+
+    The background script will scan this same pool:
+        [5000, 5001, 5002, 5003, 5004]
+
+    Can override with SFF_PORT if ever want it fixed again.
+    """
+    # 1) Allow an explicit override.
+    env_port = os.getenv("SFF_PORT")
+    if env_port:
+        try:
+            return int(env_port)
+        except ValueError:
+            print(f"[warn] Ignoring invalid SFF_PORT={env_port!r}", file=sys.stderr)
+
+    # 2) Choose a free one from the pool.
+    candidates = [5000, 5001, 5002, 5003, 5004]
+    random.shuffle(candidates)
+    for port in candidates:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            # successfully reserved; OS frees it when we close
+            return port
+
+    # 3) Fallback.
+    return 5000
+
+
 # === Run the server ===
 if __name__ == "__main__":
-    # Starts the Flask server at http://127.0.0.1:5000/
-    # host=127.0.0.1 means it only runs locally (safe for dev)
-    app.run(host="127.0.0.1", port=5000)
+    port = choose_dev_port()
+    print(f"*** Smart Form Filler backend listening on http://127.0.0.1:{port} ***")
+    app.run(host="127.0.0.1", port=port)

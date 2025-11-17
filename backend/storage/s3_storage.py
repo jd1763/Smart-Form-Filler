@@ -9,6 +9,7 @@ Why a separate module?
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Optional
 
@@ -21,6 +22,9 @@ S3_BUCKET = os.getenv("S3_BUCKET")  # required when USE_S3=true
 # Configure retries; S3 is "eventually consistent" and network-bound
 _BOTO_CFG = Config(retries={"max_attempts": 10, "mode": "standard"})
 _s3 = boto3.client("s3", region_name=AWS_REGION, config=_BOTO_CFG)
+
+_S3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
+_BUCKET = os.getenv("S3_BUCKET")
 
 
 def make_resume_key(resume_id: str, original_filename: str) -> str:
@@ -86,3 +90,22 @@ def presign_get(key: str, expires_seconds: int = 300) -> str:
         Params={"Bucket": S3_BUCKET, "Key": key},
         ExpiresIn=expires_seconds,
     )
+
+
+def make_profile_key(object_key=None):
+    """Return the S3 key for the profile.json object."""
+    return object_key or os.getenv("PROFILE_OBJECT_KEY", "profiles/default.json")
+
+
+# --- JSON convenience ---
+def put_json(key: str, obj: dict):
+    data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+    put_bytes(key, data, "application/json; charset=utf-8")
+
+
+def get_json(key: str) -> dict:
+    try:
+        raw = get_bytes(key)
+        return json.loads(raw.decode("utf-8"))
+    except _S3.exceptions.NoSuchKey:
+        return {}

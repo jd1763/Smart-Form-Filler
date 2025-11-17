@@ -5,27 +5,29 @@ Run from repo root:  python scripts/migrate_local_resumes_to_s3.py
 
 from __future__ import annotations
 
+import mimetypes
 import os
-
-# Allow importing backend modules
 import sys
 from pathlib import Path
 
-import mimetypes
-
-from storage.s3_storage import make_resume_key, put_bytes
-
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from storage.s3_storage import make_resume_key, put_bytes  # keep this import
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / "backend"))
+# Make backend/ importable so we can do `from storage.s3_storage ...`
+BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
+sys.path.append(str(BACKEND_DIR))
 
 # Reuse settings from backend/api.py file layout
-BASE_DIR = Path(__file__).resolve().parents[1] / "backend"
+BASE_DIR = BACKEND_DIR
 DB_PATH = BASE_DIR / "db.sqlite3"
 PDF_DIR = BASE_DIR / "data" / "resumes"
 
 
 def run():
+    # Load .env so S3_BUCKET is available
+    load_dotenv()
+
     engine = create_engine(f"sqlite:///{DB_PATH}", future=True)
     # Basic existence checks
     if not PDF_DIR.exists():

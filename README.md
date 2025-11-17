@@ -206,11 +206,16 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
 > - **Prod-like process model**: Gunicorn workers (`gthread`) behind `0.0.0.0:8000` mirrors a realistic deployment.
 > - **Make targets (optional)**: `make up`, `make dev`, `make logs`, `make down`, `make rebuild`, `make sh`.
 >
-> **Automatic failover in the Chrome extension**
-> - **Candidate order**: `127.0.0.1:8000` → `localhost:8000` → `127.0.0.1:5000` → `localhost:5000`.
-> - **Sticky base**: first alive base is persisted and reused; if it dies, the extension re-probes and switches automatically.
-> - **Robust liveness probe**: tolerant of **403** (auth) and **CORS**; falls back to `no-cors` so it still detects a listening server even without permissive headers.
-> - **No console spam**: while connecting, backend calls are gated to avoid repeated `/resumes` errors; logs remain clean.
+> **Automatic backend resolution in the Chrome extension**
+> - **Background as single source of truth**: `background.js` owns backend discovery via `getBackendStatus`, and all popup/content code ask it for `{ ok, base }` instead of probing directly.
+> - **Local + Docker aware**: the resolver prefers a locally running Flask backend in dev and falls back to the Dockerized backend on `http://127.0.0.1:8000` when only the container is up.
+> - **Sticky base**: the first healthy base is cached (via `chrome.storage.local`) and reused until a request fails, at which point the background re-probes and swaps over.
+> - **Clean liveness probe**: health checks hit `/health` and only treat 2xx as “alive”, avoiding noisy 403/CORS failures and keeping the popup logic simple.
+>
+> **Cloud storage for resumes (AWS S3)**
+> - **PDF + text in S3**: whenever you upload a resume, the backend stores the original PDF, its extracted plain-text, and the generated `profile.json` in an S3 bucket (see `S3_BUCKET` in `docker-compose.yml`).
+> - **Toggleable via env vars**: `USE_S3`, `USE_S3_TEXT`, and `USE_S3_PROFILE` control which artifacts are pushed to S3; `KEEP_LOCAL_TEXT_CACHE` lets you keep a local `.txt` copy for debugging.
+> - **Still works locally**: with the S3 flags disabled, the backend behaves like before and keeps everything on the local filesystem, so the project remains easy to run without AWS.
 >
 > **Graceful loading overlay in the popup**
 > - **Full-screen “Connecting to API…” overlay** appears if no backend is reachable yet and **keeps listening** (polling every ~1s).
@@ -237,14 +242,20 @@ make up (build+run), make dev (hot-reload), make logs, make down, make rebuild.
 
 ## Backend Failover (Extension)
 
-The popup tries these bases in order and “sticks” to the first alive one:
-1. `http://127.0.0.1:8000`
-2. `http://localhost:8000`
-3. `http://127.0.0.1:5000`
-4. `http://localhost:5000`
+The popup never guesses ports on its own — it always asks `background.js` for backend status:
 
-If none are alive, the popup shows a **“Connecting to API…”** loading overlay and
-keeps listening until one becomes available. Liveness checks tolerate 403/CORS.
+1. The background resolver looks for a local Flask backend first, and if that isn’t reachable it falls back to the Docker backend on `http://127.0.0.1:8000`.
+2. It returns `{ ok: true/false, base }` to the popup and caches the result in `chrome.storage.local`.
+
+When `ok === false`:
+
+- The popup shows a full-screen **“Connecting to API…” / offline** overlay with a **Retry connection** button.
+- It does **not** spam `/resumes`; it waits for you to click **Retry**, which tells background to re-run the health check.
+
+When `ok === true`:
+
+- The overlay hides, the normal cards (Job Match, Resume Suggestor, Apply Helper) load, and all API calls use the resolved `base` URL.
+
 
 ## Setup (locally)
 

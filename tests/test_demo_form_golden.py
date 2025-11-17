@@ -10,7 +10,10 @@ from tests.golden_form_mapping import GOLDEN_EXPECTED_KEYS, GOLDEN_LABELS
 from tests.value_resolver import flatten_profile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PROFILE_JSON = os.environ.get("PROFILE_JSON") or str((ROOT / "backend" / "data" / "profile.json"))
+PROFILE_JSON = (
+    os.environ.get("PROFILE_JSON")
+    or str((ROOT / "backend" / "_archive" / "data" / "profile.json"))
+)
 
 MODEL_FILES = [
     str(ROOT / "models" / "form_model.pkl"),

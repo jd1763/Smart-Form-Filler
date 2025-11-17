@@ -11,6 +11,7 @@
 #   make sh        -> shell into the container
 #   make down      -> stop everything
 
+
 # 1) Create a virtual environment with Python 3.12 (on the terminal)
 #    • Apple Silicon macOS (Homebrew):
 #      /opt/homebrew/bin/python3.12 -m venv .venv
@@ -30,7 +31,7 @@ pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 
 # 5) Start the backend API (on the terminal and keep terminal open)
-#    Local dev default: http://127.0.0.1:5000
+#    Local dev defaults: http://127.0.0.1:5000 - http://127.0.0.1:5004
 python -m backend.api
 
 # 6) Load the Chrome extension from ./extension in Developer Mode
@@ -39,14 +40,14 @@ python -m backend.api
 - Then click "Load unpacked"
 - Go to the folder smart-form-filler/extension and click select
 - The extension is now added, you are good to go! Just keep the api running
-- While the API is starting:
-- The popup shows a "Connecting to API..." screen and keeps listening until a backend is alive.
-- Failover order: 127.0.0.1:8000 -> localhost:8000 -> 127.0.0.1:5000 -> localhost:5000.
 - Open the popup on a job posting and click "Fill Form"
 
 # Subsequent runs (local):
 source .venv/bin/activate
 python -m backend.api
+
+
+
 
 # ----------------------------
 # Run with Docker (one command)
