@@ -27,6 +27,14 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
+# 3.5) (Optional) Create your env file for S3 / AWS
+#   cp .env.example .env
+#   Then open .env and tweak:
+#     - USE_S3, USE_S3_TEXT, USE_S3_PROFILE, KEEP_LOCAL_TEXT_CACHE
+#     - AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+#   For a local-only run with no AWS, you can leave USE_S3* as "false" and
+#   skip AWS keys entirely.
+
 # 4) (Optional) Verify spaCy model is present if the wheel failed for any reason (on the terminal)
 python -m spacy download en_core_web_sm
 
@@ -72,7 +80,7 @@ curl http://localhost:8000/health
 docker compose down
 
 # Edit skills whitelist (no code changes needed):
-#   - Edit backend/data/skill_terms.txt
+#   - Edit backend/skill_terms.txt
 #   - Restart the container (choose ONE):
 #       docker compose up --build backend        # prod-like
 #       # or:
