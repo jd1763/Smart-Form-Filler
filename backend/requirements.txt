@@ -1,7 +1,14 @@
 --only-binary=:all:
 --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Web frameworks
 flask
 flask-cors
+fastapi
+uvicorn[standard]
+python-multipart  # needed for FastAPI UploadFile/form parsing
+httpx>=0.27.0     # needed for fastapi.testclient / starlette.testclient
+
 joblib
 scikit-learn==1.6.1
 nltk

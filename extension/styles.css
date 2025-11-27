@@ -336,3 +336,58 @@ select:focus {
 }
 .debug-badge.good { color: #86efac; }
 .debug-badge.na   { color: #fca5a5; }
+
+/* Backend V1 / V2 pill toggle */
+
+.backend-pill-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;           /* light grey */
+  font-size: 10px;
+  margin-left: auto;              /* pushes it to the right inside a flex row */
+}
+
+.backend-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+  color: #4b5563;                 /* gray text */
+  background: transparent;        /* unselected: light/transparent */
+}
+
+.backend-pill.active {
+  background: #111827;            /* black-ish pill when active */
+  color: #ffffff;                 /* white text when active */
+}
+
+.score {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-top:6px;
+  justify-content: space-between; /* keep gauge at left, pills at right */
+}
+
+.backend-toggle-group {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-top:4px;
+}
+
+.backend-icon {
+  width:16px;
+  height:16px;
+}
+
+.toggle-message {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #e67e22; /* orange warning color */
+  text-align: center;
+}

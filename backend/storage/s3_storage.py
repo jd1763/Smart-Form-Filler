@@ -26,6 +26,17 @@ _s3 = boto3.client("s3", region_name=AWS_REGION, config=_BOTO_CFG)
 _S3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
 _BUCKET = os.getenv("S3_BUCKET")
 
+def _bucket() -> str:
+    """
+    Return the current S3 bucket name from the environment.
+
+    We resolve this at call-time instead of import-time so .env
+    (load_dotenv) has already run when api.py imports this module.
+    """
+    bucket = os.getenv("S3_BUCKET")
+    if not bucket:
+        raise RuntimeError("S3_BUCKET environment variable is not set")
+    return bucket
 
 def make_resume_key(resume_id: str, original_filename: str) -> str:
     """
@@ -59,8 +70,9 @@ def put_bytes(key: str, data: bytes, content_type: Optional[str] = None) -> None
     extra = {}
     if content_type:
         extra["ContentType"] = content_type
+
     _s3.put_object(
-        Bucket=S3_BUCKET,
+        Bucket=_bucket(),
         Key=key,
         Body=data,
         ServerSideEncryption="AES256",
@@ -70,13 +82,13 @@ def put_bytes(key: str, data: bytes, content_type: Optional[str] = None) -> None
 
 def get_bytes(key: str) -> bytes:
     """Download raw bytes for a given key."""
-    obj = _s3.get_object(Bucket=S3_BUCKET, Key=key)
+    obj = _s3.get_object(Bucket=_bucket(), Key=key)
     return obj["Body"].read()
 
 
 def delete_object(key: str) -> None:
     """Delete a single object; no error if the object did not exist."""
-    _s3.delete_object(Bucket=S3_BUCKET, Key=key)
+    _s3.delete_object(Bucket=_bucket(), Key=key)
 
 
 def presign_get(key: str, expires_seconds: int = 300) -> str:
@@ -87,7 +99,7 @@ def presign_get(key: str, expires_seconds: int = 300) -> str:
     """
     return _s3.generate_presigned_url(
         "get_object",
-        Params={"Bucket": S3_BUCKET, "Key": key},
+        Params={"Bucket": _bucket(), "Key": key},
         ExpiresIn=expires_seconds,
     )
 
@@ -107,5 +119,5 @@ def get_json(key: str) -> dict:
     try:
         raw = get_bytes(key)
         return json.loads(raw.decode("utf-8"))
-    except _S3.exceptions.NoSuchKey:
+    except _s3.exceptions.NoSuchKey:
         return {}
