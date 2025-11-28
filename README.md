@@ -280,20 +280,6 @@ When `ok === true`:
     pip install -r requirements.txt
     pip install -r requirements-dev.txt   # optional dev tool
 
-5. (Optional) Configure environment variables:
-
-    ```bash
-    cp .env.example .env
-    ```
-
-    Then open `.env` and adjust as needed:
-
-    - `USE_S3`, `USE_S3_TEXT`, `USE_S3_PROFILE`, `KEEP_LOCAL_TEXT_CACHE`
-    - `AWS_REGION`, `S3_BUCKET`
-    - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (only if you want real S3)
-
-    For a simple local run without AWS, you can leave the `USE_S3*` flags as
-    `"false"` and skip providing AWS credentials.
 
 ## Usage
 Run the core API

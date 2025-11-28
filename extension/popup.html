@@ -119,6 +119,20 @@
           <div><strong id="scoreNum">—</strong></div>
           <div class="muted">Match score</div>
         </div>
+
+        <!-- Backend toggle, pushed to the right -->
+        <div class="backend-pill-toggle" id="backendTogglePills">
+          <div id="backendV1Pill" class="backend-pill">V1</div>
+          <div id="backendV2Pill" class="backend-pill">V2</div>
+        </div>
+
+        <!-- Message about which backend is up/down -->
+        <div id="backendVersionStatus" class="muted" style="margin:4px 0 8px;"></div>
+      </div>
+
+      <div class="backend-toggle-group" id="backendToggleGroup">
+        <img src="ai.png" alt="AI icon" class="backend-icon" />
+        <span class="muted"><strong>Use V2 (FastAPI) for the new AI features</strong></span>
       </div>
 
       <div style="margin-top:8px;" class="muted"><strong>Matched skills</strong></div>

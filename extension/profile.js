@@ -129,31 +129,43 @@ async function _listResumes(){
     console.warn("[profile] GET /resumes failed:", e); return [];
   }
 }
-// Replace the old _getResumeText with this robust, no-/resumes/:id version
+
 async function _getResumeText(id){
   const safePick = (obj) => (obj?.plain_text || obj?.text || obj?.content || "");
+
   const tryJson = async (path, pickFn) => {
     try {
       const r = await fetchWithFailoverP(path);
       if (!r.ok) return "";
       const js = await r.json();
       return pickFn(js) || "";
-    } catch { return ""; }
-  };  
+    } catch {
+      return "";
+    }
+  };
 
-  // 1) Try a common single-item endpoint shape
-  let text = await tryJson(`/resume?id=${encodeURIComponent(id)}`, safePick);
+  // 1) Smart Form Filler canonical endpoint: /resumes/<id>/text (matches api.py)
+  let text = await tryJson(
+    `/resumes/${encodeURIComponent(id)}/text`,
+    (js) => js?.text || js?.plain_text || js?.content || ""
+  );
   if (text) return text;
 
-  // 2) Another common name
-  text = await tryJson(`/resume_text?id=${encodeURIComponent(id)}`, (js)=> js?.text || js?.plain_text || js?.content || "");
+  // 2) Legacy single-item endpoints (keep for future FastAPI or other backends)
+  text = await tryJson(`/resume?id=${encodeURIComponent(id)}`, safePick);
   if (text) return text;
 
-  // 3) Some backends expose POST /resume_text { id }
+  text = await tryJson(
+    `/resume_text?id=${encodeURIComponent(id)}`,
+    (js) => js?.text || js?.plain_text || js?.content || ""
+  );
+  if (text) return text;
+
+  // 3) Fallback: POST /resume_text { id }
   try {
     const r = await fetchWithFailoverP(`/resume_text`, {
       method: "POST",
-      headers: { "Content-Type":"application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id })
     });
     if (r.ok) {
@@ -161,13 +173,16 @@ async function _getResumeText(id){
       text = js?.text || js?.plain_text || js?.content || "";
       if (text) return text;
     }
-  } catch { /* ignore */ }
+  } catch {
+    // ignore
+  }
 
-  // 4) Fallback: GET /resumes (list) and find the matching item by id
-  const items = await tryJson(`/resumes`, (js) => Array.isArray(js?.items) ? js.items : []);
-
+  // 4) Last resort: /resumes list (in this backend it won't have text, but we keep it for compatibility)
+  const items = await tryJson(`/resumes`, (js) =>
+    Array.isArray(js?.items) ? js.items : []
+  );
   if (Array.isArray(items) && items.length) {
-    const it = items.find(x => String(x.id) === String(id));
+    const it = items.find((x) => String(x.id) === String(id));
     if (it) {
       text = it.plain_text || it.text || it.content || "";
       if (text) return text;
@@ -206,34 +221,23 @@ async function initProfileResumeDropdown(profileData = {}) {
     const id = sel.value;
     const name = sel.options[sel.selectedIndex]?.textContent || id || "";
     if (!id) {
-      window._pendingResume = { id:"", name:"", skills:[] };
+      window._pendingResume = { id: "", name: "", skills: [] };
       if (meta) meta.textContent = "";
       return;
     }
-  
-    // 1) get resume text (you already have this helper)
+
+    // 1) get resume text
     const text = await _getResumeText(id);
-  
-    // 2) ask backend to extract skills (NEW)
-    let skills = [];
-    try {
-      const r = await fetchWithFailoverP(`/skills/extract`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({ text })
-      });      
-      const j = await r.json();
-      skills = Array.isArray(j.skills) ? j.skills : [];
-    } catch (e) {
-      console.warn("[profile] skills extract failed:", e);
-    }
-  
+
+    // 2) compute skills LOCALLY (no backend call → no 403)
+    const skills = _extractAllSkillsFromText(text);
+
     // 3) stash pending (not saved until user clicks Save)
     window._pendingResume = { id, name, skills };
-  
+
     // 4) UI hint
     if (meta) meta.textContent = `${name} (pending — click Save)`;
-  });  
+  });
 }
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -804,57 +808,38 @@ $("addExp").addEventListener("click", ()=>{
       });
 
     
-      // ===== Selected Resume (compute skills via backend) =====
+      // ===== Selected Resume (compute skills locally) =====
       const sel    = document.getElementById("profileResumeSelect");
       const loaded = (window._loadedProfile || {});
       let   sr     = window._pendingResume; // if user changed during this session
-    
+
       // If no pending but a UI selection exists, use it
       if (!sr && sel && sel.value) {
         const name = sel.options[sel.selectedIndex]?.textContent || sel.value;
         sr = { id: sel.value, name, skills: [] }; // skills will be computed below
       }
-    
+
       // If still nothing, fall back to what profile had
       if (!sr && loaded?.selectedResumeId) {
         sr = {
           id: String(loaded.selectedResumeId),
           name: loaded.selectedResumeName || "",
-          skills: Array.isArray(loaded.selectedResumeSkills) ? loaded.selectedResumeSkills : []
+          skills: Array.isArray(loaded.selectedResumeSkills)
+            ? loaded.selectedResumeSkills
+            : []
         };
       }
-    
-      // Compute skills if we have an id (prefer ID-based; fallback to text extract)
-      if (sr && sr.id) {
-        try {
-          // 1) Try backend/data/text/<id>.txt via /skills/by_resume
-          const r1 = await fetchWithFailoverP(`/skills/by_resume`, {
-            method: "POST",
-            headers: { "Content-Type":"application/json" },
-            body: JSON.stringify({ resumeId: sr.id })
-          });          
-          if (r1.ok) {
-            const j1 = await r1.json();
-            const k1 = Array.isArray(j1.skills) ? j1.skills : [];
-            if (k1.length) sr.skills = k1;
-          }
 
-          // 2) Fallback: extract from raw text if still empty
-          if (!Array.isArray(sr.skills) || !sr.skills.length) {
+      // Compute skills if we have an id (purely local → no /skills/* calls)
+      if (sr && sr.id) {
+        if (!Array.isArray(sr.skills) || !sr.skills.length) {
+          try {
             const textRes = await _getResumeText(sr.id);
-            const r2 = await fetchWithFailoverP(`/skills/extract`, {
-              method: "POST",
-              headers: { "Content-Type":"application/json" },
-              body: JSON.stringify({ text: textRes || "" })
-            });            
-            if (r2.ok) {
-              const j2 = await r2.json();
-              sr.skills = Array.isArray(j2.skills) ? j2.skills : [];
-            }
+            sr.skills = _extractAllSkillsFromText(textRes);
+          } catch (e) {
+            console.warn("[profile] skills compute failed (local):", e);
+            sr.skills = Array.isArray(sr.skills) ? sr.skills : [];
           }
-        } catch (e) {
-          console.warn("[profile] skills compute failed:", e);
-          sr.skills = Array.isArray(sr.skills) ? sr.skills : [];
         }
       }
     

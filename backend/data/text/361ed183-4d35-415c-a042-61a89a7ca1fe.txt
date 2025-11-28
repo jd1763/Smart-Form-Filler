@@ -13,9 +13,9 @@ Rutgers University - New Brunswick
  TECHNICAL SKILLS 
 
 Languages: Java, Python, C, C++, SQL, R, JavaScript, XML, HTML, CSS, JSON 
-Frameworks: Flask (REST API), MySQL/JDBC, SQLite, Android SDK, Chrome Extensions (MV3), Tomcat  
-Tools & DevOps: Docker, AWS (Cloud Run, S3), Git/GitHub, GitHub Actions (CI), Linux, Android Studio, VS Code 
+Frameworks: React, Flask (REST API), MySQL/JDBC, SQLite, Android SDK, Chrome Extensions (MV3), Tomcat  
 Data & Machine Learning: scikit-learn (TF-IDF, Logistic Regression), Sentence-BERT, pandas, NumPy 
+Tools & DevOps: Docker, AWS (Cloud Run, S3), Git/GitHub, GitHub Actions (CI/CD), Linux, Android Studio, VS Code 
 
 PROJECTS 
 
@@ -23,42 +23,47 @@ PROJECTS
 
 (cid:0) 
 
-  Smart Form Filler | Python, JS, Flask, scikit-learn, SBERT, Chrome MV3, Docker, AWS         GitHub | Demo: <links>   
-•  Designed and built a Chrome MV3 extension that scans job apps, detects 60+ field types, applies confidence 
+  Smart Form Filler | Python, JS, Flask, scikit-learn, SBERT, Chrome MV3, Docker, AWS              GitHub | Demo: <links> 
 
-scoring, handles checkbox/radio logic re-scans after Add Education/Experience, and autofills to speed submissions. 
+•  Designed and built a Chrome MV3 extension that scans job applications, detects 60+ field types, applies 
+
+confidence scoring, handles checkbox/radio logic, and autofills forms to significantly reduce manual form filling. 
 
 •  Trained an NLP label classifier in Python (scikit-learn: TF-IDF + Logistic Regression) and a resume-to-job 
 
 description matcher (Sentence-BERT) to score fit and surface matched and missing skills.  
 
-•  Shipped Edit My Answers and Manage Resume so users can customize answers/files and upload/view/delete 
+•  Built multiple web-facing features including REST API integrations, client-side workflows, and full-stack logic 
 
-resumes; store resume PDFs in SQLite (db.sqlite) and persist users’ answers/preferences in JSON. 
+across Flask + JavaScript, similar to modern full-stack environments (React + Node/Python). 
 
-•  Dockerized the Flask backend and deployed it to AWS Cloud Run with S3 for resume storage, enabling scalable 
+•  Dockerized the Flask backend and deployed it to AWS Cloud Run, adding S3-backed resume storage and a simple 
 
-cloud integration and simplified setup with docker compose up. 
+docker-compose flow so contributors can run the API locally or in Docker with one command. 
 
-•  Connected the extension to a Flask REST API with content-script to background messaging, added 40+ pytest tests 
+•  Designed a lightweight ETL system to parse resumes, extract structured data, and store text/profile assets across 
 
-and GitHub Actions CI, and hardened for CSP/permissions stability. 
+AWS S3 and local storage for cross-environment support. 
 
   Online Railway Booking System | Java, SQL, JSP, HTML, CSS                                 
 
-             GitHub | Demo: <links> 
+                GitHub | Demo: <links> 
+
 •  Co-developed a full-featured railway booking system with real-time schedule and reservation management using 
 
 JSP, HTML, and CSS, enabling a dynamic and user-friendly web interface. 
 
-•  Structured the system with a three-tier architecture to isolate logic and simplify future maintenance. 
+•  Developed full-stack JSP/HTML/CSS pages with SQL-backed dynamic content, comparable to CMS and template-
+
+driven web environments used in agencies. 
+
 •  Used JDBC and MySQL to design and optimize secure, efficient queries that reduced redundant data operations, 
 
 accelerated page load times, and improved overall system responsiveness. 
 
 •  Deployed using Eclipse and Tomcat Server, optimizing backend performance and data retrieval. 
 
-  RU Pizzeria Android App | Java, Android SDK, JUnit                                                                GitHub | Demo: <links> 
+  Pizza Ordering App | Java, Android SDK, JUnit                                                                             GitHub | Demo: <links> 
 •  Developed an Android app for pizza ordering using Java and Android SDK, applying OOP principles such as 
 
 inheritance and polymorphism to reduce repetitive logic and improve long-term code flexibility. 
@@ -77,16 +82,14 @@ WORK EXPERIENCE
 
 (cid:0) 
 
-          Perth Amboy, NJ 
 Target Corporation 
+          Perth Amboy, NJ 
 Learning Ambassador                                                                                                                  February 2021 – June 2024 
 
 •  Delivered training programs for new hires, accelerating onboarding and improving team performance.  
 •  Used work systems to schedule shipments, track trailer arrivals, and manage inventory operations.  
 •  Maintained communication with leadership teams to support logistics and resolve operational issues.  
-•  Supported daily warehouse operations by assisting with inventory movement, equipment handling, and task 
-
-coordination to ensure smooth workflows. 
+•  Supported daily warehouse operations to maintain accuracy, efficiency, and smooth task execution. 
 
 Amazon Sortation Center (PNE5)                                                                                             
            Robbinsville, NJ 
@@ -97,6 +100,7 @@ Warehouse Associate                                                             
          
  
        
+ 
  
  
  

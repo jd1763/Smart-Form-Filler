@@ -25,6 +25,9 @@ from docx import Document
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Load .env early so S3/boto3 see AWS_* variables before we import s3_storage
+load_dotenv()
+
 # Flask basics for building APIs
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS  # lets my Chrome extension call this API without CORS errors
@@ -46,8 +49,6 @@ from .storage.s3_storage import delete_object, get_bytes, put_bytes
 
 # Add the project root to Python path so we can import ml/ and backend/ modules
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-load_dotenv()  # load .env in local/dev
-
 
 def detect_mime(path: str) -> str:
     mt, _ = mimetypes.guess_type(path)
@@ -95,11 +96,20 @@ USE_S3_TEXT = os.getenv("USE_S3_TEXT", "false").lower() == "true"
 USE_S3_PROFILE = os.getenv("USE_S3_PROFILE", "false").lower() == "true"
 KEEP_LOCAL_TEXT_CACHE = os.getenv("KEEP_LOCAL_TEXT_CACHE", "false").lower() == "true"
 S3_BUCKET = os.getenv("S3_BUCKET")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 
 # Default user id if the caller doesn’t pass one (good for local/dev)
 DEFAULT_USER = os.getenv("DEFAULT_USER", "default")
 
+print(
+    "[api] S3 config:",
+    "USE_S3=", USE_S3,
+    "USE_S3_TEXT=", USE_S3_TEXT,
+    "USE_S3_PROFILE=", USE_S3_PROFILE,
+    "KEEP_LOCAL_TEXT_CACHE=", KEEP_LOCAL_TEXT_CACHE,
+    "S3_BUCKET=", S3_BUCKET,
+    "AWS_REGION=", AWS_REGION,
+)
 
 def _user_id_from_request() -> str:
     """
@@ -699,35 +709,51 @@ def upload_resume():
 
         user_id = _user_id_from_request()
 
-        # ======== S3 UPLOADS ========
+        # These will be set in either S3 or local branch
+        pdf_path_db: str
+        text_path_db: str
+
         if USE_S3 and S3_BUCKET:
+            print(f"[upload_resume] S3 mode: bucket={S3_BUCKET}, user_id={user_id}, rid={rid}")
+            try:
+                # Upload PDF to S3
+                pdf_key = _s3_key_pdf(user_id, rid, f.filename)
+                with open(final_pdf_path, "rb") as fh:
+                    put_bytes(pdf_key, fh.read(), content_type=mime)
 
-            # Upload PDF
-            pdf_key = _s3_key_pdf(user_id, rid, f.filename)
-            put_bytes(pdf_key, open(final_pdf_path, "rb").read(), content_type=mime)
+                # Upload extracted text to S3
+                text_key = None
+                if USE_S3_TEXT:
+                    text_key = _s3_key_text(user_id, rid)
+                    put_bytes(
+                        text_key,
+                        text_out.encode("utf-8"),
+                        content_type="text/plain; charset=utf-8",
+                    )
 
-            # Upload extracted text
-            if USE_S3_TEXT:
-                text_key = _s3_key_text(user_id, rid)
-                put_bytes(
-                    text_key, text_out.encode("utf-8"), content_type="text/plain; charset=utf-8"
-                )
+                # Optionally delete local copies if we don't want a cache
+                if not KEEP_LOCAL_TEXT_CACHE:
+                    try:
+                        os.remove(final_pdf_path)
+                    except Exception:
+                        pass
+                    try:
+                        os.remove(text_path)
+                    except Exception:
+                        pass
 
-            # If KEEP_LOCAL_TEXT_CACHE=false ⇒ remove local files immediately
-            if not KEEP_LOCAL_TEXT_CACHE:
-                try:
-                    os.remove(final_pdf_path)
-                except Exception:
-                    pass
-                try:
-                    os.remove(text_path)
-                except Exception:
-                    pass
+                pdf_path_db = f"s3://{S3_BUCKET}/{pdf_key}"
+                text_path_db = f"s3://{S3_BUCKET}/{text_key}" if USE_S3_TEXT else ""
+            except Exception as e:
+                # IMPORTANT: don't 500 the whole request; log and fall back to local
+                print(f"[upload_resume] S3 upload failed, falling back to local: {e}")
+                import traceback
+                traceback.print_exc()
 
-            pdf_path_db = f"s3://{S3_BUCKET}/{pdf_key}"
-            text_path_db = f"s3://{S3_BUCKET}/{text_key}" if USE_S3_TEXT else ""
+                pdf_path_db = str(final_pdf_path)
+                text_path_db = str(text_path)
         else:
-            # Local mode
+            print(f"[upload_resume] LOCAL mode: USE_S3={USE_S3}, S3_BUCKET={S3_BUCKET!r}")
             pdf_path_db = str(final_pdf_path)
             text_path_db = str(text_path)
 

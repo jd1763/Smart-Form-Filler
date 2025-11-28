@@ -1,0 +1,28 @@
+Taylor Quinn 
+
+ Platform Engineer
+
+Email: taylor.quinn@example.com   |   Location: Remote (US)
+
+SUMMARY
+Platform engineer focused on event streaming and cloud primitives for internal developer
+platforms.
+
+SKILLS (Preferred targets only)
+Kafka · Spark · Airflow
+AWS · S3 · IAM · ECS · EKS
+React · TypeScript · GraphQL
+
+EXPERIENCE
+Platform Engineer   Cloud Systems Inc.
+- Operated multi-tenant Kafka clusters and Spark jobs for real-time ingestion.
+- Built Airflow DAGs and observability around data pipelines.
+- Delivered internal tools in React and TypeScript using GraphQL APIs.
+- Automated cloud access and RBAC using AWS IAM; deployed services on ECS/EKS with IaC.
+
+EDUCATION
+BS, Information Systems (in progress)
+
+Page 1
+
+
