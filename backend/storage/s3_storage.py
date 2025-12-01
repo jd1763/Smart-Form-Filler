@@ -26,6 +26,7 @@ _s3 = boto3.client("s3", region_name=AWS_REGION, config=_BOTO_CFG)
 _S3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
 _BUCKET = os.getenv("S3_BUCKET")
 
+
 def _bucket() -> str:
     """
     Return the current S3 bucket name from the environment.
@@ -37,6 +38,7 @@ def _bucket() -> str:
     if not bucket:
         raise RuntimeError("S3_BUCKET environment variable is not set")
     return bucket
+
 
 def make_resume_key(resume_id: str, original_filename: str) -> str:
     """

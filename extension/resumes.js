@@ -1,5 +1,24 @@
 // ---- Backend base (Docker preferred if /resumes works) ----
-const CANDIDATE_BASES = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
+const CANDIDATE_BASES = [
+  // Docker defaults
+  "http://127.0.0.1:8000", // Flask v1
+  "http://127.0.0.1:8001", // FastAPI v2
+
+  // Local dev pool — Flask v1
+  "http://127.0.0.1:5000",
+  "http://127.0.0.1:5001",
+  "http://127.0.0.1:5002",
+  "http://127.0.0.1:5003",
+  "http://127.0.0.1:5004",
+
+  // Local dev pool — FastAPI v2
+  "http://127.0.0.1:6000",
+  "http://127.0.0.1:6001",
+  "http://127.0.0.1:6002",
+  "http://127.0.0.1:6003",
+  "http://127.0.0.1:6004",
+];
+
 let BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
 
 (async function initBackendBase(){

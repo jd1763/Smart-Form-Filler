@@ -1,4 +1,7 @@
 services:
+  # ----------------------------
+  # V1 - Flask backend (prod)
+  # ----------------------------
   backend:
     build:
       context: .
@@ -7,24 +10,22 @@ services:
     environment:
       - APP_ENV=production
       - PORT=8000
-      - SKILL_TERMS_FILE=/app/backend/data/skill_terms.txt
+      - SKILL_TERMS_FILE=/app/backend/skill_terms.txt
       - USE_S3=true
-      - USE_S3_TEXT=true              # text in S3 on now
-      - USE_S3_PROFILE=true           # store profile.json in S3
-      - KEEP_LOCAL_TEXT_CACHE=false   # keep a local .txt cache for dev
+      - USE_S3_TEXT=true
+      - USE_S3_PROFILE=true
+      - KEEP_LOCAL_TEXT_CACHE=false
       - AWS_REGION=us-east-2
       - S3_BUCKET=smart-form-filler-resumes-jd1763
-      - PROFILE_OBJECT_KEY=profiles/default.json   # where profile.json lives in S3
-      # For local dev only — prefer AWS IAM roles in cloud
+      - PROFILE_OBJECT_KEY=profiles/default.json
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     ports:
       - "8000:8000"
-    # prod-like: no code bind; only data/db mounts
     volumes:
       - ./backend/data:/app/backend/data
       - ./backend/db.sqlite3:/app/backend/db.sqlite3
-      - ./models:/app/models:ro  
+      - ./models:/app/models:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
       interval: 10s
@@ -32,6 +33,46 @@ services:
       retries: 10
       start_period: 15s
 
+  # ----------------------------
+  # V2 - FastAPI backend (prod)
+  # ----------------------------
+  backend-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-form-filler-backend-v2
+    environment:
+      - APP_ENV=production
+      - PORT=8000            # not used by uvicorn command, but kept for consistency
+      - SKILL_TERMS_FILE=/app/backend/skill_terms.txt
+      - USE_S3=true
+      - USE_S3_TEXT=true
+      - USE_S3_PROFILE=true
+      - KEEP_LOCAL_TEXT_CACHE=false
+      - AWS_REGION=us-east-2
+      - S3_BUCKET=smart-form-filler-resumes-jd1763
+      - PROFILE_OBJECT_KEY=profiles/default.json
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    ports:
+      # host:container
+      # Background script will probe host:8001 as Docker v2
+      - "8001:8000"
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./backend/db.sqlite3:/app/backend/db.sqlite3
+      - ./models:/app/models:ro
+    command: bash -lc "uvicorn backend.fastapi_app:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  # ----------------------------
+  # V1 - Flask backend (dev, hot reload)
+  # ----------------------------
   backend-dev:
     build:
       context: .
@@ -40,26 +81,67 @@ services:
     environment:
       - APP_ENV=development
       - PORT=8000
-      - SKILL_TERMS_FILE=/app/backend/data/skill_terms.txt
+      - SKILL_TERMS_FILE=/app/backend/skill_terms.txt
       - USE_S3=true
-      - USE_S3_TEXT=true              # text in S3 on now
-      - USE_S3_PROFILE=true           # store profile.json in S3
-      - KEEP_LOCAL_TEXT_CACHE=false   # keep a local .txt cache for dev
+      - USE_S3_TEXT=true
+      - USE_S3_PROFILE=true
+      - KEEP_LOCAL_TEXT_CACHE=false
       - AWS_REGION=us-east-2
       - S3_BUCKET=smart-form-filler-resumes-jd1763
-      - PROFILE_OBJECT_KEY=profiles/default.json   # where profile.json lives in S3
-      # For local dev only — prefer AWS IAM roles in cloud
+      - PROFILE_OBJECT_KEY=profiles/default.json
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     ports:
       - "8000:8000"
-    # dev: bind code for instant edits
     volumes:
       - ./backend:/app/backend:delegated
-      - ./ml:/app/ml:delegated            
-      - ./matcher:/app/matcher:delegated 
+      - ./ml:/app/ml:delegated
+      - ./matcher:/app/matcher:delegated
       - ./backend/data:/app/backend/data
       - ./backend/db.sqlite3:/app/backend/db.sqlite3
-      - ./models:/app/models:ro  
-    # dev: hot reload but reachable from host
+      - ./models:/app/models:ro
     command: bash -lc "gunicorn --reload backend.api:app -b 0.0.0.0:8000 --workers=1 --threads=4 --timeout=120"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  # ----------------------------
+  # V2 - FastAPI backend (dev, hot reload)
+  # ----------------------------
+  backend-v2-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-form-filler-backend-v2-dev
+    environment:
+      - APP_ENV=development
+      - PORT=8000            # not used by uvicorn, but fine
+      - SKILL_TERMS_FILE=/app/backend/skill_terms.txt
+      - USE_S3=true
+      - USE_S3_TEXT=true
+      - USE_S3_PROFILE=true
+      - KEEP_LOCAL_TEXT_CACHE=false
+      - AWS_REGION=us-east-2
+      - S3_BUCKET=smart-form-filler-resumes-jd1763
+      - PROFILE_OBJECT_KEY=profiles/default.json
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend:/app/backend:delegated
+      - ./ml:/app/ml:delegated
+      - ./matcher:/app/matcher:delegated
+      - ./backend/data:/app/backend/data
+      - ./backend/db.sqlite3:/app/backend/db.sqlite3
+      - ./models:/app/models:ro
+    command: bash -lc "uvicorn backend.fastapi_app:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s

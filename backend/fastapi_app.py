@@ -14,7 +14,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import random
 import shutil
+import socket
+import sys
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -83,11 +86,7 @@ def _user_id_from_request(request: Request) -> str:
     - X-User-Id header
     - falls back to DEFAULT_USER (good enough for local/dev)
     """
-    return (
-        request.query_params.get("userId")
-        or request.headers.get("X-User-Id")
-        or DEFAULT_USER
-    )
+    return request.query_params.get("userId") or request.headers.get("X-User-Id") or DEFAULT_USER
 
 
 # === Health ===
@@ -97,11 +96,10 @@ def _user_id_from_request(request: Request) -> str:
 async def health() -> Dict[str, Any]:
     """
     Simple check to see if the FastAPI server is running.
-    If I visit http://127.0.0.1:8000/health
-    I should see: { "ok": true, "backend": "fastapi", "version": "v2" }.
+    For tests and the Chrome extension, I keep this identical in shape to the
+    Flask /health endpoint: just { "ok": true }.
     """
-    return {"ok": True, "backend": "fastapi", "version": "v2"}
-
+    return {"ok": True}
 
 
 # === Profile ===
@@ -165,9 +163,7 @@ async def put_profile(
             )
             return JSONResponse(content=data, status_code=200)
         except Exception as e:  # pragma: no cover
-            raise HTTPException(
-                status_code=500, detail=f"Failed to write profile to S3: {e}"
-            )
+            raise HTTPException(status_code=500, detail=f"Failed to write profile to S3: {e}")
 
     # Local profile.json
     try:
@@ -221,9 +217,7 @@ async def patch_profile(
             )
             return JSONResponse(content=merged, status_code=200)
         except Exception as e:  # pragma: no cover
-            raise HTTPException(
-                status_code=500, detail=f"Failed to write profile to S3: {e}"
-            )
+            raise HTTPException(status_code=500, detail=f"Failed to write profile to S3: {e}")
 
     try:
         PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -248,9 +242,7 @@ async def list_resumes() -> Dict[str, Any]:
     """
     try:
         with SessionLocal() as s:
-            items = [
-                to_dict(r) for r in s.query(Resume).order_by(Resume.created_at.desc()).all()
-            ]
+            items = [to_dict(r) for r in s.query(Resume).order_by(Resume.created_at.desc()).all()]
         return {"items": items, "max": MAX_RESUMES}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list resumes: {e}")
@@ -563,9 +555,7 @@ async def skills_by_resume(body: Dict[str, Any] = Body(default_factory=dict)) ->
 
             if not text or not text.strip():
                 text_path = r.text_path
-                if not text_path or (
-                    not _is_s3_url(text_path) and not os.path.exists(text_path)
-                ):
+                if not text_path or (not _is_s3_url(text_path) and not os.path.exists(text_path)):
                     try:
                         text_path = ensure_text_exists(s, r)
                     except FileNotFoundError as e:
@@ -674,9 +664,7 @@ async def match(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             print(f"[match] embedding matcher failed, falling back to tfidf: {e}")
 
     # TF-IDF baseline matcher (default path / embedding fallback).
-    similarity, missing_keywords = tfidf_matcher.get_similarity_and_missing(
-        resume_text, jd_text
-    )
+    similarity, missing_keywords = tfidf_matcher.get_similarity_and_missing(resume_text, jd_text)
     return {
         "similarity_score": round(float(similarity), 3),
         "missing_keywords": missing_keywords,
@@ -751,11 +739,46 @@ async def predict_batch(body: Dict[str, Any] = Body(...)) -> List[Dict[str, Any]
         else:
             conf = 1.0
 
-        results.append(
-            {"label": text, "prediction": str(pred), "confidence": round(conf, 3)}
-        )
+        results.append({"label": text, "prediction": str(pred), "confidence": round(conf, 3)})
 
     return results
+
+
+def choose_dev_port_v2() -> int:
+    """
+    Pick a port for the FastAPI dev server that does NOT clash with my Flask api.py.
+
+    Flask (legacy api.py) uses [5000, 5001, 5002, 5003, 5004].
+    For FastAPI I reserve a separate pool:
+        [6000, 6001, 6002, 6003, 6004]
+
+    This keeps the Chrome extension logic simple: it can just scan both pools.
+    You can still override with SFF_PORT_V2 if you ever want a fixed port.
+    """
+    # 1) Allow an explicit override for FastAPI.
+    env_port = os.getenv("SFF_PORT_V2")
+    if env_port:
+        try:
+            return int(env_port)
+        except ValueError:
+            print(f"[warn] Ignoring invalid SFF_PORT_V2={env_port!r}", file=sys.stderr)
+
+    # 2) Choose a free one from the FastAPI pool.
+    candidates = [6000, 6001, 6002, 6003, 6004]
+    random.shuffle(candidates)
+    for port in candidates:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            # successfully reserved; OS frees it when we close
+            return port
+
+    # 3) Fallback: last resort if everything in the pool was busy.
+    return 6000
+
 
 # === Run the server ===
 # I like having this here so I can just do:
@@ -766,11 +789,8 @@ if __name__ == "__main__":
 
     # Reuse the same helper I use in my Flask api.py so the Chrome extension
     # can keep scanning the same dev port pool.
-    port = legacy.choose_dev_port()
-    print(
-        f"*** Smart Form Filler FastAPI backend listening on "
-        f"http://127.0.0.1:{port} ***"
-    )
+    port = choose_dev_port_v2()
+    print(f"*** Smart Form Filler FastAPI backend listening on " f"http://127.0.0.1:{port} ***")
 
     # Run FastAPI with uvicorn on the chosen port.
     # Here I pass the app object directly instead of an import string.

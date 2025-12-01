@@ -2,24 +2,25 @@
 const TEST_MODE  = true;   // enables bg.selftest route
 const FAKE_MODEL = false;  // deterministic predictions instead of calling Flask
 
-// ===================== Backend base resolver (Docker-first) =====================
-// Prefer Docker (8000) when available, else local (5000).
-let API_BASE_CACHE = null;
+// ===================== Backend base resolver (v1 vs v2) =====================
+// v1 = Flask (legacy api.py)
+// v2 = FastAPI (new matcher service)
 
-// Simple shared status cache so popup/content can see what background probed
+// Track last-known status for both backends + selected preference.
 let BACKEND_STATUS = {
-  ok: null,        // true / false / null (unknown)
-  base: null,      // last known base
-  lastChecked: 0,  // Date.now()
+  ok: null,       // is the SELECTED backend up?
+  base: null,     // base URL for the SELECTED backend (e.g. http://127.0.0.1:5000)
+  pref: "v1",     // "v1" | "v2"
+  v1: { up: null, base: null },
+  v2: { up: null, base: null },
+  lastChecked: 0, // Date.now()
 };
 
-// Ports the backend might listen on in local dev.
-// api.py chooses a free one from this pool on startup.
-const LOCAL_PORTS = [5000, 5001, 5002, 5003, 5004];
-
-// Fixed host port used by Docker backend.
-const DOCKER_PORT = 8000;
-
+// Ports each backend might listen on in local dev.
+// v1 (Flask api.py): 5000–5004; Docker maps to 8000
+// v2 (FastAPI app):  6000–6004; Docker maps to 8001
+const V1_PORT_CANDIDATES = [8000, 5000, 5001, 5002, 5003, 5004];
+const V2_PORT_CANDIDATES = [8001, 6000, 6001, 6002, 6003, 6004];
 
 // Probe a base URL by hitting /health. Only 2xx counts as "alive".
 async function probe(base, timeoutMs = 800) {
@@ -42,51 +43,80 @@ async function probe(base, timeoutMs = 800) {
   }
 }
 
-async function resolveAPIBase(force = false) {
-  if (!force && API_BASE_CACHE) return API_BASE_CACHE;
+// Probe a list of ports for one backend (v1 or v2).
+// We try both 127.0.0.1 and localhost so we don't depend on which
+async function probeBackendOnPorts(ports) {
+  const hosts = ["http://127.0.0.1", "http://localhost"];
 
-  // 1) Prefer any local dev server in our known pool.
-  for (const port of LOCAL_PORTS) {
-    const base = `http://127.0.0.1:${port}`;
-    if (await probe(base)) {
-      API_BASE_CACHE = base;
-      try { await chrome.storage.local.set({ backend_base: base }); } catch {}
-      return base;
+  for (const host of hosts) {
+    for (const port of ports) {
+      const base = `${host}:${port}`;
+      if (await probe(base)) {
+        return { up: true, base };
+      }
     }
   }
-
-  // 2) Fallback to Docker container (fixed host port)
-  const dockerBase = `http://127.0.0.1:${DOCKER_PORT}`;
-  if (await probe(dockerBase)) {
-    API_BASE_CACHE = dockerBase;
-    try { await chrome.storage.local.set({ backend_base: dockerBase }); } catch {}
-    return dockerBase;
-  }
-
-  // 3) Nothing listening: clear cache + stored base.
-  API_BASE_CACHE = null;
-  try { await chrome.storage.local.remove("backend_base"); } catch {}
-  return null;
+  return { up: false, base: null };
 }
 
+
+// Read last selected backend from storage (popup writes this)
+async function loadBackendPref() {
+  try {
+    const { backendPref } = await chrome.storage.sync.get("backendPref");
+    if (backendPref === "v2") return "v2";
+    return "v1";
+  } catch (e) {
+    console.warn("[bg] loadBackendPref failed, defaulting to v1:", e && e.message);
+    return "v1";
+  }
+}
+
+// Compute + cache status for v1 and v2, and for the SELECTED backend.
 async function getBackendStatus(force = false) {
   const now = Date.now();
 
+  // Use cache if recent, but refresh `pref` from storage in case popup changed it
   if (!force && BACKEND_STATUS.ok !== null && (now - BACKEND_STATUS.lastChecked) < 5000) {
+    BACKEND_STATUS.pref = await loadBackendPref();
+    const sel = BACKEND_STATUS.pref === "v2" ? BACKEND_STATUS.v2 : BACKEND_STATUS.v1;
+    BACKEND_STATUS.ok = !!sel.up;
+    BACKEND_STATUS.base = sel.base;
     return BACKEND_STATUS;
   }
 
-  const base = await resolveAPIBase(force); // already probed
-  const alive = !!base;
+  const pref = await loadBackendPref();
+  const v1 = await probeBackendOnPorts(V1_PORT_CANDIDATES);
+  const v2 = await probeBackendOnPorts(V2_PORT_CANDIDATES);
+  const selected = pref === "v2" ? v2 : v1;
 
   BACKEND_STATUS = {
-    ok: alive,
-    base,
+    ok: !!selected.up,
+    base: selected.base,
+    pref,
+    v1,
+    v2,
     lastChecked: now,
   };
 
   console.log("[bg] getBackendStatus:", BACKEND_STATUS);
   return BACKEND_STATUS;
+}
+
+// Resolve the base URL for the SELECTED backend (v1 or v2)
+async function resolveAPIBase(force = false) {
+  const st = await getBackendStatus(force);
+  return st.base;
+}
+
+// When a call fails, re-probe the currently selected backend.
+// NOTE: this will NOT silently failover v2 -> v1 or vice versa.
+async function reprobeAndSwap() {
+  const base = await resolveAPIBase(true);
+  if (!base) {
+    throw new Error("No backend available after reprobe");
+  }
+  return base;
 }
 
 // --- Heuristics for fake predictions (dev only) ---
@@ -325,13 +355,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           success: true,
           ok: !!st.ok,
           base: st.base,
+          pref: st.pref,
+          v1: st.v1,
+          v2: st.v2,
           lastChecked: st.lastChecked,
         });
       } catch (e) {
         sendResponse({ success: false, error: String(e) });
       }
       return;
-    }
+    }    
 
     // 1) Full profile fetch (nested JSON)
     if (msg?.action === "getProfile") {

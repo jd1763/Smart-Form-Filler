@@ -126,8 +126,10 @@
           <div id="backendV2Pill" class="backend-pill">V2</div>
         </div>
 
-        <!-- Message about which backend is up/down -->
-        <div id="backendVersionStatus" class="muted" style="margin:4px 0 8px;"></div>
+        <div id="backendToggleMessage"
+          class="muted"
+          style="margin-top:4px; font-size:11px; display:none;">
+        </div>
       </div>
 
       <div class="backend-toggle-group" id="backendToggleGroup">
@@ -195,6 +197,11 @@
         <button id="manageResumesBtn" class="btn">Manage Resumes</button>
       </div>
 
+      <!-- Timed warning for button clicks when backend is down -->
+      <div id="backendButtonsMessage"
+        class="muted"
+        style="margin-top:4px; display:none;">
+      </div>
       <div id="status">Ready…</div>
     </div>
     

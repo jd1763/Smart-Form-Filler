@@ -20,6 +20,218 @@ function setBackendBase(base) {
 // Track backend availability so we don't keep hammering it if it's down
 let BACKEND_AVAILABLE = null; // null = unknown, true = up, false = down
 
+// Track which logical backend version the user prefers ("v1" or "v2")
+let BACKEND_VERSION_PREF = "v1";
+
+function showNoResumesCard() {
+  const card = document.getElementById("noResumesCard");
+  const matchCard = document.getElementById("matchCard");
+  const suggestor = document.getElementById("resumeSuggestorCard");
+  const fillBtn = document.getElementById("fillForm");
+  if (card) card.style.display = "";
+  if (matchCard) matchCard.style.display = "none";
+  if (suggestor) suggestor.style.display = "none";
+  if (fillBtn) { fillBtn.disabled = true; fillBtn.title = "Upload a resume first"; }
+}
+
+function hideNoResumesCard() {
+  const card = document.getElementById("noResumesCard");
+  const fillBtn = document.getElementById("fillForm");
+  if (card) card.style.display = "none";
+  if (fillBtn) { fillBtn.disabled = false; fillBtn.title = ""; }
+}
+
+// Load the last selected backend from chrome.storage.sync
+async function loadBackendPreference() {
+  try {
+    const { backendPref } = await chrome.storage.sync.get("backendPref");
+    if (backendPref === "v2" || backendPref === "v1") {
+      BACKEND_VERSION_PREF = backendPref;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// Save the selected backend into chrome.storage.sync
+function saveBackendPreference(pref) {
+  const normalized = pref === "v2" ? "v2" : "v1";
+  BACKEND_VERSION_PREF = normalized;
+  try {
+    chrome.storage.sync.set({ backendPref: normalized });
+  } catch (_) {
+    // ignore
+  }
+}
+
+// Simple pill UI helper
+function updateBackendPillUI(pref) {
+  const v1 = document.getElementById("backendV1Pill");
+  const v2 = document.getElementById("backendV2Pill");
+  if (!v1 || !v2) return;
+
+  v1.classList.toggle("active", pref === "v1");
+  v2.classList.toggle("active", pref === "v2");
+}
+
+// Optional inline status under the toggle (if you have an element for it)
+function setBackendToggleMessage(msg) {
+  const el = document.getElementById("backendToggleMsg");
+  if (el) el.textContent = msg || "";
+}
+
+// ------------------------------
+// Backend version + port helpers
+// ------------------------------
+
+// Each backend has its own pool of ports so they never fight over a busy port:
+//   - Flask (v1)  : 5000–5004 locally, 8000 via Docker
+//   - FastAPI (v2): 6000–6004 locally, 8001 via Docker
+const V1_LOCAL_PORTS = [5000, 5001, 5002, 5003, 5004];
+const V2_LOCAL_PORTS = [6000, 6001, 6002, 6003, 6004];
+const V1_DOCKER_PORT = 8000;
+const V2_DOCKER_PORT = 8001;
+
+// Last selected backend version (persisted between popup opens)
+let CURRENT_BACKEND =
+  (typeof localStorage !== "undefined" && localStorage.getItem("backendPreference")) || "v1";
+
+// Map a base URL (http://127.0.0.1:PORT) back to v1 or v2
+function inferBackendFromBase(base) {
+  if (typeof base !== "string") return null;
+  try {
+    const u = new URL(base);
+    const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
+    if (V1_LOCAL_PORTS.includes(port) || port === V1_DOCKER_PORT) return "v1";
+    if (V2_LOCAL_PORTS.includes(port) || port === V2_DOCKER_PORT) return "v2";
+  } catch (_) {
+    // ignore malformed URLs
+  }
+  return null;
+}
+
+// Update CURRENT_BACKEND + save + refresh pill UI
+function setCurrentBackend(pref) {
+  const normalized = pref === "v2" ? "v2" : "v1";
+  CURRENT_BACKEND = normalized;
+
+  // Keep localStorage for your UI
+  try {
+    localStorage.setItem("backendPreference", normalized);
+  } catch (_) {
+    // ignore
+  }
+
+  // IMPORTANT: keep background.js in sync so it routes based on the toggle
+  try {
+    chrome.storage.sync.set({ backendPref: normalized });
+  } catch (_) {
+    // ignore
+  }
+
+  setBackendPillUI(normalized);
+}
+
+// Visual pill state: which side is active
+function setBackendPillUI(pref) {
+  const v1El = document.getElementById("backendV1Pill");
+  const v2El = document.getElementById("backendV2Pill");
+  if (!v1El || !v2El) return;
+
+  v1El.classList.toggle("active", pref === "v1");
+  v2El.classList.toggle("active", pref === "v2");
+}
+
+// Small info message directly under the toggle
+function setBackendInfoMessage(msg) {
+  const infoEl = document.getElementById("backendInfoMessage");
+  if (!infoEl) return;
+
+  if (msg) {
+    infoEl.textContent = msg;
+    infoEl.style.display = "";
+  } else {
+    infoEl.textContent = "";
+    infoEl.style.display = "none";
+  }
+}
+
+// Probe a single base for /health with a short timeout
+async function probeHealthOnce(base, timeoutMs = 700) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${base}/health?t=${Date.now()}`, {
+      method: "GET",
+      cache: "no-store",
+      signal: ctl.signal,
+    });
+    return r.ok;
+  } catch (_) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Hosts we try for local dev. This lets the extension work whether your
+// manifest.json has host_permissions for 127.0.0.1, localhost, or both.
+const BACKEND_HOSTS = ["http://127.0.0.1", "http://localhost"];
+
+// Given "v1" or "v2", find the first live base in that backend's pool
+async function findBackendBase(version) {
+  const ports =
+    version === "v2"
+      ? [...V2_LOCAL_PORTS, V2_DOCKER_PORT]
+      : [...V1_LOCAL_PORTS, V1_DOCKER_PORT];
+
+  for (const host of BACKEND_HOSTS) {
+    for (const port of ports) {
+      const base = `${host}:${port}`;
+      if (await probeHealthOnce(base)) {
+        return base;
+      }
+    }
+  }
+  return null;
+}
+
+
+// Probe both backends at once.
+// Prefer asking background.js so we share its logic + port pools.
+async function getMultiBackendStatus() {
+  // 1) Try to reuse background.js' status (single source of truth)
+  try {
+    const st = await queryBackendStatus(true); // force reprobe
+
+    if (st && (st.v1 || st.v2)) {
+      const v1 = st.v1 || {};
+      const v2 = st.v2 || {};
+      return {
+        v1Ok:  !!v1.up,
+        v2Ok:  !!v2.up,
+        v1Base: v1.base || null,
+        v2Base: v2.base || null,
+      };
+    }
+  } catch (e) {
+    err("[popup] getMultiBackendStatus via background failed:", e);
+  }
+
+  // 2) Fallback: do the old direct probe from the popup
+  const [v1Base, v2Base] = await Promise.all([
+    findBackendBase("v1"),
+    findBackendBase("v2"),
+  ]);
+
+  return {
+    v1Ok:  !!v1Base,
+    v2Ok:  !!v2Base,
+    v1Base,
+    v2Base,
+  };
+}
+
 // Minimal backend helper: single base, no health checks, no failover
 async function fetchWithFailover(path, opts) {
   const baseDefaults = {
@@ -95,32 +307,64 @@ async function queryBackendStatus(forceReprobe = false) {
   });
 }
 
-// Health check: delegate to background.getBackendStatus (single source of truth)
+// Health check: delegate to background.getBackendStatus, but fall back to a direct /health probe
 async function ensureBackendHealthy(forceReprobe = false) {
+  // Fast path: we already know it's up and caller didn't force a re-probe.
   if (!forceReprobe && BACKEND_AVAILABLE === true) {
-    log("[popup] ensureBackendHealthy/bg: using cached OK");
+    log("[popup] ensureBackendHealthy: using cached OK");
     return true;
   }
 
   try {
+    // Ask background first (single source of truth for which port/base to use)
     const st = await queryBackendStatus(forceReprobe);
-    const ok = !!st.ok;
 
-    BACKEND_AVAILABLE = ok;
-    if (st.base) {
-      setBackendBase(st.base);
+    let ok   = false;
+    let base = st && st.base ? st.base : BACKEND_BASE;
+
+    // 1) Prefer the explicit ok flag if background provided it
+    if (st && typeof st.ok === "boolean") {
+      ok = st.ok;
     }
 
-    log(
-      "[popup] ensureBackendHealthy/bg:",
-      ok ? "UP" : "DOWN",
-      "base:",
-      BACKEND_BASE
-    );
+    // 2) If ok is still false but we DO have a base, try a direct /health probe ourselves.
+    if (!ok && base) {
+      try {
+        const r = await fetch(`${base}/health?t=${Date.now()}`, {
+          cache: "no-store",
+          credentials: "omit",
+        });
+        log(
+          "[popup] direct /health probe:",
+          base,
+          "status=",
+          r && r.status,
+          "ok=",
+          r && r.ok
+        );
+        if (r && r.ok) {
+          ok = true;
+        }
+      } catch (probeErr) {
+        log(
+          "[popup] direct /health probe failed:",
+          probeErr && probeErr.message
+        );
+      }
+    }
+
+    // 3) Update globals + base URL
+    BACKEND_AVAILABLE = ok;
+
+    if (base && base !== BACKEND_BASE) {
+      setBackendBase(base);
+    }
+
+    log("[popup] ensureBackendHealthy: final ok =", ok, "base =", BACKEND_BASE);
     return ok;
   } catch (e) {
     BACKEND_AVAILABLE = false;
-    err("[popup] ensureBackendHealthy/bg error:", e);
+    err("[popup] ensureBackendHealthy error:", e);
     return false;
   }
 }
@@ -841,10 +1085,28 @@ function ensureNotFilledBadges(container){
   btnTryAgain.style.display = "none";
   await rescanFilledNonFilledFromPage();
 
-  // ---------- fill button ----------
-  btnFill?.addEventListener("click", async () => {
-    // --- capture matched skills for the SELECTED resume used to APPLY (not suggestor) ---
-    try {
+// ---------- fill button ----------
+btnFill?.addEventListener("click", async (evt) => {
+  // Guard: if the selected backend is down, show message under buttons and STOP other handlers.
+  if (BACKEND_AVAILABLE === false) {
+    evt?.preventDefault();
+    evt?.stopImmediatePropagation();
+    showBackendButtonsWarning();
+    return;
+  }
+  // If we don't know yet, force a quick health check once
+  if (BACKEND_AVAILABLE === null) {
+    const ok = await ensureBackendHealthy(true);
+    if (!ok) {
+      evt?.preventDefault();
+      evt?.stopImmediatePropagation();
+      showBackendButtonsWarning();
+      return;
+    }
+  }
+
+  // --- capture matched skills for the SELECTED resume used to APPLY (not suggestor) ---
+  try {
       // 1) get selected resume text (from the UI where the user picked it)
       const getSelectedResumeText = () => {
         // selected card pattern
@@ -1284,6 +1546,67 @@ function hideNoResumesCard() {
   const fillBtn = document.getElementById("fillForm");
   if (card) card.style.display = "none";
   if (fillBtn) { fillBtn.disabled = false; fillBtn.title = ""; }
+}
+
+// Timed warning message under the Apply Helper buttons when backend is down
+let backendButtonsMsgTimer = null;
+
+function clearBackendButtonsWarning() {
+  const msgEl = document.getElementById("backendButtonsMessage");
+  if (!msgEl) return;
+
+  if (backendButtonsMsgTimer) {
+    clearTimeout(backendButtonsMsgTimer);
+    backendButtonsMsgTimer = null;
+  }
+  msgEl.textContent = "";
+  msgEl.style.display = "none";
+}
+
+function showBackendButtonsWarning() {
+  const msgEl = document.getElementById("backendButtonsMessage");
+  if (!msgEl) return;
+
+  // clear any previous timer
+  if (backendButtonsMsgTimer) {
+    clearTimeout(backendButtonsMsgTimer);
+    backendButtonsMsgTimer = null;
+  }
+
+  // Message under the buttons
+  msgEl.innerHTML =
+    '⚠ Selected backend is offline. Use the toggle above to switch to a running version.' +
+    ' <button id="backendButtonsRetry" class="btn" style="margin-left:4px;">Retry</button>';
+  msgEl.style.display = "block";
+
+  const retryInline = document.getElementById("backendButtonsRetry");
+  if (retryInline) {
+    retryInline.addEventListener(
+      "click",
+      async () => {
+        retryInline.disabled = true;
+
+        // Force a fresh probe of the selected backend
+        const ok = await ensureBackendHealthy(true);
+        if (ok) {
+          clearBackendButtonsWarning();
+          try {
+            await preloadAndRestore();
+            await autoMatch();
+          } catch (e) {
+            err("[popup] error after inline retry:", e);
+          }
+        } else {
+          retryInline.disabled = false;
+        }
+      },
+      { once: true }
+    );
+  }
+
+  backendButtonsMsgTimer = setTimeout(() => {
+    clearBackendButtonsWarning();
+  }, 6000);
 }
 
 const isSupportedUrl = (u)=> /^https?:\/\//i.test(u)||/^file:\/\//i.test(u);
@@ -2022,8 +2345,12 @@ async function preloadAndRestore(){
 
   // Always fresh on popup open (BucketUI handles detection + seeding)
   setStatus("Ready.");
+
+  // Reset Fill Form / Try Again buttons whenever we reload for a backend change
   const tryBtn = document.getElementById("tryAgain");
+  const fillBtn = document.getElementById("fillForm");
   if (tryBtn) tryBtn.style.display = "none";
+  if (fillBtn) fillBtn.style.display = "inline-block";
 
   // IMPORTANT: Do NOT touch Detected/Filled/Non-Filled lists or their headers here.
   // BucketUI (the IIFE at the top) handles detection, seeding, and counts.
@@ -2115,6 +2442,21 @@ async function renderResultsAndRemember(url, resp, statusText){
 }
 
 async function runFill(){
+  // If backend is known to be down, do not run fill;
+  if (BACKEND_AVAILABLE === false) {
+    return;
+  }
+
+  // If backend status is unknown, probe once before attempting to fill.
+  if (BACKEND_AVAILABLE === null) {
+    const ok = await ensureBackendHealthy(true);
+    if (!ok) {
+      showBackendButtonsWarning();
+      setStatus("⚠ Selected backend is offline. Use the toggle above to switch to a running version.");
+      return;
+    }
+  }
+
   const tab = await getActiveTab();
   if(!tab){ setStatus("❌ No active tab."); return; }
 
@@ -2183,55 +2525,235 @@ document.addEventListener("DOMContentLoaded", () => {
   const suggestorCard  = document.getElementById("resumeSuggestorCard");
   const statusEl       = document.getElementById("status");
   const retryBtn       = document.getElementById("retryConnectionBtn");
+  const backendToggleMsg =
+    document.getElementById("backendToggleMessage");
 
-  async function runInitialLoad() {
-    // Always start with the full-screen loading overlay
-    setLoading(true, "Connecting to API…");
+  // Helper to show "selected backend offline" under the toggle
+  function showBackendOfflineMessage() {
+    if (backendToggleMsg) {
+      backendToggleMsg.textContent =
+        "⚠ Selected backend is offline. Use the toggle above to switch to a running version.";
+      backendToggleMsg.style.display = "block";
+    } else if (statusEl) {
+      // Fallback if the element somehow isn’t there
+      statusEl.textContent =
+        "⚠ Selected backend is offline. Use the toggle to switch to a running version.";
+    }
+  }
 
-    const ok = await ensureBackendHealthy();
+  // Optional: helper to clear that message when things are healthy
+  function clearBackendOfflineMessage() {
+    if (backendToggleMsg) {
+      backendToggleMsg.textContent = "";
+      backendToggleMsg.style.display = "none";
+    }
+  }
 
-    if (!ok) {
-      log("[popup] backend appears offline on open");
+  // Backend version toggle elements (pills) — IDs must exist in popup.html
+  const v1Pill  = document.getElementById("backendV1Pill");
+  const v2Pill  = document.getElementById("backendV2Pill");
 
-      // Keep the overlay visible, but change the copy
-      const label = document.getElementById("loadingMsg");
-      if (label) {
-        label.textContent =
-          "❌ Could not reach API." +
-          " Start the backend, then click “Retry connection”.";
+  // On open, reflect whatever backend the user last chose
+  setBackendPillUI(CURRENT_BACKEND);
+  setBackendInfoMessage("");
+
+  // Handle clicks on the backend version pills
+  async function handleBackendClick(target) {
+    // If user re-clicks the already active side, do nothing
+    if (target === CURRENT_BACKEND) return;
+
+    // We only want Smart Form Filler to use the target backend if it's really up.
+    // First, probe both v1 and v2 pools.
+    let status;
+    try {
+      status = await getMultiBackendStatus();
+    } catch (e) {
+      err("[popup] getMultiBackendStatus error:", e);
+      status = { v1Ok: false, v2Ok: false, v1Base: null, v2Base: null };
+    }
+
+    const { v1Ok, v2Ok, v1Base, v2Base } = status;
+    const other = target === "v1" ? "v2" : "v1";
+
+    const targetOk   = target === "v1" ? v1Ok   : v2Ok;
+    const targetBase = target === "v1" ? v1Base : v2Base;
+    const otherOk    = other  === "v1" ? v1Ok   : v2Ok;
+    const otherBase  = other  === "v1" ? v1Base : v2Base;
+
+    // CASE 1: Target backend is actually running → normal behavior + refresh cards
+    if (targetOk && targetBase) {
+      // Commit the new backend choice
+      setCurrentBackend(target);
+      setBackendBase(targetBase);
+      setBackendInfoMessage("");
+
+      if (statusEl) {
+        statusEl.textContent =
+          "🔄 Refreshing with backend " + target.toUpperCase() + "…";
       }
 
-      // Show the retry button on the overlay
+      try {
+        // No full-screen offline overlay here; just refresh content
+        await preloadAndRestore();
+        await autoMatch();
+        if (statusEl) {
+          statusEl.textContent = "✅ Connected to Smart Form Filler API.";
+        }
+      } catch (e) {
+        err("[popup] error after backend switch:", e);
+        if (statusEl) {
+          statusEl.textContent =
+            "❌ Error after switching backend. See console for details.";
+        }
+      }
+      return;
+    }
+
+    // CASE 2: Target is down, but the OTHER backend is up
+    if (!targetOk && otherOk) {
+      const msg =
+        target === "v2"
+          ? "Backend v2 is not running, but v1 is. Switch back to v1 to use Smart Form Filler."
+          : "Backend v1 is not running, but v2 is. Switch back to v2 to use Smart Form Filler.";
+
+      // Show the small info message under the toggle
+      setBackendInfoMessage(msg);
+
+      // Snap the pill back to the healthy backend; do NOT talk to the target backend at all
+      setCurrentBackend(other);
+      if (otherBase) {
+        setBackendBase(otherBase);
+      }
+      // IMPORTANT: no loading overlay in this case
+      return;
+    }
+
+    // CASE 3: Both v1 and v2 are down
+    if (!v1Ok && !v2Ok) {
+      // Clear any inline info — we’ll show the big overlay instead
+      setBackendInfoMessage("");
+
+      if (statusEl) {
+        statusEl.textContent =
+          "❌ Could not reach any backend. Start Flask (v1) or FastAPI (v2), then click “Retry connection”.";
+      }
+
+      setLoading(
+        true,
+        "Both backends appear to be offline. Start Flask (v1) or FastAPI (v2), then click “Retry connection”."
+      );
+
       if (retryBtn) {
         retryBtn.style.display = "";
         retryBtn.disabled = false;
       }
 
-      // Optionally also update the inline status (behind the overlay)
-      if (statusEl) {
-        statusEl.textContent =
-          "❌ Could not reach Smart Form Filler API on " + BACKEND_BASE + ".";
-      }
-
-      // Do NOT hide loadingView here and do NOT load resumes or show main UI.
-      // The popup stays in "offline" overlay mode until the backend is healthy.
+      BACKEND_AVAILABLE = false;
       return;
     }
 
-    // Backend is healthy → hide overlay and show normal UI
-    setLoading(false);
+    // Fallback: shouldn't really hit here, but don't explode if we do
+    setBackendInfoMessage(
+      "⚠️ Could not confirm backend status. Please try again."
+    );
+  }
 
+  // Wire the click handlers if the pills exist in the DOM
+  if (v1Pill) {
+    v1Pill.addEventListener("click", () => handleBackendClick("v1"));
+  }
+  if (v2Pill) {
+    v2Pill.addEventListener("click", () => handleBackendClick("v2"));
+  }
+
+  async function runInitialLoad() {
+    // Always start with the full-screen loading overlay
+    setLoading(true, "Connecting to API…");
+  
+    // This checks ONLY the currently selected backend (via background).
+    const ok = await ensureBackendHealthy();
+  
+    if (!ok) {
+      log("[popup] selected backend appears offline on open");
+  
+      // Now probe both v1 and v2 directly so we can decide how to behave.
+      let multi;
+      try {
+        multi = await getMultiBackendStatus();
+      } catch (e) {
+        err("[popup] getMultiBackendStatus error on open:", e);
+        multi = { v1Ok: false, v2Ok: false };
+      }
+  
+      const v1Up = !!(multi && multi.v1Ok);
+      const v2Up = !!(multi && multi.v2Ok);
+      const target = CURRENT_BACKEND === "v2" ? "v2" : "v1";
+  
+      // CASE A: both backends are down → keep the big overlay + retry.
+      if (!v1Up && !v2Up) {
+        const label = document.getElementById("loadingMsg");
+        if (label) {
+          label.textContent =
+            "❌ Both backends appear to be offline. Start either Flask (v1) or FastAPI (v2), then click “Retry connection”.";
+        }
+        if (statusEl) {
+          statusEl.textContent =
+            "❌ Both backends appear to be offline. Start a backend, then click Retry.";
+        }
+        if (retryBtn) {
+          retryBtn.style.display = "";
+          retryBtn.disabled = false;
+        }
+  
+        // Keep overlay visible; don't show match cards.
+        if (matchCard)     matchCard.style.display = "none";
+        if (suggestorCard) suggestorCard.style.display = "none";
+        showNoResumesCard();
+        return;
+      }
+  
+      // CASE B: selected backend is down, but the OTHER backend is up.
+      // → No overlay, just show a message telling the user to switch.
+      setLoading(false);
+      if (retryBtn) {
+        retryBtn.style.display = "none";
+        retryBtn.disabled = false;
+      }
+  
+      showBackendOfflineMessage();
+  
+      let infoMsg = "";
+      if (target === "v1" && !v1Up && v2Up) {
+        infoMsg =
+          "Backend v1 is not running, but v2 is. Switch to v2 to use Smart Form Filler.";
+      } else if (target === "v2" && !v2Up && v1Up) {
+        infoMsg =
+          "Backend v2 is not running, but v1 is. Switch to v1 to use Smart Form Filler.";
+      }
+      setBackendInfoMessage(infoMsg);
+  
+      // Show the cards, but DO NOT auto-load or auto-switch backends.
+      if (matchCard)     matchCard.style.display = "";
+      if (suggestorCard) suggestorCard.style.display = "";
+      // We deliberately do NOT call preloadAndRestore()/autoMatch() here,
+      // because that would talk to a backend the user hasn't selected.
+      return;
+    }
+  
+    // CASE C: selected backend is healthy → normal path
+    setLoading(false);
     if (retryBtn) {
       retryBtn.style.display = "none";
       retryBtn.disabled = false;
     }
-    if (statusEl) {
-      statusEl.textContent = "✅ Connected to Smart Form Filler API.";
-    }
+    
+    clearBackendOfflineMessage();
+    clearBackendButtonsWarning();
+
     if (matchCard)     matchCard.style.display = "";
     if (suggestorCard) suggestorCard.style.display = "";
     hideNoResumesCard();
-
+  
     try {
       await preloadAndRestore();
       await autoMatch();
@@ -2242,7 +2764,7 @@ document.addEventListener("DOMContentLoaded", () => {
           "❌ Error while loading resumes or matching. See console for details.";
       }
     }
-  }
+  }  
 
   // Optional: “Retry connection” button
   if (retryBtn) {
@@ -2267,28 +2789,71 @@ document.addEventListener("DOMContentLoaded", () => {
       const ok = await ensureBackendHealthy(true); // force background to re-probe
   
       if (!ok) {
-        // Still offline — keep overlay visible, just change the message
-        retryBtn.disabled = false;
-  
-        if (label) {
-          label.textContent =
-            "❌ Still cannot reach Smart Form Filler API on " +
-            BACKEND_BASE +
-            ". Make sure it’s running, then click Retry connection again.";
+        // Selected backend is still offline. Check if the *other* backend is up.
+        let multi;
+        try {
+          multi = await getMultiBackendStatus();
+        } catch (e) {
+          err("[popup] getMultiBackendStatus error on retry:", e);
+          multi = { v1Ok: false, v2Ok: false };
         }
+  
+        const v1Up = !!(multi && multi.v1Ok);
+        const v2Up = !!(multi && multi.v2Ok);
+        const target = CURRENT_BACKEND === "v2" ? "v2" : "v1";
+  
+        // If both are down, we stay in full overlay mode.
+        if (!v1Up && !v2Up) {
+          retryBtn.disabled = false;
+  
+          if (label) {
+            label.textContent =
+              "❌ Both backends still appear to be offline. Start a backend, then click Retry connection again.";
+          }
+          if (statusEl) {
+            statusEl.textContent =
+              "❌ Both backends still appear to be offline. Make sure a backend is running, then try again.";
+          }
+  
+          // Keep the overlay up.
+          return;
+        }
+  
+        // At least one backend is up → hide the overlay and tell the user
+        // to use the toggle. We do NOT auto-switch.
+        setLoading(false);
+        retryBtn.disabled = false;
+        retryBtn.style.display = "none";
+  
         if (statusEl) {
           statusEl.textContent =
-            "❌ Still cannot reach Smart Form Filler API on " +
-            BACKEND_BASE +
-            ". Make sure it’s running, then try again.";
+            "⚠ Selected backend is offline. Use the toggle above to switch to a running version.";
         }
   
-        // IMPORTANT: do NOT call setLoading(false) here → overlay stays
-        return;
-      }
+        let infoMsg = "";
+        if (target === "v1" && !v1Up && v2Up) {
+          infoMsg =
+            "Backend v1 is not running, but v2 is. Switch to v2 to use Smart Form Filler.";
+        } else if (target === "v2" && !v2Up && v1Up) {
+          infoMsg =
+            "Backend v2 is not running, but v1 is. Switch to v1 to use Smart Form Filler.";
+        }
+        setBackendInfoMessage(infoMsg);
+        
+        // Show the main cards, but DO NOT override the resumes state.
+        // We keep whatever the user had and just tell them to switch.
+        if (matchCard)     matchCard.style.display = "";
+        if (suggestorCard) suggestorCard.style.display = "";
+        hideNoResumesCard();
+        clearBackendButtonsWarning();
+        
+        return;        
+      }  
   
       // Now online — hide overlay and restore the normal UI
       setLoading(false);
+      clearBackendOfflineMessage();
+      clearBackendButtonsWarning()
   
       if (statusEl) {
         statusEl.textContent = "✅ Connected to Smart Form Filler API.";
@@ -2312,20 +2877,58 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+
   // Kick things off once DOM is ready
   runInitialLoad();
 });
 
 // Buttons
-document.getElementById("manageProfileBtn")?.addEventListener("click", () => {
-  // open the profile editor page
-  const url = chrome.runtime.getURL("profile.html");
-  window.open(url, "_blank");
-});
-document.getElementById("manageResumesBtn")?.addEventListener("click", () => {
-  if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
-  else window.open(chrome.runtime.getURL("resumes.html"));
-});
+document.getElementById("manageProfileBtn")?.addEventListener(
+  "click",
+  async (evt) => {
+    if (BACKEND_AVAILABLE === false) {
+      evt.preventDefault();
+      showBackendButtonsWarning();
+      return;
+    }
+    if (BACKEND_AVAILABLE === null) {
+      const ok = await ensureBackendHealthy(true);
+      if (!ok) {
+        evt.preventDefault();
+        showBackendButtonsWarning();
+        return;
+      }
+    }
+
+    // open the profile editor page
+    const url = chrome.runtime.getURL("profile.html");
+    window.open(url, "_blank");
+  }
+);
+document.getElementById("manageResumesBtn")?.addEventListener(
+  "click",
+  async (evt) => {
+    if (BACKEND_AVAILABLE === false) {
+      evt.preventDefault();
+      showBackendButtonsWarning();
+      return;
+    }
+    if (BACKEND_AVAILABLE === null) {
+      const ok = await ensureBackendHealthy(true);
+      if (!ok) {
+        evt.preventDefault();
+        showBackendButtonsWarning();
+        return;
+      }
+    }
+
+    if (chrome.runtime.openOptionsPage) {
+      chrome.runtime.openOptionsPage();
+    } else {
+      window.open(chrome.runtime.getURL("resumes.html"));
+    }
+  }
+);
 document.getElementById("uploadResumeCTA")?.addEventListener("click", () => {
   if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
   else window.open(chrome.runtime.getURL("resumes.html"));

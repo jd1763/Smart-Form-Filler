@@ -6,8 +6,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # --- Paths ---
-THIS_DIR = Path(__file__).resolve().parent          # .../tests
-PROJECT_ROOT = THIS_DIR.parent                      # .../ (project root)
+THIS_DIR = Path(__file__).resolve().parent  # .../tests
+PROJECT_ROOT = THIS_DIR.parent  # .../ (project root)
 BACKEND_DIR = PROJECT_ROOT / "backend"
 
 # Load .env from project root so AWS_*, S3_BUCKET, etc. are visible
@@ -15,9 +15,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 # Import your existing S3 helpers
 from backend.storage.s3_storage import (  # noqa: E402
-    put_bytes,
-    make_profile_key,
     get_bytes,
+    make_profile_key,
+    put_bytes,
 )
 
 
