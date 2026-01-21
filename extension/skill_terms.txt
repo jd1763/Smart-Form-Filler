@@ -1,0 +1,545 @@
+# --- Languages ---
+python
+java
+javascript
+typescript
+c
+c++
+c#
+c sharp
+csharp
+go
+golang
+rust
+scala
+kotlin
+swift
+objective-c
+ruby
+php
+perl
+r
+dart
+matlab
+julia
+sql
+nosql
+no-sql
+bash
+zsh
+powershell
+html
+css
+scss
+sass
+less
+# --- Frontend & Web ---
+react
+react.js
+reactjs
+redux
+next.js
+nextjs
+angular
+angularjs
+vue
+vue.js
+vuejs
+svelte
+sveltekit
+tailwind
+tailwindcss
+bootstrap
+material ui
+mui
+chakra ui
+three.js
+d3
+chart.js
+storybook
+webpack
+vite
+rollup
+babel
+eslint
+prettier
+# --- Backend & APIs ---
+node
+node.js
+nodejs
+express
+express.js
+koa
+nest
+nest.js
+nestjs
+fastify
+hapi
+django
+flask
+fastapi
+tornado
+pyramid
+spring
+spring boot
+spring mvc
+hibernate
+quarkus
+micronaut
+asp.net
+asp.net core
+.net
+.net core
+dotnet
+laravel
+symfony
+codeigniter
+rails
+ruby on rails
+phoenix
+elixir
+gin
+fiber
+rest
+rest api
+graphql
+grpc
+soap
+websocket
+websockets
+openapi
+swagger
+asyncio
+# --- Databases (SQL) ---
+mysql
+mariadb
+postgres
+postgresql
+oracle
+sql server
+mssql
+sqlite
+aurora
+redshift
+snowflake
+bigquery
+synapse
+teradata
+# --- Databases (NoSQL, search, cache, time series, graph) ---
+mongodb
+dynamodb
+cassandra
+couchdb
+cosmos db
+neo4j
+arangodb
+janusgraph
+hbase
+elasticsearch
+opensearch
+solr
+redis
+memcached
+influxdb
+timescaledb
+prometheus
+questdb
+# --- Data formats & serialization ---
+parquet
+orc
+avro
+jsonl
+protobuf
+thrift
+csv
+# --- Data/ETL/Streaming/Orchestration ---
+spark
+hadoop
+yarn
+mapreduce
+hive
+pig
+presto
+trino
+flink
+beam
+airflow
+luigi
+prefect
+dbt
+kafka
+schema registry
+ksql
+pulsar
+kinesis
+pubsub
+pub/sub
+eventbridge
+sqs
+sns
+rabbitmq
+activemq
+nats
+zeromq
+celery
+sidekiq
+# --- DevOps / CI-CD / Build ---
+git
+github
+gitlab
+bitbucket
+svn
+ci
+cd
+ci/cd
+github actions
+gitlab ci
+circleci
+jenkins
+travis
+teamcity
+bamboo
+spinnaker
+argo
+argo cd
+argo workflows
+nexus
+jfrog
+artifactory
+sonarqube
+coveralls
+codecov
+maven
+gradle
+sbt
+ant
+make
+cmake
+nmake
+poetry
+pipenv
+virtualenv
+conda
+npm
+yarn
+pnpm
+pip
+twine
+tox
+ruff
+flake8
+black
+isort
+pylint
+mypy
+pre-commit
+shellcheck
+# --- Containers / Orchestration / Networking ---
+docker
+docker compose
+podman
+kubernetes
+k8s
+helm
+istio
+linkerd
+traefik
+haproxy
+nginx
+apache httpd
+apache
+caddy
+envoy
+consul
+vault
+nomad
+etcd
+zookeeper
+# --- Cloud (AWS) ---
+aws
+cloud
+iam
+ec2
+s3
+rds
+aurora
+efs
+ecr
+elb
+alb
+nlb
+vpc
+route 53
+cloudfront
+cloudwatch
+cloudtrail
+lambda
+api gateway
+step functions
+eventbridge
+sns
+sqs
+sagemaker
+athena
+glue
+emr
+kinesis
+eks
+ecs
+fargate
+elastic beanstalk
+batch
+lightsail
+secrets manager
+kms
+opensearch
+# --- Cloud (GCP) ---
+gcp
+compute engine
+cloud storage
+cloud sql
+bigquery
+spanner
+firestore
+datastore
+bigtable
+pub/sub
+dataflow
+dataproc
+composer
+gke
+cloud run
+cloud functions
+vertex ai
+cloud build
+artifact registry
+cloud logging
+cloud monitoring
+memorystore
+iam
+# --- Cloud (Azure) ---
+azure
+vm
+aks
+app service
+functions
+cosmos db
+sql database
+blob storage
+event hubs
+service bus
+synapse
+databricks
+data factory
+key vault
+monitor
+devops
+pipelines
+container registry
+application gateway
+# --- Testing / QA ---
+unit testing
+unittest
+pytest
+nose
+doctest
+junit
+testng
+mockito
+hamcrest
+kotest
+spock
+xunit
+mstest
+selenium
+cypress
+playwright
+puppeteer
+robot framework
+rest-assured
+supertest
+jest
+mocha
+chai
+ava
+vitest
+enzyme
+jasmine
+karma
+postman
+newman
+locust
+k6
+gatling
+jmeter
+tdd
+bdd
+property-based testing
+hypothesis
+# --- Mobile ---
+android
+android sdk
+jetpack
+jetpack compose
+gradle
+adb
+ios
+swiftui
+xcode
+cocoapods
+react native
+expo
+flutter
+ionic
+cordova
+# --- Analytics / Viz ---
+matplotlib
+seaborn
+plotly
+bokeh
+altair
+ggplot
+tableau
+looker
+lookml
+power bi
+superset
+metabase
+redash
+grafana
+kibana
+quicksight
+# --- ML / AI / MLOps ---
+machine learning
+ml
+deep learning
+dl
+scikit-learn
+sklearn
+pandas
+numpy
+scipy
+xgboost
+lightgbm
+catboost
+pytorch
+tensorflow
+tf
+keras
+pytorch lightning
+onnx
+mlflow
+huggingface
+transformers
+opencv
+nltk
+spacy
+gensim
+fairseq
+detectron
+yolo
+stable diffusion
+prophet
+statsmodels
+feature engineering
+model deployment
+model serving
+onnxruntime
+triton inference server
+kubeflow
+seldon
+bentoml
+ray
+ray serve
+feast
+tfx
+vertex ai
+# --- Observability / Logging ---
+prometheus
+loki
+tempo
+jaeger
+zipkin
+opentelemetry
+elastic stack
+elk
+logstash
+fluentd
+fluent-bit
+datadog
+new relic
+splunk
+sentry
+rollbar
+honeycomb
+# --- Security & Auth ---
+oauth
+oauth2
+openid connect
+oidc
+jwt
+saml
+mfa
+sso
+rbac
+abac
+tls
+ssl
+https
+ssh
+bcrypt
+argon2
+pbkdf2
+owasp
+cors
+csrf
+rate limiting
+waf
+zap
+burp suite
+keycloak
+okta
+auth0
+cognito
+kms
+secrets manager
+vault
+# --- Architecture & CS topics ---
+microservices
+event-driven
+domain-driven design
+ddd
+clean architecture
+hexagonal architecture
+cqrs
+event sourcing
+message queues
+caching
+cache
+webhooks
+serverless
+monolith
+soa
+design patterns
+data structures
+algorithms
+oop
+functional programming
+concurrency
+multithreading
+async
+synchronization
+transactions
+acid
+cap theorem
+eventual consistency
+distributed systems
+# --- Workflow & misc tools ---
+jira
+confluence
+notion
+slack
+microsoft teams
+excel
+gitflow
+semver

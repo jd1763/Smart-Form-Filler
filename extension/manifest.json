@@ -56,7 +56,11 @@
         "profile.html",
         "profile.js",
         "resumes.html",
-        "resumes.js"
+        "resumes.js",
+        "profile_dashboard.html",
+        "profile_dashboard.js",
+        "vendor/react.production.min.js",
+        "vendor/react-dom.production.min.js"
       ],
       "matches": ["http://*/*", "https://*/*", "file://*/*"]
     }

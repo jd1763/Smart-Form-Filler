@@ -1,84 +1,101 @@
-// ---- Backend base (Docker preferred if /resumes works) ----
-const CANDIDATE_BASES = [
-  // Docker defaults
-  "http://127.0.0.1:8000", // Flask v1
-  "http://127.0.0.1:8001", // FastAPI v2
+// ===============================
+// Option A: Background is resolver
+// resumes.js must NOT probe ports.
+// ===============================
 
-  // Local dev pool — Flask v1
-  "http://127.0.0.1:5000",
-  "http://127.0.0.1:5001",
-  "http://127.0.0.1:5002",
-  "http://127.0.0.1:5003",
-  "http://127.0.0.1:5004",
+let BACKEND_BASE = null;
+let CURRENT_PREF = "v1";
+let LAST_RESOLVE_TS = 0;
 
-  // Local dev pool — FastAPI v2
-  "http://127.0.0.1:6000",
-  "http://127.0.0.1:6001",
-  "http://127.0.0.1:6002",
-  "http://127.0.0.1:6003",
-  "http://127.0.0.1:6004",
-];
-
-let BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
-
-(async function initBackendBase(){
-  for (const b of CANDIDATE_BASES) {
+function bgGetBackendStatus(forceReprobe = false) {
+  return new Promise((resolve) => {
     try {
-      const r = await fetch(`${b}/resumes?t=${Date.now()}`, {
-        credentials: "omit", headers: { "Accept":"application/json" }, cache: "no-store"
-      });
-      if (r.ok) { BACKEND_BASE = b; try{ localStorage.setItem("backend_base", b);}catch{}; break; }
-    } catch {}
+      chrome.runtime.sendMessage(
+        { action: "getBackendStatus", forceReprobe: !!forceReprobe },
+        (res) => resolve(res || null)
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function ensureBackendResolved(force = false) {
+  const now = Date.now();
+  if (!force && BACKEND_BASE && (now - LAST_RESOLVE_TS) < 5000) {
+    return { ok: true, base: BACKEND_BASE, pref: CURRENT_PREF };
   }
-})();
 
-// ---- Failover + retry-once helpers (8000 → 5000) ----
-async function _probeR(base, timeoutMs = 900) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const r = await fetch(`${base}/resumes?t=${Date.now()}`, {
-      signal: ctl.signal,
-      credentials: "omit",
-      headers: { "Accept": "application/json" },
-      cache: "no-store"
-    });
-    return r.ok;
-  } catch { return false; }
-  finally { clearTimeout(t); }
-}
+  const res = await bgGetBackendStatus(force);
+  if (!res || !res.success) {
+    BACKEND_BASE = null;
+    CURRENT_PREF = "v1";
+    LAST_RESOLVE_TS = now;
+    return { ok: false, base: null, pref: "v1" };
+  }
 
-async function _rechooseBaseR() {
-  const order = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
-  for (const b of order) if (await _probeR(b)) return b;
-  return "http://127.0.0.1:5000";
-}
-async function fetchWithFailoverR(path, opts) {
-  const baseHeaders = Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {});
-  opts = Object.assign({ credentials: "omit", cache: "no-store", headers: baseHeaders }, opts || {});
-  const method = (opts.method || "GET").toUpperCase();
+  CURRENT_PREF = res.pref === "v2" ? "v2" : "v1";
+  BACKEND_BASE = res.base ? String(res.base).replace(/\/+$/, "") : null;
+  LAST_RESOLVE_TS = now;
 
-  try {
-    const r = await fetch(`${BACKEND_BASE}${path}`, opts);
-    if (r.ok) return r;
-
-    if (r.status === 403 && method === "GET") {
-      const r0 = await fetch(`${BACKEND_BASE}${path}`, Object.assign({}, opts, { credentials: "omit" }));
-      if (r0.ok) return r0;
-    }
-    throw new Error(`HTTP ${r.status}`);
-  } catch (_) {
-    BACKEND_BASE = await _rechooseBaseR();
+  if (BACKEND_BASE) {
     try { localStorage.setItem("backend_base", BACKEND_BASE); } catch {}
+  }
 
-    const r2 = await fetch(`${BACKEND_BASE}${path}`, opts);
+  return { ok: !!res.ok, base: BACKEND_BASE, pref: CURRENT_PREF };
+}
+
+async function getAccessTokenR() {
+  try {
+    const r = await chrome.storage.local.get(["sff_access_token"]);
+    return r.sff_access_token || null;
+  } catch {
+    return await new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(["sff_access_token"], (r) => resolve((r && r.sff_access_token) || null));
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+}
+
+async function getTokenIfV2R() {
+  if (CURRENT_PREF !== "v2") return null;
+  return await getAccessTokenR();
+}
+
+async function fetchWithFailoverR(path, opts) {
+  const sel = await ensureBackendResolved(false);
+  if (!sel.base) throw new Error(`No backend base available (pref=${sel.pref}). Start the backend.`);
+
+  const token = sel.pref === "v2" ? await getTokenIfV2R() : null;
+
+  const mergedHeaders = Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {});
+  if (token && !mergedHeaders["Authorization"]) mergedHeaders["Authorization"] = `Bearer ${token}`;
+
+  // IMPORTANT: don't force Content-Type for FormData
+  const finalOpts = Object.assign({ credentials: "omit", cache: "no-store" }, opts || {});
+  finalOpts.headers = mergedHeaders;
+
+  try {
+    const r = await fetch(`${sel.base}${path}`, finalOpts);
+    if (r.ok) return r;
+    throw new Error(`HTTP ${r.status}`);
+  } catch (e) {
+    const sel2 = await ensureBackendResolved(true);
+    if (!sel2.base) throw e;
+
+    const token2 = sel2.pref === "v2" ? await getTokenIfV2R() : null;
+    const mergedHeaders2 = Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {});
+    if (token2 && !mergedHeaders2["Authorization"]) mergedHeaders2["Authorization"] = `Bearer ${token2}`;
+
+    const finalOpts2 = Object.assign({ credentials: "omit", cache: "no-store" }, opts || {});
+    finalOpts2.headers = mergedHeaders2;
+
+    const r2 = await fetch(`${sel2.base}${path}`, finalOpts2);
     if (r2.ok) return r2;
-
-    if (r2.status === 403 && method === "GET") {
-      const r3 = await fetch(`${BACKEND_BASE}${path}`, Object.assign({}, opts, { credentials: "omit" }));
-      if (r3.ok) return r3;
-    }
-    throw new Error(`HTTP ${r2.status} (after failover)`);
+    throw new Error(`HTTP ${r2.status} (after reprobe)`);
   }
 }
 
@@ -101,15 +118,70 @@ function fmtSize(bytes) {
   return `${n.toFixed(1)} ${units[i]}`;
 }
 
+function extractFileNameR(v) {
+  if (!v) return "";
+  const s = String(v);
+  const noQuery = s.split("?")[0];
+  return noQuery.split("/").pop().split("\\").pop() || s;
+}
+
+function normalizeResumesPayloadR(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.resumes)) return payload.resumes;
+  if (Array.isArray(payload.files)) return payload.files;
+  if (Array.isArray(payload.results)) return payload.results;
+
+  // Common wrappers
+  if (payload.data && Array.isArray(payload.data)) return payload.data;
+  if (payload.data && Array.isArray(payload.data.files)) return payload.data.files;
+  if (payload.data && Array.isArray(payload.data.items)) return payload.data.items;
+  if (payload.data && Array.isArray(payload.data.resumes)) return payload.data.resumes;
+
+  return [];
+}
+
+function resumeIdR(r) {
+  if (typeof r === "string") return r;
+  return String(r?.id || r?.resume_id || r?.resumeId || r?.uuid || r?.path || r?.file_path || "").trim();
+}
+
+function resumeNameR(r) {
+  if (typeof r === "string") return extractFileNameR(r);
+  const raw = r?.original_name || r?.originalName || r?.name || r?.filename || r?.path || r?.file_path || "";
+  return extractFileNameR(raw) || resumeIdR(r) || "Resume";
+}
+
+function resumeCreatedTextR(r) {
+  if (!r || typeof r === "string") return "";
+  const v = r?.created_at || r?.createdAt || r?.uploaded_at || r?.updated_at || "";
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().replace("T"," ").replace("Z","");
+}
+
+function resumeSizeBytesR(r) {
+  if (!r || typeof r === "string") return null;
+  return r?.size_bytes ?? r?.sizeBytes ?? r?.bytes ?? r?.size ?? null;
+}
+
 function row(resume) {
+  const id = resumeIdR(resume);
+  const name = resumeNameR(resume);
+  const created = resumeCreatedTextR(resume);
+  const size = resumeSizeBytesR(resume);
+
   const tr = document.createElement("tr");
   tr.innerHTML = `
-    <td>${resume.original_name}</td>
-    <td><span class="muted">${new Date(resume.created_at).toISOString().replace('T',' ').replace('Z','')}</span></td>
-    <td>${fmtSize(resume.size_bytes)}</td>
+    <td>${name}</td>
+    <td><span class="muted">${created || ""}</span></td>
+    <td>${size == null ? "" : fmtSize(size)}</td>
     <td style="white-space:nowrap">
-      <button class="btn btn-ghost" data-view="${resume.id}">View PDF</button>
-      <button class="btn btn-danger" data-del="${resume.id}">Delete</button>
+      <button class="btn btn-ghost" data-view="${id}">View PDF</button>
+      <button class="btn btn-danger" data-del="${id}">Delete</button>
     </td>
   `;
   return tr;
@@ -117,13 +189,20 @@ function row(resume) {
 
 async function refresh() {
   els.tbody.innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
+
+  let sel = null;
   try {
+    sel = await ensureBackendResolved(false);
+    if (!sel.base) throw new Error("No backend base resolved.");
+
     const r = await fetchWithFailoverR(`/resumes`);
-    const data = await r.json();
-    LIMIT = data.max || 5;
+    const data = await r.json().catch(() => ({}));
+
+    LIMIT = Number(data?.max || data?.limit || 5);
     els.maxCount.textContent = LIMIT;
 
-    current = data.items || [];
+    current = normalizeResumesPayloadR(data);
+
     if (!current.length) {
       els.tbody.innerHTML = `<tr><td colspan="4" class="muted">No resumes yet.</td></tr>`;
     } else {
@@ -137,7 +216,9 @@ async function refresh() {
     els.fileInput.disabled = atLimit;
     els.uploadHint.textContent = atLimit ? "Limit reached — delete one to upload another." : "";
   } catch (e) {
-    els.tbody.innerHTML = `<tr><td colspan="4" class="muted">Error loading. Check backend at ${BACKEND_BASE}.</td></tr>`;
+    const baseTxt = (sel && sel.base) ? sel.base : (BACKEND_BASE || "(unknown)");
+    els.tbody.innerHTML = `<tr><td colspan="4" class="muted">Error loading resumes. Backend: ${baseTxt}</td></tr>`;
+    console.warn("[resumes] refresh failed:", e);
   }
 }
 
@@ -145,15 +226,25 @@ els.tbody.addEventListener("click", async (ev) => {
   const viewId = ev.target?.dataset?.view;
   const delId = ev.target?.dataset?.del;
   if (viewId) {
-    // Probe with HEAD (failover may update BACKEND_BASE), then open
-    try { await fetchWithFailoverR(`/resumes/${viewId}/file`, { method: "HEAD" }); } catch {}
-    const url = `${BACKEND_BASE}/resumes/${viewId}/file`;
-    window.open(url, "_blank");
+    try {
+      const r = await fetchWithFailoverR(`/resumes/${encodeURIComponent(viewId)}/file`, { method: "GET" });
+      const blob = await r.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank");
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (e) {
+      const sel = await ensureBackendResolved(false);
+      if (sel.pref === "v2") {
+        alert("Could not open resume file. Make sure you are signed in and v2 is running.");
+      } else {
+        alert("Could not open resume file. Make sure the v1 backend is running and the file exists in backend/data.");
+      }
+    }
   }  
   if (delId) {
     if (!confirm("Delete this resume? This cannot be undone.")) return;
   
-    const r = await fetchWithFailoverR(`/resumes/${delId}`, { method: "DELETE" });
+    const r = await fetchWithFailoverR(`/resumes/${encodeURIComponent(delId)}`, { method: "DELETE" });
     if (!r.ok) { alert("Delete failed."); return; }
   
     // Refresh the table + internal `current` list first
@@ -164,12 +255,13 @@ els.tbody.addEventListener("click", async (ev) => {
       // Read current profile to see what's selected
       const pr = await fetchWithFailoverR(`/profile`);
         if (pr.ok) {
-        const prof = await pr.json();
-        const wasSelected = String(prof.selectedResumeId || "") === String(delId);
+          const profRaw = await pr.json();
+          const prof = (profRaw && profRaw.profile) ? profRaw.profile : profRaw;
+          const wasSelected = String(prof?.selectedResumeId || "") === String(delId);          
   
         if (wasSelected) {
           // pick first remaining resume as fallback (if any)
-          const fallback = (current || []).find(r => String(r.id) !== String(delId));
+          const fallback = (current || []).find(r => String(resumeIdR(r)) !== String(delId));
   
           if (!fallback) {
             // no resumes left → clear selection in backend + local cache
@@ -189,27 +281,32 @@ els.tbody.addEventListener("click", async (ev) => {
               });
             } catch (_) {}
           } else {
+            // compute fallback id/name FIRST (works for object OR string)
+            const fallbackId = resumeIdR(fallback);
+            const fallbackName = resumeNameR(fallback);
+
             // fetch skills for the fallback (same approach popup.js uses)
             let skills = [];
-            try {
-              const sr = await fetchWithFailoverR(`/skills/by_resume`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ resumeId: fallback.id })
-              });
-              const sj = await sr.json();
-              skills = Array.isArray(sj.skills) ? sj.skills : [];
-            } catch (_) {}
-  
-            const fallbackName = fallback.original_name || fallback.name || String(fallback.id);
-            const dedupSkills  = Array.from(new Set(skills)).sort();
+            if (fallbackId) {
+              try {
+                const sr = await fetchWithFailoverR(`/skills/by_resume`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ resumeId: fallbackId })
+                });
+                const sj = await sr.json().catch(() => ({}));
+                skills = Array.isArray(sj.skills) ? sj.skills : [];
+              } catch (_) {}
+            }
+
+            const dedupSkills = Array.from(new Set(skills)).sort();
   
             // patch backend profile
             await fetchWithFailoverR(`/profile`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                selectedResumeId: String(fallback.id),
+                selectedResumeId: String(fallbackId),
                 selectedResumeName: fallbackName,
                 selectedResumeSkills: dedupSkills
               })
@@ -218,8 +315,8 @@ els.tbody.addEventListener("click", async (ev) => {
             // mirror to local cache so popup/content can use immediately
             try {
               await chrome.storage.local.set({
-                lastResumeId: String(fallback.id),
-                selectedResume: { id: String(fallback.id), name: fallbackName, skills: dedupSkills }
+                lastResumeId: String(fallbackId),
+                selectedResume: { id: String(fallbackId), name: fallbackName, skills: dedupSkills }
               });
             } catch (_) {}
           }
@@ -234,16 +331,76 @@ els.tbody.addEventListener("click", async (ev) => {
 els.uploadBtn.addEventListener("click", async () => {
   const f = els.fileInput.files?.[0];
   if (!f) return alert("Choose a .pdf or .docx file.");
+
+  const wasFirstResume = (current?.length || 0) === 0;
+
   const fd = new FormData();
   fd.append("file", f);
+
   els.uploadBtn.disabled = true;
   els.uploadBtn.textContent = "Uploading…";
+
   try {
     const r = await fetchWithFailoverR(`/resumes`, { method: "POST", body: fd });
-    const data = await r.json();
+    const data = await r.json().catch(() => ({}));
+
     if (!r.ok) {
       alert(data.error || "Upload failed.");
+      return;
     }
+
+    // ✅ Auto-select ONLY if this was the first resume in the account
+    if (wasFirstResume) {
+      try {
+        const uploaded = data?.resume || data?.item || data || {};
+        const newId = String(uploaded.id || uploaded.resumeId || "").trim();
+        const newName =
+          uploaded.original_name ||
+          uploaded.name ||
+          uploaded.filename ||
+          f.name ||
+          newId;
+
+        if (newId) {
+          // skills via backend (same pattern you already use elsewhere in this file)
+          let skills = [];
+          try {
+            const sr = await fetchWithFailoverR(`/skills/by_resume`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ resumeId: newId })
+            });
+            const sj = await sr.json().catch(() => ({}));
+            skills = Array.isArray(sj.skills) ? sj.skills : [];
+          } catch (_) {}
+
+          const dedupSkills = Array.from(new Set(skills || [])).sort();
+
+          // Patch backend profile selection
+          await fetchWithFailoverR(`/profile`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              selectedResumeId: newId,
+              selectedResumeName: newName,
+              selectedResumeSkills: dedupSkills
+            })
+          });
+
+          // Mirror to storage so popup/dashboard update instantly
+          try {
+            await chrome.storage.local.set({
+              lastResumeId: newId,
+              selectedResume: { id: newId, name: newName, skills: dedupSkills }
+            });
+            try { chrome.runtime.sendMessage({ action: "profile.updated" }); } catch (_) {}
+          } catch (_) {}
+        }
+      } catch (e) {
+        console.warn("[resumes] auto-select first upload failed:", e);
+      }
+    }
+
     await refresh();
   } catch (e) {
     alert("Network error.");
@@ -254,5 +411,10 @@ els.uploadBtn.addEventListener("click", async () => {
   }
 });
 
-// Init
-refresh();
+// Init: ask background for the selected base, then refresh.
+(async function initResumesPage() {
+  try {
+    await ensureBackendResolved(true); // force a fresh resolve on page load
+  } catch (_) {}
+  await refresh();
+})();

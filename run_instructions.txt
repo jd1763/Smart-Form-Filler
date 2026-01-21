@@ -1,52 +1,88 @@
 # ----------------------------
-# Setup & Run Instructions (User)
+# Setup & Run Instructions (Source of Truth)
 # ----------------------------
 
-# (NEW) Quick Start — Makefile (preferred)
-# These shortcuts wrap docker compose so I don't have to remember long commands.
-#   make up        -> build + start prod-like (Gunicorn @ http://localhost:8000)
-#   make dev       -> start dev hot-reload (http://localhost:8000)
-#   make logs      -> tail logs
-#   make rebuild   -> rebuild image clean
-#   make sh        -> shell into the container
-#   make down      -> stop everything
+# This repo supports TWO backend modes:
+#   v1 (Flask)   = Local-only single “Local Profile” in backend/data (no accounts)
+#   v2 (FastAPI) = Multi-user + JWT auth (accounts)
+#
+# The Chrome extension uses Option A:
+#   background.js is the ONLY resolver for base URL + mode routing.
+#   UI pages do NOT probe ports directly. You pick v1/v2 using the popup toggle.
 
+# ----------------------------
+# Quick Start (Local, no Docker)
+# ----------------------------
 
-# 1) Create a virtual environment with Python 3.12 (on the terminal)
-#    • Apple Silicon macOS (Homebrew):
-#      /opt/homebrew/bin/python3.12 -m venv .venv
-#    • Intel macOS (Homebrew):
-#      /usr/local/opt/python@3.12/bin/python3.12 -m venv .venv
-#    • Fallback (whatever 'python3' resolves to 3.12):
+# 1) Create a virtual environment with Python 3.12
 python3 -m venv .venv
 
-# 2) Activate the virtual environment (every new shell) (on the terminal)
+# 2) Activate it (every new shell)
 source .venv/bin/activate
 
-# 3) Upgrade pip and install runtime dependencies (on the terminal)
+# 3) Install deps
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-# 4) (Optional) Verify spaCy model is present if the wheel failed for any reason (on the terminal)
+# 4) (Optional) spaCy model (only if you see missing model errors)
 python -m spacy download en_core_web_sm
 
-# 5) Start the backend API (on the terminal and keep terminal open)
-#    Local dev defaults: http://127.0.0.1:5000 - http://127.0.0.1:5004
+
+# ----------------------------
+# Run Backend — Choose v1 or v2
+# ----------------------------
+
+# --- v1 (Flask / Local Mode) ---
+# - Local-only single profile in backend/data/profile.json
+# - Resumes live in backend/data/resumes/
+# - No login/logout
+#
+# Local port auto-selects from: 5000–5004
+# Optional override: SFF_PORT=5000
 python -m backend.api
 
-# 6) Load the Chrome extension from ./extension in Developer Mode
-- Open chrome://extensions
-- Enable Developer mode
-- Then click "Load unpacked"
-- Go to the folder smart-form-filler/extension and click select
-- The extension is now added, you are good to go! Just keep the api running
-- Open the popup on a job posting and click "Fill Form"
 
-# Subsequent runs (local):
-source .venv/bin/activate
-python -m backend.api
+# --- v2 (FastAPI / Cloud Mode) ---
+# - Multi-user accounts + JWT
+# - Login/registration enabled
+#
+# Local port auto-selects from: 6000–6004
+# Optional override: SFF_PORT_V2=6000
+python -m backend.fastapi_app
 
 
+# ----------------------------
+# Run BOTH backends at once (recommended for development)
+# ----------------------------
+
+# This starts v1 + v2 together and cleans up old processes on those ports first.
+# Script location: script/run_local_backends.sh
+#
+# It:
+#  - kills old servers on v1 pool 5000–5004
+#  - kills old servers on v2 pool 6001–6004 (avoids 6000)
+#  - starts python -m backend.api   (v1)
+#  - starts python -m backend.fastapi_app (v2)
+#  - Ctrl+C stops both
+bash script/run_local_backends.sh
+
+
+# ----------------------------
+# Load the Chrome Extension
+# ----------------------------
+
+# 1) Open chrome://extensions
+# 2) Enable "Developer mode"
+# 3) Click "Load unpacked"
+# 4) Select: smart-form-filler/extension
+
+# Usage:
+# - Open a job posting page
+# - Open the extension popup
+# - Select backend mode (v1 or v2) using the toggle:
+#     - v1 = Local Profile stored on this computer
+#     - v2 = Sign in / Register (JWT auth)
+# - Click "Fill Form"
 
 
 # ----------------------------
@@ -65,18 +101,18 @@ docker compose up --build backend        # prod-like (Gunicorn @ 8000)
 # or:
 docker compose up --build backend-dev    # dev hot-reload (@ 8000)
 
-# Health check (should return {"ok": true}):
-curl http://localhost:8000/health
-
 # Stop
 docker compose down
 
-# Edit skills whitelist (no code changes needed):
-#   - Edit backend/data/skill_terms.txt
-#   - Restart the container (choose ONE):
-#       docker compose up --build backend        # prod-like
-#       # or:
-#       docker compose up --build backend-dev    # dev hot-reload
+
+# ----------------------------
+# Notes / Overrides
+# ----------------------------
+
+# Local port overrides:
+#   v1: SFF_PORT=5000
+#   v2: SFF_PORT_V2=6000
 #
-# Dev hot-reload inside the container (alternative raw command):
-# docker compose run --service-ports backend-dev bash -lc 'gunicorn --reload backend.api:app -b 0.0.0.0:8000 --workers=1 --threads=4 --timeout=120'
+# Skills whitelist:
+#   - Edit backend/data/skill_terms.txt
+#   - Restart whichever backend you’re using (v1 or v2)

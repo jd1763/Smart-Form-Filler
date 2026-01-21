@@ -23,24 +23,6 @@ let BACKEND_AVAILABLE = null; // null = unknown, true = up, false = down
 // Track which logical backend version the user prefers ("v1" or "v2")
 let BACKEND_VERSION_PREF = "v1";
 
-function showNoResumesCard() {
-  const card = document.getElementById("noResumesCard");
-  const matchCard = document.getElementById("matchCard");
-  const suggestor = document.getElementById("resumeSuggestorCard");
-  const fillBtn = document.getElementById("fillForm");
-  if (card) card.style.display = "";
-  if (matchCard) matchCard.style.display = "none";
-  if (suggestor) suggestor.style.display = "none";
-  if (fillBtn) { fillBtn.disabled = true; fillBtn.title = "Upload a resume first"; }
-}
-
-function hideNoResumesCard() {
-  const card = document.getElementById("noResumesCard");
-  const fillBtn = document.getElementById("fillForm");
-  if (card) card.style.display = "none";
-  if (fillBtn) { fillBtn.disabled = false; fillBtn.title = ""; }
-}
-
 // Load the last selected backend from chrome.storage.sync
 async function loadBackendPreference() {
   try {
@@ -76,8 +58,10 @@ function updateBackendPillUI(pref) {
 
 // Optional inline status under the toggle (if you have an element for it)
 function setBackendToggleMessage(msg) {
-  const el = document.getElementById("backendToggleMsg");
-  if (el) el.textContent = msg || "";
+  const el = document.getElementById("backendToggleMessage");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.style.display = msg ? "block" : "none";
 }
 
 // ------------------------------
@@ -96,6 +80,102 @@ const V2_DOCKER_PORT = 8001;
 let CURRENT_BACKEND =
   (typeof localStorage !== "undefined" && localStorage.getItem("backendPreference")) || "v1";
 
+// Popup-level auth state (v2 only). We use this to prevent the popup from
+// calling match/resume endpoints while signed out (which can cause resolver fallback to v1).
+let POPUP_IS_AUTHENTICATED = false;
+
+function isV2SignedOut() {
+  return CURRENT_BACKEND === "v2" && !POPUP_IS_AUTHENTICATED;
+}
+
+function resetMatchCardToEmptySignedOutV2() {
+  const matchCard = document.getElementById("matchCard");
+
+  // Keep the Job Match card visible so the V1/V2 toggle stays accessible
+  if (matchCard) matchCard.style.display = "";
+
+  // Ensure the gauge SVG is visible (some earlier patches hid it)
+  try {
+    const svg = matchCard?.querySelector("svg");
+    if (svg) svg.style.display = "";
+  } catch {}
+
+  // Reset gauge to the same defaults as popup.html (track visible, arc empty, score is —)
+  const arc = document.getElementById("arc");
+  if (arc) {
+    arc.setAttribute("stroke-dasharray", "0,100");
+    arc.setAttribute("stroke", "#111");
+  }
+
+  const scoreNum = document.getElementById("scoreNum");
+  if (scoreNum) scoreNum.textContent = "—";
+
+  const jdHint2 = document.getElementById("jdHint2");
+  if (jdHint2) jdHint2.textContent = "Sign in to see match";
+
+  const matchStatus = document.getElementById("matchStatus");
+  if (matchStatus) matchStatus.textContent = "";
+
+  // Keep all four skill boxes present, but empty/neutral placeholders
+  const putDashChip = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = "";
+    const s = document.createElement("span");
+    s.className = "chip";
+    s.textContent = "—";
+    el.appendChild(s);
+  };
+
+  putDashChip("matchedReq");
+  putDashChip("matchedPref");
+  putDashChip("missingReq");
+  putDashChip("missingPref");
+}
+
+// Force the popup into the correct logged-out v2 experience.
+// This must be called immediately after logout AND whenever auth.me says unauthenticated.
+function resetSignedOutV2UI() {
+  if (!isV2SignedOut()) return;
+
+  // Keep Job Match card visible + fully rendered (circle + sections), but empty
+  resetMatchCardToEmptySignedOutV2();
+
+  // Hide cards that should NOT appear while signed out in v2
+  const suggestorCard = document.getElementById("resumeSuggestorCard");
+  const noResumesCard = document.getElementById("noResumesCard");
+  if (suggestorCard) suggestorCard.style.display = "none";
+  if (noResumesCard) noResumesCard.style.display = "none";
+
+  // Apply Helper: keep the card but remove resume picker + disable actions
+  const applyCard = document.getElementById("applyCard");
+  const controls = document.getElementById("controls");
+  const fillBtn = document.getElementById("fillForm");
+  const tryBtn = document.getElementById("tryAgain");
+  if (applyCard) applyCard.style.display = "";
+  if (controls) controls.style.display = "none";
+  if (fillBtn) fillBtn.disabled = true;
+  if (tryBtn) tryBtn.style.display = "none";
+
+  // Hide the dynamically injected inline resume picker (created in ensureInlineResumePicker)
+  const inlineHost = document.getElementById("resumeInlineHost");
+  if (inlineHost) inlineHost.style.display = "none";
+
+  // Clear resume suggestor labels if present (prevents sticky text)
+  try {
+    const chosenResume = document.getElementById("chosenResume");
+    const chosenScore = document.getElementById("chosenScore");
+    const selectedResume = document.getElementById("selectedResume");
+    const selectedScore = document.getElementById("selectedScore");
+    const resumeSelect = document.getElementById("resumeSelect");
+    if (chosenResume) chosenResume.textContent = "";
+    if (chosenScore) chosenScore.textContent = "";
+    if (selectedResume) selectedResume.textContent = "";
+    if (selectedScore) selectedScore.textContent = "";
+    if (resumeSelect) resumeSelect.innerHTML = "";
+  } catch {}
+}
+
 // Map a base URL (http://127.0.0.1:PORT) back to v1 or v2
 function inferBackendFromBase(base) {
   if (typeof base !== "string") return null;
@@ -112,17 +192,22 @@ function inferBackendFromBase(base) {
 
 // Update CURRENT_BACKEND + save + refresh pill UI
 function setCurrentBackend(pref) {
-  const normalized = pref === "v2" ? "v2" : "v1";
+  const normalized = pref === "v2" ? "v2" : pref === "v1" ? "v1" : null;
+
+  // IMPORTANT: if pref is missing/invalid, do nothing.
+  // This prevents clobbering the saved backendPref back to v1 on every popup open.
+  if (!normalized) return;
+
   CURRENT_BACKEND = normalized;
 
-  // Keep localStorage for your UI
+  // Keep localStorage for the popup UI (optional)
   try {
     localStorage.setItem("backendPreference", normalized);
   } catch (_) {
     // ignore
   }
 
-  // IMPORTANT: keep background.js in sync so it routes based on the toggle
+  // Keep background.js in sync (single source of truth)
   try {
     chrome.storage.sync.set({ backendPref: normalized });
   } catch (_) {
@@ -156,99 +241,70 @@ function setBackendInfoMessage(msg) {
   }
 }
 
-// Probe a single base for /health with a short timeout
-async function probeHealthOnce(base, timeoutMs = 700) {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const r = await fetch(`${base}/health?t=${Date.now()}`, {
-      method: "GET",
-      cache: "no-store",
-      signal: ctl.signal,
-    });
-    return r.ok;
-  } catch (_) {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Hosts we try for local dev. This lets the extension work whether your
-// manifest.json has host_permissions for 127.0.0.1, localhost, or both.
-const BACKEND_HOSTS = ["http://127.0.0.1", "http://localhost"];
-
-// Given "v1" or "v2", find the first live base in that backend's pool
-async function findBackendBase(version) {
-  const ports =
-    version === "v2"
-      ? [...V2_LOCAL_PORTS, V2_DOCKER_PORT]
-      : [...V1_LOCAL_PORTS, V1_DOCKER_PORT];
-
-  for (const host of BACKEND_HOSTS) {
-    for (const port of ports) {
-      const base = `${host}:${port}`;
-      if (await probeHealthOnce(base)) {
-        return base;
-      }
-    }
-  }
-  return null;
-}
-
-
-// Probe both backends at once.
-// Prefer asking background.js so we share its logic + port pools.
+// Probe both backends at once via background.js (single source of truth).
 async function getMultiBackendStatus() {
-  // 1) Try to reuse background.js' status (single source of truth)
   try {
-    const st = await queryBackendStatus(true); // force reprobe
+    // force reprobe AND probeBoth so background fills v1/v2 fields
+    const st = await queryBackendStatus(true, true);
 
-    if (st && (st.v1 || st.v2)) {
-      const v1 = st.v1 || {};
-      const v2 = st.v2 || {};
-      return {
-        v1Ok:  !!v1.up,
-        v2Ok:  !!v2.up,
-        v1Base: v1.base || null,
-        v2Base: v2.base || null,
-      };
-    }
+    const v1 = (st && st.v1) ? st.v1 : {};
+    const v2 = (st && st.v2) ? st.v2 : {};
+
+    return {
+      v1Ok:  !!v1.up,
+      v2Ok:  !!v2.up,
+      v1Base: v1.base || null,
+      v2Base: v2.base || null,
+    };
   } catch (e) {
-    err("[popup] getMultiBackendStatus via background failed:", e);
+    err("[popup] getMultiBackendStatus failed:", e);
+    return { v1Ok: false, v2Ok: false, v1Base: null, v2Base: null };
   }
+}
 
-  // 2) Fallback: do the old direct probe from the popup
-  const [v1Base, v2Base] = await Promise.all([
-    findBackendBase("v1"),
-    findBackendBase("v2"),
-  ]);
+function _unwrapProfilePayload(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  if (raw.profile && typeof raw.profile === "object") return raw.profile;
+  if (raw.data && raw.data.profile && typeof raw.data.profile === "object") return raw.data.profile;
+  return raw;
+}
 
-  return {
-    v1Ok:  !!v1Base,
-    v2Ok:  !!v2Base,
-    v1Base,
-    v2Base,
-  };
+// Read JWT from chrome storage (same key as background.js)
+async function getAccessTokenPopup() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["sff_access_token"], (result) => {
+      resolve(result?.sff_access_token || null);
+    });
+  });
 }
 
 // Minimal backend helper: single base, no health checks, no failover
 async function fetchWithFailover(path, opts) {
   const baseDefaults = {
     cache: "no-store",
-    credentials: "omit", // no cookies/sessions involved
+    credentials: "omit",
     headers: Object.assign(
       { "Accept": "application/json" },
       (opts && opts.headers) || {}
     ),
   };
+
   const finalOpts = Object.assign({}, baseDefaults, opts || {});
+
+  // IMPORTANT: attach JWT ONLY in v2 mode (v1 must be local/no-accounts)
+  try {
+    if (CURRENT_BACKEND === "v2") {
+      const token = await getAccessTokenPopup();
+      if (token && finalOpts.headers && !finalOpts.headers["Authorization"]) {
+        finalOpts.headers["Authorization"] = `Bearer ${token}`;
+      }
+    }
+  } catch (_) {}
 
   let resp;
   try {
     resp = await fetch(`${BACKEND_BASE}${path}`, finalOpts);
   } catch (e) {
-    // True network error (backend not running / blocked)
     const err = new Error(`network-failed: ${e && e.message}`);
     err.kind = "network";
     throw err;
@@ -256,14 +312,8 @@ async function fetchWithFailover(path, opts) {
 
   if (!resp.ok) {
     let bodyText = "";
-    try {
-      bodyText = await resp.text();
-    } catch (_) {
-      // ignore
-    }
-    const err = new Error(
-      `http-${resp.status}${bodyText ? `: ${bodyText}` : ""}`
-    );
+    try { bodyText = await resp.text(); } catch (_) {}
+    const err = new Error(`http-${resp.status}${bodyText ? `: ${bodyText}` : ""}`);
     err.kind = "http";
     err.status = resp.status;
     err.body = bodyText;
@@ -274,11 +324,16 @@ async function fetchWithFailover(path, opts) {
 }
 
 // Ask background.js for backend base + health so everything uses the same port.
-async function queryBackendStatus(forceReprobe = false) {
+// probeBoth=true makes background probe v1+v2 (used for "retry connection" UI).
+async function queryBackendStatus(forceReprobe = false, probeBoth = false) {
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage(
-        { action: "getBackendStatus", forceReprobe: !!forceReprobe },
+        {
+          action: "getBackendStatus",
+          forceReprobe: !!forceReprobe,
+          probeBoth: !!probeBoth,
+        },
         (resp) => {
           if (!resp || resp.success === false) {
             log("[popup] getBackendStatus failed:", resp && resp.error);
@@ -289,10 +344,8 @@ async function queryBackendStatus(forceReprobe = false) {
             });
             return;
           }
-          if (resp.base) {
-            setBackendBase(resp.base);
-          }
-          log("[popup] getBackendStatus:", resp.ok, "base:", resp.base);
+          if (resp.base) setBackendBase(resp.base);
+          log("[popup] getBackendStatus:", resp.ok, "base:", resp.base, "pref:", resp.pref);
           resolve(resp);
         }
       );
@@ -510,145 +563,134 @@ function diagError(step, message, extra={}) {
   throw e;
 }
 
+let _errTimer = null;
+
+function _getAuthErrorEl() {
+  // Support both ids, and also support legacy code that references authError
+  return (
+    window.authErrorMsg ||
+    window.authError ||
+    document.getElementById("authErrorMsg") ||
+    document.getElementById("authError")
+  );
+}
+
+function flashError(msg, ms = 2500) {
+  const el = _getAuthErrorEl();
+  if (!el) return;
+
+  el.textContent = msg;
+  el.style.opacity = 1;
+
+  if (_errTimer) clearTimeout(_errTimer);
+  _errTimer = setTimeout(() => {
+    el.style.opacity = 0.7; // subtle fade
+  }, ms);
+}
+
+async function setAuthError(text) {
+  const el = _getAuthErrorEl();
+  if (el) el.textContent = text || "";
+}
+
+async function storeAccessToken(token) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ sff_access_token: token }, () => resolve());
+  });
+}
+
+// Uses your existing multi-backend probing
+async function getV2BaseOrNull() {
+  try {
+    const status = await getMultiBackendStatus();
+    // adjust if your status key name differs
+    return status?.v2Base || status?.v2?.base || status?.v2?.baseUrl || null;
+  } catch (e) {
+    console.error("[popup] getMultiBackendStatus failed:", e);
+    return null;
+  }
+}
+
 /* ===================== MATCHER CONFIG ===================== */
 const MATCH_ROUTE = "/match";
 
-// Combined + expanded whitelist (mirrors SKILL_TERMS). Keep lowercase; your normalizer can map symbols.
-const SKILL_WORDS = new Set([
-  // Languages
-  "python","java","javascript","typescript","c","c++","c#","c sharp","csharp",
-  "go","golang","rust","scala","kotlin","swift","objective-c","ruby","php","perl",
-  "r","dart","matlab","julia","sql","nosql","no-sql","bash","zsh","powershell",
-  "html","css","scss","sass","less",
+// Skills whitelist is loaded from skill_terms.txt so popup/profile/dashboard stay in sync.
+let SKILL_WORDS = null;
+let _skillWordsPromise = null;
 
-  // Frontend & Web
-  "react","react.js","reactjs","redux","next.js","nextjs","angular","angularjs",
-  "vue","vue.js","vuejs","svelte","sveltekit","tailwind","tailwindcss","bootstrap",
-  "material ui","mui","chakra ui","three.js","d3","chart.js","storybook",
-  "webpack","vite","rollup","babel","eslint","prettier",
+function _canonSkillTerm(raw) {
+  let t = String(raw || "").trim().toLowerCase();
+  if (!t || t.startsWith("#")) return "";
 
-  // Backend & APIs
-  "node","node.js","nodejs","express","express.js","koa","nest","nest.js","nestjs",
-  "fastify","hapi","django","flask","fastapi","tornado","pyramid",
-  "spring","spring boot","spring mvc","hibernate","quarkus","micronaut",
-  "asp.net","asp.net core",".net",".net core","dotnet","laravel","symfony",
-  "codeigniter","rails","ruby on rails","phoenix","elixir","gin","fiber",
-  "rest","rest api","graphql","grpc","soap","websocket","websockets",
-  "openapi","swagger","asyncio",
+  const compact = t.replace(/\s+/g, "");
+  if (compact === "c++") return "cpp";
+  if (compact === "c#") return "csharp";
+  if (compact === ".net") return "dotnet";
 
-  // Databases (SQL)
-  "mysql","mariadb","postgres","postgresql","oracle","sql server","mssql","sqlite",
-  "aurora","redshift","snowflake","bigquery","synapse","teradata",
+  // Keep phrases as-is (we still support phrase detection elsewhere)
+  return t.replace(/\s+/g, " ");
+}
 
-  // Databases (NoSQL, search, cache, time series, graph)
-  "mongodb","dynamodb","cassandra","couchdb","cosmos db","neo4j","arangodb","janusgraph",
-  "hbase","elasticsearch","opensearch","solr","redis","memcached","influxdb",
-  "timescaledb","prometheus","questdb",
+async function ensureSkillWordsLoaded() {
+  if (SKILL_WORDS) return SKILL_WORDS;
+  if (_skillWordsPromise) return _skillWordsPromise;
 
-  // Data formats & serialization
-  "parquet","orc","avro","jsonl","protobuf","thrift","csv",
+  _skillWordsPromise = (async () => {
+    const url = chrome.runtime.getURL("skill_terms.txt");
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`[popup] failed to load skill_terms.txt (${resp.status})`);
 
-  // Data/ETL/Streaming/Orchestration
-  "spark","hadoop","yarn","mapreduce","hive","pig","presto","trino","flink","beam",
-  "airflow","luigi","prefect","dbt",
-  "kafka","schema registry","ksql","pulsar","kinesis","pubsub","pub/sub",
-  "eventbridge","sqs","sns","rabbitmq","activemq","nats","zeromq","celery","sidekiq",
+    const text = await resp.text();
+    const set = new Set();
 
-  // DevOps / CI-CD / Build
-  "git","github","gitlab","bitbucket","svn",
-  "ci","cd","ci/cd","github actions","gitlab ci","circleci","jenkins","travis",
-  "teamcity","bamboo","spinnaker","argo","argo cd","argo workflows",
-  "nexus","jfrog","artifactory","sonarqube","coveralls","codecov",
-  "maven","gradle","sbt","ant","make","cmake","nmake","poetry","pipenv","virtualenv","conda",
-  "npm","yarn","pnpm","pip","twine","tox","ruff","flake8","black","isort","pylint","mypy",
-  "pre-commit","shellcheck",
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
 
-  // Containers / Orchestration / Networking
-  "docker","docker compose","podman","kubernetes","k8s","helm","istio","linkerd",
-  "traefik","haproxy","nginx","apache httpd","apache","caddy","envoy","consul","vault",
-  "nomad","etcd","zookeeper",
+      const asIs = line.toLowerCase();
+      set.add(asIs);
 
-  // Cloud (AWS)
-  "aws","cloud","iam","ec2","s3","rds","aurora","efs","ecr","elb","alb","nlb","vpc",
-  "route 53","cloudfront","cloudwatch","cloudtrail","lambda","api gateway",
-  "step functions","eventbridge","sns","sqs","sagemaker","athena","glue","emr",
-  "kinesis","eks","ecs","fargate","elastic beanstalk","batch","lightsail","secrets manager",
-  "kms","opensearch",
+      const canon = _canonSkillTerm(asIs);
+      if (canon) set.add(canon);
+    }
 
-  // Cloud (GCP)
-  "gcp","compute engine","cloud storage","cloud sql","bigquery","spanner","firestore",
-  "datastore","bigtable","pub/sub","dataflow","dataproc","composer","gke","cloud run",
-  "cloud functions","vertex ai","cloud build","artifact registry","cloud logging",
-  "cloud monitoring","memorystore","iam",
+    // hard guarantees (even if someone edits the file)
+    set.add("git");
 
-  // Cloud (Azure)
-  "azure","vm","aks","app service","functions","cosmos db","sql database","blob storage",
-  "event hubs","service bus","synapse","databricks","data factory","key vault","monitor",
-  "devops","pipelines","container registry","application gateway",
+    SKILL_WORDS = set;
+    return SKILL_WORDS;
+  })();
 
-  // Testing / QA
-  "unit testing","unittest","pytest","nose","doctest","junit","testng","mockito","hamcrest",
-  "kotest","spock","xunit","mstest","selenium","cypress","playwright","puppeteer",
-  "robot framework","rest-assured","supertest","jest","mocha","chai","ava","vitest",
-  "enzyme","jasmine","karma","postman","newman","locust","k6","gatling","jmeter","tdd","bdd",
-  "property-based testing","hypothesis",
-
-  // Mobile
-  "android","android sdk","jetpack","jetpack compose","gradle","adb",
-  "ios","swiftui","xcode","cocoapods",
-  "react native","expo","flutter","ionic","cordova",
-
-  // Analytics / Viz
-  "matplotlib","seaborn","plotly","bokeh","altair","ggplot","tableau","looker","lookml",
-  "power bi","superset","metabase","redash","grafana","kibana","quicksight",
-
-  // ML / AI / MLOps
-  "machine learning","ml","deep learning","dl","scikit-learn","sklearn","pandas","numpy",
-  "scipy","xgboost","lightgbm","catboost","pytorch","tensorflow","tf","keras",
-  "pytorch lightning","onnx","mlflow","huggingface","transformers","opencv","nltk","spacy",
-  "gensim","fairseq","detectron","yolo","stable diffusion","prophet","statsmodels",
-  "feature engineering","model deployment","model serving","onnxruntime","triton inference server",
-  "kubeflow","seldon","bentoml","ray","ray serve","feast","tfx","vertex ai",
-
-  // Observability / Logging
-  "prometheus","loki","tempo","jaeger","zipkin","opentelemetry","elastic stack","elk",
-  "logstash","fluentd","fluent-bit","datadog","new relic","splunk","sentry","rollbar","honeycomb",
-
-  // Security & Auth
-  "oauth","oauth2","openid connect","oidc","jwt","saml","mfa","sso","rbac","abac",
-  "tls","ssl","https","ssh","bcrypt","argon2","pbkdf2","owasp","cors","csrf","rate limiting",
-  "waf","zap","burp suite","keycloak","okta","auth0","cognito","kms","secrets manager","vault",
-
-  // Architecture & CS topics
-  "microservices","event-driven","domain-driven design","ddd","clean architecture",
-  "hexagonal architecture","cqrs","event sourcing","message queues","caching","cache",
-  "webhooks","serverless","monolith","soa","design patterns","data structures","algorithms",
-  "oop","functional programming","concurrency","multithreading","async","synchronization",
-  "transactions","acid","cap theorem","eventual consistency","distributed systems",
-
-  // Workflow & misc tools
-  "jira","confluence","notion","slack","microsoft teams","excel","gitflow","semver"
-]);
-
+  return _skillWordsPromise;
+}
 
 // === skill aliases (keep minimal) ===
 const SFF_SKILL_ALIASES = Object.assign(Object.create(null), {
   "github": "git",
   "git": "git",
+  "react.js": "reactjs",
+  "next.js": "nextjs",
+  "node.js": "nodejs",
+  "js": "javascript",
+  "ts": "typescript",
+  "k8s": "kubernetes",
 });
 
 // small normalizer used only here
 function sffNormSkillToken(s) {
-  const t = String(s || "").toLowerCase().trim()
-    .replace(/(^[^a-z0-9]+|[^a-z0-9]+$)/g, ""); // trim punctuation at ends
-  return SFF_SKILL_ALIASES[t] || t;
-}
+  let t = String(s || "").toLowerCase().trim();
 
-// make sure 'git' is in the canonical vocab
-if (typeof SKILL_WORDS === "undefined") {
-  window.SKILL_WORDS = new Set(["git"]);
-} else {
-  SKILL_WORDS.add("git");
+  // trim junk punctuation at ends BUT keep tech chars like + # . / -
+  t = t.replace(/^[^a-z0-9.+#/-]+|[^a-z0-9.+#/-]+$/g, "");
+
+  const compact = t.replace(/\s+/g, "");
+
+  // canonicalize common language tokens
+  if (compact === "c++") return "cpp";
+  if (compact === "c#") return "csharp";
+  if (compact === ".net") return "dotnet";
+
+  return SFF_SKILL_ALIASES[compact] || compact;
 }
 
 function sffCollectSkills(text) {
@@ -664,6 +706,7 @@ function sffCollectSkills(text) {
 
 // ================= BUCKETS / RENDERING =================
 (async function BucketUI() {
+  await ensureSkillWordsLoaded();
   // --- DOM refs
   const detectedToggle   = document.getElementById("detectedToggle");
   const detectedFieldsEl = document.getElementById("detectedFields");
@@ -1532,20 +1575,28 @@ async function callBoth(job_text, resume_id){
 /* ===================== CONTENT HELPERS ===================== */
 function showNoResumesCard() {
   const card = document.getElementById("noResumesCard");
-  const matchCard = document.getElementById("matchCard");
-  const suggestor = document.getElementById("resumeSuggestorCard");
   const fillBtn = document.getElementById("fillForm");
-  if (card) card.style.display = "";
-  if (matchCard) matchCard.style.display = "none";
-  if (suggestor) suggestor.style.display = "none";
-  if (fillBtn) { fillBtn.disabled = true; fillBtn.title = "Upload a resume first"; }
+  if (card) card.style.display = "block";
+
+  // Fill Form stays enabled (auth is the only gate). We just show a warning.
+  if (fillBtn) {
+    fillBtn.title = "Upload a resume for best results (optional)";
+  }
 }
 
 function hideNoResumesCard() {
   const card = document.getElementById("noResumesCard");
   const fillBtn = document.getElementById("fillForm");
   if (card) card.style.display = "none";
-  if (fillBtn) { fillBtn.disabled = false; fillBtn.title = ""; }
+  if (fillBtn) { fillBtn.title = ""; }
+}
+
+function inferMimeFromFilename(filename = "") {
+  const lower = String(filename).toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".docx"))
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  return "";
 }
 
 // Timed warning message under the Apply Helper buttons when backend is down
@@ -1739,6 +1790,9 @@ async function getJobDescription(){
 
 /* ===================== RESUME STORAGE ===================== */
 async function loadAllResumesFromBackend(){
+  // Never load resumes in v2 while signed out (prevents resolver fallback to v1 local).
+  if (isV2SignedOut()) return [];
+
   // If we've already decided the backend is down, don't even try again
   if (BACKEND_AVAILABLE === false) {
     return [];
@@ -1756,8 +1810,22 @@ async function loadAllResumesFromBackend(){
       createdAt: it.created_at
     }));
   } catch (e) {
-    // If it's a network failure *or* a 403 from your backend, treat it as "unusable"
-    if (e.kind === "network" || e.status === 403) {
+    // 403 means "forbidden" (usually v2 signed out). Do NOT mark backend offline.
+    if (e.status === 403) {
+      BACKEND_AVAILABLE = true;
+
+      const statusEl = document.getElementById("status");
+      if (statusEl) {
+        statusEl.textContent =
+          (CURRENT_BACKEND === "v2")
+            ? "Sign in to load your resumes."
+            : "Resume list unavailable (403).";
+      }
+      return [];
+    }
+
+    // Network failures: treat as unavailable
+    if (e.kind === "network" || e.status === 0) {
       BACKEND_AVAILABLE = false;
 
       const statusEl = document.getElementById("status");
@@ -1835,31 +1903,30 @@ async function setSelectedResumeById(resumeId, resumeName){
       selectedResume: { id: resumeId, name, skills }
     });
 
-    // 3) Guard: only touch backend if it's reachable (prevents wipes if down/misconfigured)
-    let backendOk = false;
+    // 3) Read current profile first, then PATCH the full merged object
+    //    (v2 can error on partial PATCH shapes; full merge is safest for v1 + v2)
+    let currentProfile = null;
     try {
-      await fetchWithFailover(`/profile`);
-      backendOk = true;
+      const pr = await fetchWithFailover(`/profile`);
+      currentProfile = await pr.json();
     } catch (_) {
-      backendOk = false;
-    }    
-    if (!backendOk) {
       console.warn("[popup] GET /profile failed; skip PATCH to avoid corrupting profile.json");
       console.log("[popup] Cached selection locally only.");
-      return; // ← do not PATCH if we can't read current profile
+      return;
     }
 
-    // 4) PATCH-merge only the selectedResume* fields (Step 2)
-    const patch = {
-      selectedResumeId: String(resumeId || ""),
-      selectedResumeName: String(name || ""),
-      selectedResumeSkills: Array.from(new Set(skills)).sort()
-    };
+    if (!currentProfile || typeof currentProfile !== "object") currentProfile = {};
+
+    // 4) Merge selection into the existing profile and PATCH the full object
+    currentProfile.selectedResumeId = String(resumeId || "");
+    currentProfile.selectedResumeName = String(name || "");
+    currentProfile.selectedResumeSkills = Array.from(new Set(skills)).sort();
+
     await fetchWithFailover(`/profile`, {
       method: "PATCH",
-      headers: { "Content-Type":"application/json" },
-      body: JSON.stringify(patch)
-    });    
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentProfile)
+    });
 
     console.log("[popup] selectedResume updated with skills:", resumeId, skills.length);
   } catch (e) {
@@ -1869,6 +1936,12 @@ async function setSelectedResumeById(resumeId, resumeName){
 
 /* ============= INLINE RESUME PICKER IN FILLER CARD (always visible) ============= */
 function ensureInlineResumePicker(resumes){
+  // In v2 signed-out, do not show the resume picker at all.
+  if (isV2SignedOut()) {
+    const host = document.getElementById("resumeInlineHost");
+    if (host) host.style.display = "none";
+    return;
+  }  
   const controls = document.getElementById("controls");
   if (!controls) return;
   let host = document.getElementById("resumeInlineHost");
@@ -1945,6 +2018,15 @@ async function autoMatch(){
   const hideMatch = () => { if(matchCard) matchCard.style.display = "none"; };
   const showMatch = () => { if(matchCard) matchCard.style.display = ""; };
 
+  // v2 signed-out: never match, never load resumes (prevents v1 fallback content).
+  if (isV2SignedOut()) {
+    hideMatch();
+    const suggestor = document.getElementById("resumeSuggestorCard");
+    if (suggestor) suggestor.style.display = "none";
+    resetSignedOutV2UI();
+    return;
+  }
+  
   // Default state
   setArc(0);
   if (elsM.hint) elsM.hint.textContent = "detecting…";
@@ -2330,6 +2412,13 @@ async function preloadAndRestore(){
   const tab = await getActiveTab();
   if (!tab) { setStatus("❌ No active tab."); return; }
 
+  // v2 signed-out: do not preload resumes or restore UI state.
+  if (isV2SignedOut()) {
+    resetSignedOutV2UI();
+    setStatus("Not signed in.");
+    return;
+  }  
+
   // BACKEND HEALTH GATE: don't even try /resumes if backend is down
   if (BACKEND_AVAILABLE === false) {
     return;
@@ -2441,84 +2530,6 @@ async function renderResultsAndRemember(url, resp, statusText){
   }catch{}
 }
 
-async function runFill(){
-  // If backend is known to be down, do not run fill;
-  if (BACKEND_AVAILABLE === false) {
-    return;
-  }
-
-  // If backend status is unknown, probe once before attempting to fill.
-  if (BACKEND_AVAILABLE === null) {
-    const ok = await ensureBackendHealthy(true);
-    if (!ok) {
-      showBackendButtonsWarning();
-      setStatus("⚠ Selected backend is offline. Use the toggle above to switch to a running version.");
-      return;
-    }
-  }
-
-  const tab = await getActiveTab();
-  if(!tab){ setStatus("❌ No active tab."); return; }
-
-  const cls = classifyPageUrl(tab.url||"");
-  if(!cls.ok){ setStatus(cls.msg); return; }
-
-  // Try to ensure content script without throwing
-  const ensured = await ensureContentSafe(tab.id);
-  if(!ensured.ok){
-    if (ensured.reason === "injectionDenied") {
-      setStatus("❌ Could not inject on this page (blocked origin). Try another tab.");
-      return;
-    }
-    if (ensured.reason === "notReachable") {
-      setStatus("❌ Content script not reachable. Refresh the page and try again.");
-      return;
-    }
-    setStatus("❌ Could not reach content script.");
-    return;
-  }
-
-  // Frame resolution should not crash the UI
-  let frameId = 0;
-  try {
-    frameId = await getBestFrame(tab.id);
-  } catch (e) {
-    console.warn("[popup] getBestFrame failed:", e);
-    frameId = 0;
-  }
-
-  const resp = await sendToFrameSafe(tab.id, frameId, { action:"fillFormSmart" });
-  if(!resp){ setStatus("❌ No response from content script."); return; }
-
-  // Friendly outcomes
-  if (resp.ok === true) {
-    if (typeof resp.inputs === "number") {
-      if (resp.inputs === 0) setStatus("❌ No form fields detected on this page.");
-      else flashStatus("✅ Form filled! You can try again.", 2600);
-      return;
-    }
-    flashStatus("✅ Done.", 2200, " Ready.");
-    return;
-  }  
-
-  // Known structured error
-  if (resp.ok === false && resp.error) {
-    // Normalize a couple of common messages
-    if (/no\s*fields/i.test(resp.error)) {
-      setStatus("❌ No form fields detected on this page.");
-      return;
-    }
-    if (/not\s*supported/i.test(resp.error)) {
-      setStatus("❌ This page type can’t be filled.");
-      return;
-    }
-    setStatus("❌ Error: " + resp.error);
-    return;
-  }
-
-  setStatus("ℹ️ Unexpected response (see console).");
-}
-
 /* ===================== INIT (backend-aware) ===================== */
 document.addEventListener("DOMContentLoaded", () => {
   const matchCard      = document.getElementById("matchCard");
@@ -2527,6 +2538,618 @@ document.addEventListener("DOMContentLoaded", () => {
   const retryBtn       = document.getElementById("retryConnectionBtn");
   const backendToggleMsg =
     document.getElementById("backendToggleMessage");
+  
+    // --- Auth UI elements (profile strip at top of popup) ---
+    const authStatusLabel = document.getElementById("authStatusLabel");
+    const authAvatar = document.getElementById("authAvatar");
+    const authShowFormBtn = document.getElementById("authShowFormBtn");
+    const authLogoutBtn = document.getElementById("authLogoutBtn");
+    const authMenu = document.getElementById("authMenu");
+    const authMenuProfileBtn = document.getElementById("authMenuProfileBtn");
+    const authMenuLogoutBtn = document.getElementById("authMenuLogoutBtn");
+    const authFormCard = document.getElementById("authFormCard");
+    const authUsernameInput = document.getElementById("authUsername");
+    const authEmailInput = document.getElementById("authEmail");
+    const authFirstNameInput = document.getElementById("authFirstName");
+    const authLastNameInput = document.getElementById("authLastName");
+    const authRegisterFields = document.getElementById("authRegisterFields");
+    const authConfirmPasswordField = document.getElementById("authConfirmPasswordField");
+    const authPasswordInput = document.getElementById("authPassword");    
+    const authPasswordConfirmInput = document.getElementById("authPasswordConfirm");
+    const authShowPasswordBtn = document.getElementById("authShowPasswordBtn");
+    const authShowPasswordConfirmBtn = document.getElementById("authShowPasswordConfirmBtn");
+    const authLoginBtn = document.getElementById("authLoginBtn");
+    const authCancelBtn = document.getElementById("authCancelBtn");
+    const authErrorMsg =
+    document.getElementById("authErrorMsg") || document.getElementById("authError");
+  
+    // Make it globally available so any legacy references don't crash
+    window.authErrorMsg = authErrorMsg;
+    window.authError = authErrorMsg;
+    // --- Auth mode (login vs register) ---
+    const authCardTitle = document.getElementById("authCardTitle");
+    const authCardSubtitle = document.getElementById("authCardSubtitle");
+    const authModeHelpText = document.getElementById("authModeHelpText");
+    const authModeToggleBtn = document.getElementById("authModeToggleBtn");
+
+    let AUTH_MODE = "login"; // "login" | "register"
+
+    function setPasswordVisible(inputEl, btnEl, visible) {
+      if (!inputEl || !btnEl) return;
+      inputEl.type = visible ? "text" : "password";
+      btnEl.textContent = visible ? "Hide" : "Show";
+    }
+    
+    let _pwVisible = false;
+    let _pwConfirmVisible = false;
+    
+    authShowPasswordBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      _pwVisible = !_pwVisible;
+      setPasswordVisible(authPasswordInput, authShowPasswordBtn, _pwVisible);
+    });
+    
+    authShowPasswordConfirmBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      _pwConfirmVisible = !_pwConfirmVisible;
+      setPasswordVisible(authPasswordConfirmInput, authShowPasswordConfirmBtn, _pwConfirmVisible);
+    });
+    
+    function renderAuthMode() {
+      const isRegister = AUTH_MODE === "register";
+
+      if (authCardTitle) authCardTitle.textContent = isRegister ? "Create your account" : "Sign in to Smart Form Filler";
+      if (authCardSubtitle) authCardSubtitle.textContent = isRegister
+        ? "Create an account to save your profile and resumes."
+        : "Use the same account across jobs and browsers.";
+
+      if (authLoginBtn) authLoginBtn.textContent = isRegister ? "Create account" : "Sign in";
+      if (authModeHelpText) authModeHelpText.textContent = isRegister ? "Already have an account?" : "No account?";
+      if (authModeToggleBtn) authModeToggleBtn.textContent = isRegister ? "Sign in" : "Create account";
+
+      if (authErrorMsg) authErrorMsg.textContent = "";
+
+      if (authRegisterFields) authRegisterFields.style.display = isRegister ? "" : "none";
+      if (authConfirmPasswordField) authConfirmPasswordField.style.display = isRegister ? "" : "none";
+      
+      // Better autocomplete behavior
+      if (authPasswordInput) authPasswordInput.autocomplete = isRegister ? "new-password" : "current-password";
+      if (authPasswordConfirmInput) authPasswordConfirmInput.autocomplete = "new-password";
+      
+      // Reset confirm + visibility toggles when switching modes
+      _pwVisible = false;
+      _pwConfirmVisible = false;
+      setPasswordVisible(authPasswordInput, authShowPasswordBtn, false);
+      setPasswordVisible(authPasswordConfirmInput, authShowPasswordConfirmBtn, false);
+      
+      if (authPasswordConfirmInput) authPasswordConfirmInput.value = "";
+    }
+
+    authModeToggleBtn?.addEventListener("click", () => {
+      AUTH_MODE = AUTH_MODE === "login" ? "register" : "login";
+      renderAuthMode();
+    });
+
+    renderAuthMode();
+
+    // --- Onboarding gate (Phase D) ---
+    const onboardingGate = document.getElementById("onboardingGate");
+    const onboardingGateText = document.getElementById("onboardingGateText");
+    const completeSetupBtn = document.getElementById("completeSetupBtn");
+
+    // Fill buttons to disable when onboarding is incomplete
+    const fillFormBtn = document.getElementById("fillForm"); // main button
+    const btnFillDebug = document.getElementById("btnFill"); // debug fill button
+
+    function setFillButtonsEnabled(enabled, reason) {
+      const title = enabled ? "" : (reason || "Complete setup first.");
+      for (const btn of [fillFormBtn, btnFillDebug]) {
+        if (!btn) continue;
+        btn.disabled = !enabled;
+        btn.title = title;
+      }
+    }
+
+    function applyOnboardingGate(show, text = "") {
+      if (!onboardingGate) return;
+      onboardingGate.style.display = show ? "block" : "none";
+      if (onboardingGateText) onboardingGateText.textContent = text || "";
+      // IMPORTANT: do NOT disable Fill Form here anymore (auth is the only gate)
+    }
+    
+    function refreshOnboardingGate() {
+      // Only show warnings for v2
+      if (CURRENT_BACKEND !== "v2") {
+        applyOnboardingGate(false, "");
+        return;
+      }
+    
+      // Only gate for v2 is auth
+      if (!_isAuthenticated) {
+        applyOnboardingGate(true, "Sign in to use Fill Form.");
+        setFillButtonsEnabled(false, "Sign in required");
+
+        // IMPORTANT: never show "Complete setup" while signed out (it routes to dashboard)
+        if (completeSetupBtn) completeSetupBtn.style.display = "none";
+
+        return;
+      }
+
+      // Signed in v2: allow button (if you still want it)
+      if (completeSetupBtn) completeSetupBtn.style.display = "";
+    
+      // Ask background for onboarding status (popup does NOT have callApi)
+      chrome.runtime.sendMessage({ action: "onboarding.status" }, (resp) => {
+        if (chrome.runtime.lastError || !resp) {
+          // don’t block if something transient happens
+          applyOnboardingGate(false, "");
+          setFillButtonsEnabled(true, "");
+          return;
+        }
+    
+        // backend down is still a real blocker for v2 usage
+        if (resp.backendUp === false) {
+          applyOnboardingGate(true, "FastAPI v2 is not running. Start it or switch to v1.");
+          setFillButtonsEnabled(false, "Backend v2 offline");
+          return;
+        }
+    
+        // profile/resume are warnings only (no blocking)
+        const warnings = [];
+        if (resp.hasResume === false) warnings.push("Upload a resume for best results (optional).");
+        if (resp.hasProfile === false) warnings.push("Fill profile info for best results (optional).");
+    
+        if (warnings.length) applyOnboardingGate(true, `Optional: ${warnings.join(" ")}`);
+        else applyOnboardingGate(false, "");
+    
+        setFillButtonsEnabled(true, "");
+      });
+    }    
+
+    completeSetupBtn?.addEventListener("click", () => {
+      // Open the Profile Dashboard (normal mode)
+      const url = chrome.runtime.getURL("profile_dashboard.html");
+      try {
+        chrome.tabs.create({ url });
+      } catch {
+        window.open(url, "_blank");
+      }
+    });    
+  
+    // Ask background who we are (if token exists) and update UI
+    function refreshAuthState() {
+      // Return a Promise so callers can await “auth is known” before running preload/match.
+      return new Promise((resolve) => {
+        if (!chrome?.runtime?.sendMessage) {
+          resolve();
+          return;
+        }
+    
+        // ===== v1 (Local / Legacy) =====
+        if (CURRENT_BACKEND !== "v2") {
+          POPUP_IS_AUTHENTICATED = true;
+          _isAuthenticated = true;
+    
+          closeAuthMenu();
+    
+          if (authStatusLabel) authStatusLabel.textContent = "Local profile (stored on this computer)";
+          if (authAvatar) {
+            authAvatar.textContent = "L";
+            authAvatar.style.display = "flex";
+          }
+    
+          if (authShowFormBtn) authShowFormBtn.style.display = "none";
+          if (authFormCard) authFormCard.style.display = "none";
+          if (authLogoutBtn) authLogoutBtn.style.display = "none";
+          if (authMenuLogoutBtn) authMenuLogoutBtn.style.display = "none";
+          if (authMenuProfileBtn) authMenuProfileBtn.style.display = "";
+    
+          // In v1, show Apply controls (local mode)
+          const controls = document.getElementById("controls");
+          if (controls) controls.style.display = "flex";
+          const inlineHost = document.getElementById("resumeInlineHost");
+          if (inlineHost) inlineHost.style.display = "flex";
+    
+          refreshOnboardingGate();
+          resolve();
+          return;
+        }
+    
+        // ===== v2 (Cloud / Modern) =====
+        chrome.runtime.sendMessage({ action: "auth.me" }, (resp) => {
+          if (!resp?.success || !resp.authenticated) {
+            if (authStatusLabel) authStatusLabel.textContent = "Not signed in";
+            if (authAvatar) authAvatar.style.display = "none";
+          
+            if (authShowFormBtn) authShowFormBtn.style.display = "inline-block";
+            if (authFormCard) authFormCard.style.display = "none";
+            if (authLogoutBtn) authLogoutBtn.style.display = "none";
+          
+            // Ensure logout menu item is available when signed in later
+            if (authMenuLogoutBtn) authMenuLogoutBtn.style.display = "";
+          
+            _isAuthenticated = false;
+            POPUP_IS_AUTHENTICATED = false;
+          
+            // ✅ Force the full “signed-out v2” UI, including an empty-but-complete matcher card
+            resetSignedOutV2UI();
+          
+            closeAuthMenu();
+            refreshOnboardingGate();
+            return;
+          }
+              
+          // Authenticated
+          const user = resp.user || {};
+          const label = user.username || user.email || "";
+    
+          if (authStatusLabel) {
+            authStatusLabel.textContent = label ? `Signed in as ${label}` : "Signed in";
+          }
+    
+          if (authAvatar) {
+            const initial = (label || "?").trim().charAt(0).toUpperCase() || "?";
+            authAvatar.textContent = initial;
+            authAvatar.style.display = "flex";
+          }
+    
+          if (authShowFormBtn) authShowFormBtn.style.display = "none";
+          if (authFormCard) authFormCard.style.display = "none";
+          if (authLogoutBtn) authLogoutBtn.style.display = "none";
+          if (authMenuLogoutBtn) authMenuLogoutBtn.style.display = "";
+    
+          POPUP_IS_AUTHENTICATED = true;
+          _isAuthenticated = true;
+    
+          // Re-enable Apply controls in v2 when signed in
+          const controls = document.getElementById("controls");
+          if (controls) controls.style.display = "flex";
+          const inlineHost = document.getElementById("resumeInlineHost");
+          if (inlineHost) inlineHost.style.display = "flex";
+    
+          closeAuthMenu();
+          POPUP_IS_AUTHENTICATED = true;
+          refreshOnboardingGate();
+          resolve();
+        });
+      });
+    }     
+  
+    // --- Avatar menu helpers ---
+    let _isAuthenticated = false;
+
+    // --- v2 signed-out gating for the main cards (Job Match / Suggestor / Apply Helper) ---
+    function isV2SignedOut() {
+      return CURRENT_BACKEND === "v2" && !_isAuthenticated;
+    }
+
+    function clearMainCardsUI() {
+      try { setArc(0); } catch (e) {}
+    
+      // Job Match card
+      const scoreNum = document.getElementById("scoreNum");
+      const matchStatus = document.getElementById("matchStatus");
+      const matchedReq = document.getElementById("matchedReq");
+      const matchedPref = document.getElementById("matchedPref");
+      const missingReq = document.getElementById("missingReq");
+      const missingPref = document.getElementById("missingPref");
+    
+      if (scoreNum) scoreNum.textContent = "—";
+      if (matchStatus) matchStatus.textContent = "";
+    
+      // These are chip containers (DIVs); clearing textContent is fine
+      if (matchedReq) matchedReq.textContent = "";
+      if (matchedPref) matchedPref.textContent = "";
+      if (missingReq) missingReq.textContent = "";
+      if (missingPref) missingPref.textContent = "";
+    
+      // Suggestor card
+      const chosenResume = document.getElementById("chosenResume");
+      const chosenScore = document.getElementById("chosenScore");
+      const resumeSelect = document.getElementById("resumeSelect");
+      const resumeStatus = document.getElementById("resumeStatus");
+    
+      if (chosenResume) chosenResume.textContent = "—";
+      if (chosenScore) chosenScore.textContent = "Match: —";
+      if (resumeStatus) resumeStatus.textContent = "—";
+      if (resumeSelect) resumeSelect.innerHTML = "";
+    }
+
+    function applyAuthVisibility() {
+      const matchCardEl = document.getElementById("matchCard");
+      const suggestorCardEl = document.getElementById("resumeSuggestorCard");
+      const noResumesCardEl = document.getElementById("noResumesCard");
+    
+      const controlsEl = document.getElementById("controls");
+      const gateEl = document.getElementById("onboardingGate");
+      const gateTextEl = document.getElementById("onboardingGateText");
+      const gateBtnEl = document.getElementById("completeSetupBtn");
+    
+      const backendPills = document.getElementById("backendTogglePills");
+      const jdHint2 = document.getElementById("jdHint2");
+      const matchStatus = document.getElementById("matchStatus");
+    
+      // Helpers to hide the skill sections inside Job Match while keeping the card + pills
+      const hideSkillSection = (chipContainerId) => {
+        const chips = document.getElementById(chipContainerId);
+        if (!chips) return;
+    
+        // Hide the row that contains required+preferred skill boxes
+        const row = chips.closest(".row");
+        if (row) row.style.display = "none";
+    
+        // Hide the header right above that row (“Matched skills” / “Missing skills”)
+        const header = row?.previousElementSibling;
+        if (header && header.classList.contains("muted")) header.style.display = "none";
+      };
+    
+      const showSkillSection = (chipContainerId) => {
+        const chips = document.getElementById(chipContainerId);
+        if (!chips) return;
+        const row = chips.closest(".row");
+        if (row) row.style.display = "";
+        const header = row?.previousElementSibling;
+        if (header && header.classList.contains("muted")) header.style.display = "";
+      };
+    
+      if (isV2SignedOut()) {
+        // Keep Job Match card visible ONLY to preserve the V1/V2 toggle pills
+        if (matchCardEl) matchCardEl.style.display = "";
+        if (backendPills) backendPills.style.display = "flex";
+    
+        // Hide actual match UI content inside Job Match
+        clearMainCardsUI();
+    
+        // Hide gauge svg (no score arc while signed out)
+        const svg = matchCardEl?.querySelector("svg");
+        if (svg) svg.style.display = "none";
+    
+        // Change hint text
+        if (jdHint2) jdHint2.textContent = "Sign in to see Job Match";
+        if (matchStatus) matchStatus.textContent = "";
+    
+        // Hide skill sections (both “Matched skills” + “Missing skills” blocks)
+        hideSkillSection("matchedReq");
+        hideSkillSection("missingReq");
+    
+        // Hide Suggestor + “No resumes” card entirely when signed out
+        if (suggestorCardEl) suggestorCardEl.style.display = "none";
+        if (noResumesCardEl) noResumesCardEl.style.display = "none";
+    
+        // Apply Helper: hide buttons, show sign-in message, hide Complete setup button
+        if (controlsEl) controlsEl.style.display = "none";
+    
+        if (gateEl) {
+          gateEl.style.display = "block";
+          gateEl.dataset.authGate = "1";
+        }
+        if (gateTextEl) gateTextEl.textContent = "Sign in to use Fill Form.";
+        if (gateBtnEl) gateBtnEl.style.display = "none";
+    
+        return;
+      }
+    
+      // Signed in (or v1): restore normal visibility
+      if (matchCardEl) matchCardEl.style.display = "";
+      if (suggestorCardEl) suggestorCardEl.style.display = "";
+      // noResumesCardEl is controlled elsewhere
+    
+      // Restore SVG + skill sections (Job Match)
+      const svg = matchCardEl?.querySelector("svg");
+      if (svg) svg.style.display = "";
+      if (jdHint2 && jdHint2.textContent === "Sign in to see Job Match") {
+        jdHint2.textContent = "auto-detected from page";
+      }
+      showSkillSection("matchedReq");
+      showSkillSection("missingReq");
+    
+      if (controlsEl) controlsEl.style.display = "flex";
+    
+      // If we previously forced the auth gate, let refreshOnboardingGate decide now
+      if (gateEl && gateEl.dataset.authGate === "1") {
+        gateEl.style.display = "none";
+        delete gateEl.dataset.authGate;
+      }
+    
+      // Let onboarding logic decide whether this should appear (but default visible)
+      if (gateBtnEl) gateBtnEl.style.display = "";
+    }    
+
+    function closeAuthMenu() {
+      if (authMenu) authMenu.style.display = "none";
+    }
+
+    function toggleAuthMenu() {
+      if (!_isAuthenticated || !authMenu) return;
+      const open = authMenu.style.display === "block";
+      authMenu.style.display = open ? "none" : "block";
+    }
+
+    // Close menu on outside click
+    document.addEventListener("click", () => closeAuthMenu());
+
+    // Prevent clicks inside the menu from closing it
+    authMenu?.addEventListener("click", (e) => e.stopPropagation());
+
+    // Avatar opens menu
+    authAvatar?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleAuthMenu();
+    });
+
+    // Menu actions
+    authMenuProfileBtn?.addEventListener("click", () => {
+      closeAuthMenu();
+      // Open React Profile Dashboard
+      window.open(chrome.runtime.getURL("profile_dashboard.html"), "_blank");
+    });
+
+    // --- Auth buttons wiring ---
+    // Show the inline login form
+    authShowFormBtn?.addEventListener("click", () => {
+      if (authFormCard) {
+        authFormCard.style.display = "";
+      }
+      if (authErrorMsg) {
+        authErrorMsg.textContent = "";
+      }
+      if (authPasswordInput) {
+        authPasswordInput.value = "";
+      }
+    });
+  
+    // Cancel login form
+    authCancelBtn?.addEventListener("click", () => {
+      if (authFormCard) {
+        authFormCard.style.display = "none";
+      }
+    });
+  
+    // Attempt login via background -> FastAPI v2
+    authLoginBtn?.addEventListener("click", async () => {
+      const username = (authUsernameInput?.value || "").trim();
+      const password = authPasswordInput?.value || "";
+    
+      const isRegister = AUTH_MODE === "register";
+      await setAuthError("");
+    
+      if (!username || !password) {
+        await setAuthError("Enter username and password.");
+        return;
+      }
+    
+      if (!isRegister) {
+        await setAuthError("Signing in…");
+        chrome.runtime.sendMessage({ action: "auth.login", username, password }, (resp) => {
+          if (chrome.runtime.lastError) {
+            setAuthError("Auth error (FastAPI v2 may be offline).");
+            return;
+          }
+          if (!resp?.success) {
+            setAuthError(resp?.error || "Invalid username or password.");
+            return;
+          }
+          if (authFormCard) authFormCard.style.display = "none";
+          setAuthError("");
+          
+          // Force the popup UI to fully re-render (same as closing + reopening)
+          // so any state initialized during popup boot doesn't stay stale.
+          const hardReload = () => {
+            try {
+              window.location.reload();
+            } catch {
+              refreshAuthState();
+            }
+          };
+          
+          // Clear any cached user-scoped UI state so we don't show the previous user.
+          try {
+            chrome.storage.local.remove(
+              ["lastResumeId", "selectedResume", "profile", "profileVersion"],
+              hardReload
+            );
+          } catch {
+            hardReload();
+          }          
+        });
+        return;
+      }
+
+      // Register via background -> FastAPI v2 (no resume at signup)
+      const confirmPassword = authPasswordConfirmInput?.value || "";
+      const email = (authEmailInput?.value || "").trim();
+      const firstName = (authFirstNameInput?.value || "").trim();
+      const lastName = (authLastNameInput?.value || "").trim();
+
+      if (!confirmPassword) {
+        await setAuthError("Confirm your password.");
+        return;
+      }
+      if (password !== confirmPassword) {
+        await setAuthError("Passwords do not match.");
+        return;
+      }
+      if (!firstName || !lastName || !email) {
+        await setAuthError("Enter first name, last name, and email.");
+        return;
+      }
+
+      await setAuthError("Creating account…");
+      chrome.runtime.sendMessage(
+        { action: "auth.register", username, password, confirmPassword, email, firstName, lastName },
+        (resp) => {
+          if (chrome.runtime.lastError) {
+            setAuthError("Auth error (FastAPI v2 may be offline).");
+            return;
+          }
+          if (!resp?.success) {
+            setAuthError(resp?.error || "Registration failed.");
+            return;
+          }
+          if (authFormCard) authFormCard.style.display = "none";
+          setAuthError("");
+          // After account creation, open the existing Profile Dashboard in setup mode
+          const dashUrl = chrome.runtime.getURL("profile_dashboard.html")
+          try {
+            chrome.tabs.create({ url: dashUrl });
+          } catch {
+            window.open(dashUrl, "_blank");
+          }
+          refreshAuthState();
+        }
+      );
+      return;
+    });    
+  
+  // Logout: clear token via background
+  function doLogout() {
+    if (!chrome?.runtime?.sendMessage) return;
+
+    chrome.runtime.sendMessage({ action: "auth.logout" }, async () => {
+      if (chrome.runtime.lastError) {
+        console.warn(
+          "[popup] auth.logout error:",
+          chrome.runtime.lastError.message
+        );
+      }
+
+      closeAuthMenu();
+
+      if (authStatusLabel) authStatusLabel.textContent = "Not signed in";
+      if (authAvatar) authAvatar.style.display = "none";
+      if (authShowFormBtn) authShowFormBtn.style.display = "inline-block";
+      if (authLogoutBtn) authLogoutBtn.style.display = "none";
+
+      _isAuthenticated = false;
+      POPUP_IS_AUTHENTICATED = false;
+      resetSignedOutV2UI();
+      applyOnboardingGate(false, "Sign in to use Fill Form.");
+
+      // Clear any cached user-scoped UI state so we don't show the previous user.
+      try {
+        await chrome.storage.local.remove([
+          "lastResumeId",
+          "selectedResume",
+          "profile",
+          "profileVersion",
+        ]);
+      } catch {}
+
+      // Force the popup UI to fully re-render (same as closing + reopening)
+      try {
+        window.location.reload();
+      } catch {
+        BACKEND_AVAILABLE = null;
+        runInitialLoad();
+      }
+    });
+  }
+
+  authLogoutBtn?.addEventListener("click", doLogout);
+  authMenuLogoutBtn?.addEventListener("click", () => {
+    closeAuthMenu();
+    doLogout();
+  });
 
   // Helper to show "selected backend offline" under the toggle
   function showBackendOfflineMessage() {
@@ -2587,24 +3210,27 @@ document.addEventListener("DOMContentLoaded", () => {
       setBackendBase(targetBase);
       setBackendInfoMessage("");
 
+      // IMPORTANT: re-check auth against the newly selected backend
+      await refreshAuthState();
+
+      // If we switched to v2 but we’re signed out, show logged-out v2 UI and stop.
+      if (isV2SignedOut()) {
+        if (statusEl) statusEl.textContent = "Not signed in.";
+        resetSignedOutV2UI();
+        return;
+      }
+
       if (statusEl) {
-        statusEl.textContent =
-          "🔄 Refreshing with backend " + target.toUpperCase() + "…";
+        statusEl.textContent = "🔄 Refreshing with backend " + target.toUpperCase() + "…";
       }
 
       try {
-        // No full-screen offline overlay here; just refresh content
         await preloadAndRestore();
         await autoMatch();
-        if (statusEl) {
-          statusEl.textContent = "✅ Connected to Smart Form Filler API.";
-        }
+        if (statusEl) statusEl.textContent = "✅ Connected to Smart Form Filler API.";
       } catch (e) {
         err("[popup] error after backend switch:", e);
-        if (statusEl) {
-          statusEl.textContent =
-            "❌ Error after switching backend. See console for details.";
-        }
+        if (statusEl) statusEl.textContent = "❌ Error after switching backend. See console for details.";
       }
       return;
     }
@@ -2667,219 +3293,182 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function runInitialLoad() {
-    // Always start with the full-screen loading overlay
-    setLoading(true, "Connecting to API…");
+    // Always start with the loading overlay hidden until we decide otherwise
+    setLoading(true);
   
-    // This checks ONLY the currently selected backend (via background).
     const ok = await ensureBackendHealthy();
-  
-    if (!ok) {
-      log("[popup] selected backend appears offline on open");
-  
-      // Now probe both v1 and v2 directly so we can decide how to behave.
-      let multi;
-      try {
-        multi = await getMultiBackendStatus();
-      } catch (e) {
-        err("[popup] getMultiBackendStatus error on open:", e);
-        multi = { v1Ok: false, v2Ok: false };
-      }
-  
-      const v1Up = !!(multi && multi.v1Ok);
-      const v2Up = !!(multi && multi.v2Ok);
-      const target = CURRENT_BACKEND === "v2" ? "v2" : "v1";
-  
-      // CASE A: both backends are down → keep the big overlay + retry.
-      if (!v1Up && !v2Up) {
-        const label = document.getElementById("loadingMsg");
-        if (label) {
-          label.textContent =
-            "❌ Both backends appear to be offline. Start either Flask (v1) or FastAPI (v2), then click “Retry connection”.";
-        }
-        if (statusEl) {
-          statusEl.textContent =
-            "❌ Both backends appear to be offline. Start a backend, then click Retry.";
-        }
+    
+    // AUTH GATE (v2): don't show/restore main cards until we know auth.me
+    if (CURRENT_BACKEND === "v2") {
+      await refreshAuthState();
+      if (isV2SignedOut()) {
+        // Logged-out v2 experience: hide/clear main cards and stop here.
+        setLoading(false);
+        setBackendInfoMessage("");
+        clearBackendOfflineMessage();
+        clearBackendButtonsWarning();
         if (retryBtn) {
-          retryBtn.style.display = "";
+          retryBtn.style.display = "none";
           retryBtn.disabled = false;
         }
-  
-        // Keep overlay visible; don't show match cards.
-        if (matchCard)     matchCard.style.display = "none";
-        if (suggestorCard) suggestorCard.style.display = "none";
-        showNoResumesCard();
+        if (statusEl) statusEl.textContent = "Not signed in.";
+        applyAuthVisibility();
         return;
       }
+    }
   
-      // CASE B: selected backend is down, but the OTHER backend is up.
-      // → No overlay, just show a message telling the user to switch.
-      setLoading(false);
+    // If selected backend is not ok, we may still have another backend alive (e.g. v1 is up when user selected v2).
+    if (!ok) {
+      // keep the loading overlay visible in this error state
+      setLoading(true);
+  
       if (retryBtn) {
-        retryBtn.style.display = "none";
+        retryBtn.style.display = "inline-block";
         retryBtn.disabled = false;
       }
   
-      showBackendOfflineMessage();
-  
-      let infoMsg = "";
-      if (target === "v1" && !v1Up && v2Up) {
-        infoMsg =
-          "Backend v1 is not running, but v2 is. Switch to v2 to use Smart Form Filler.";
-      } else if (target === "v2" && !v2Up && v1Up) {
-        infoMsg =
-          "Backend v2 is not running, but v1 is. Switch to v1 to use Smart Form Filler.";
+      // Still show status message (and remember: in v2 signed-out we hide cards anyway via applyAuthVisibility)
+      if (statusEl) {
+        statusEl.textContent = "❌ Backend not reachable. Start it and click Retry.";
       }
-      setBackendInfoMessage(infoMsg);
   
-      // Show the cards, but DO NOT auto-load or auto-switch backends.
-      if (matchCard)     matchCard.style.display = "";
-      if (suggestorCard) suggestorCard.style.display = "";
-      // We deliberately do NOT call preloadAndRestore()/autoMatch() here,
-      // because that would talk to a backend the user hasn't selected.
+      applyAuthVisibility();
       return;
     }
   
-    // CASE C: selected backend is healthy → normal path
+    // Backend is healthy. Normal path.
     setLoading(false);
-    if (retryBtn) {
-      retryBtn.style.display = "none";
-      retryBtn.disabled = false;
-    }
-    
+    setBackendInfoMessage("");
     clearBackendOfflineMessage();
     clearBackendButtonsWarning();
-
-    if (matchCard)     matchCard.style.display = "";
-    if (suggestorCard) suggestorCard.style.display = "";
-    hideNoResumesCard();
+  
+    if (statusEl) {
+      statusEl.textContent = "✅ Connected to Smart Form Filler API.";
+    }
+  
+    // Show cards only when allowed (v2 signed-out must stay hidden)
+    applyAuthVisibility();
+    if (!isV2SignedOut()) {
+      if (matchCard)     matchCard.style.display = "";
+      if (suggestorCard) suggestorCard.style.display = "";
+      hideNoResumesCard();
+    }
+  
+    // In v2, we must know auth status before we preload/match.
+    await refreshAuthState();
+    if (isV2SignedOut()) {
+      if (statusEl) statusEl.textContent = "Not signed in.";
+      resetSignedOutV2UI();
+      return;
+    }
   
     try {
       await preloadAndRestore();
       await autoMatch();
     } catch (e) {
-      err("[popup] error on preload/autoMatch:", e);
-      if (statusEl) {
-        statusEl.textContent =
-          "❌ Error while loading resumes or matching. See console for details.";
-      }
+      console.warn("[popup] preload/match error:", e);
     }
   }  
 
   // Optional: “Retry connection” button
   if (retryBtn) {
     retryBtn.addEventListener("click", async () => {
-      if (retryBtn.disabled) return;
-  
-      retryBtn.disabled = true;
-  
-      const label = document.getElementById("loadingMsg");
-  
-      // Show "re-connecting..." in both the overlay and status line
-      if (label) {
-        label.textContent = "Re-connecting to Smart Form Filler API…";
-      }
+      if (retryBtn) retryBtn.disabled = true;
+    
+      // Make sure the loading overlay is visible while retrying
+      setLoading(true);
+    
       if (statusEl) {
-        statusEl.textContent = "Re-connecting to Smart Form Filler API…";
+        statusEl.textContent = "⏳ Retrying connection to backend…";
       }
-  
-      // Make sure the loading overlay is visible during the check
-      setLoading(true, "Re-connecting to API…");
-  
-      const ok = await ensureBackendHealthy(true); // force background to re-probe
-  
+    
+      const ok = await ensureBackendHealthy();
+    
       if (!ok) {
-        // Selected backend is still offline. Check if the *other* backend is up.
-        let multi;
-        try {
-          multi = await getMultiBackendStatus();
-        } catch (e) {
-          err("[popup] getMultiBackendStatus error on retry:", e);
-          multi = { v1Ok: false, v2Ok: false };
-        }
-  
-        const v1Up = !!(multi && multi.v1Ok);
-        const v2Up = !!(multi && multi.v2Ok);
-        const target = CURRENT_BACKEND === "v2" ? "v2" : "v1";
-  
-        // If both are down, we stay in full overlay mode.
-        if (!v1Up && !v2Up) {
-          retryBtn.disabled = false;
-  
-          if (label) {
-            label.textContent =
-              "❌ Both backends still appear to be offline. Start a backend, then click Retry connection again.";
-          }
-          if (statusEl) {
-            statusEl.textContent =
-              "❌ Both backends still appear to be offline. Make sure a backend is running, then try again.";
-          }
-  
-          // Keep the overlay up.
-          return;
-        }
-  
-        // At least one backend is up → hide the overlay and tell the user
-        // to use the toggle. We do NOT auto-switch.
-        setLoading(false);
-        retryBtn.disabled = false;
-        retryBtn.style.display = "none";
-  
+        // Still broken → keep overlay and leave Retry visible/enabled
+        setLoading(true);
+    
         if (statusEl) {
-          statusEl.textContent =
-            "⚠ Selected backend is offline. Use the toggle above to switch to a running version.";
+          statusEl.textContent = "❌ Still cannot reach backend. Start it and try again.";
         }
-  
-        let infoMsg = "";
-        if (target === "v1" && !v1Up && v2Up) {
-          infoMsg =
-            "Backend v1 is not running, but v2 is. Switch to v2 to use Smart Form Filler.";
-        } else if (target === "v2" && !v2Up && v1Up) {
-          infoMsg =
-            "Backend v2 is not running, but v1 is. Switch to v1 to use Smart Form Filler.";
+    
+        if (retryBtn) {
+          retryBtn.style.display = "inline-block";
+          retryBtn.disabled = false;
         }
-        setBackendInfoMessage(infoMsg);
-        
-        // Show the main cards, but DO NOT override the resumes state.
-        // We keep whatever the user had and just tell them to switch.
-        if (matchCard)     matchCard.style.display = "";
-        if (suggestorCard) suggestorCard.style.display = "";
-        hideNoResumesCard();
-        clearBackendButtonsWarning();
-        
-        return;        
-      }  
-  
+    
+        applyAuthVisibility();
+        return;
+      }
+    
       // Now online — hide overlay and restore the normal UI
       setLoading(false);
+      setBackendInfoMessage("");
       clearBackendOfflineMessage();
-      clearBackendButtonsWarning()
-  
+      clearBackendButtonsWarning();
+    
+      // Ensure auth is up-to-date before showing anything
+      await refreshAuthState();
+      applyAuthVisibility();
+    
       if (statusEl) {
         statusEl.textContent = "✅ Connected to Smart Form Filler API.";
       }
-      if (matchCard)     matchCard.style.display = "";
-      if (suggestorCard) suggestorCard.style.display = "";
-      hideNoResumesCard();
-  
-      retryBtn.style.display = "none";
-      retryBtn.disabled = false;
-  
+    
+      if (!isV2SignedOut()) {
+        if (matchCard)     matchCard.style.display = "";
+        if (suggestorCard) suggestorCard.style.display = "";
+        hideNoResumesCard();
+      }
+    
+      if (retryBtn) {
+        retryBtn.style.display = "none";
+        retryBtn.disabled = false;
+      }
+    
+      // IMPORTANT: don't restore/match when v2 is signed out
+      if (isV2SignedOut()) {
+        return;
+      }
+    
       try {
         await preloadAndRestore();
         await autoMatch();
       } catch (e) {
-        err("[popup] error after reconnect:", e);
-        if (statusEl) {
-          statusEl.textContent =
-            "❌ Error while loading resumes or matching after reconnect. See console for details.";
-        }
+        console.warn("[popup] preload/match error:", e);
       }
-    });
+    });    
   }
 
   // Kick things off once DOM is ready
-  runInitialLoad();
+  (async () => {
+    // Restore the last selected backend toggle.
+    // Source of truth: chrome.storage.sync backendPref (so background.js matches).
+    // Fallback: localStorage backendPreference (older installs).
+    let pref = "v1";
+
+    try {
+      const st = await chrome.storage.sync.get("backendPref");
+      if (st?.backendPref === "v1" || st?.backendPref === "v2") {
+        pref = st.backendPref;
+      }
+    } catch (_) {}
+
+    if (pref !== "v1" && pref !== "v2") {
+      try {
+        const ls = localStorage.getItem("backendPreference");
+        if (ls === "v1" || ls === "v2") pref = ls;
+      } catch (_) {}
+    }
+
+    setCurrentBackend(pref);
+
+    // Always refresh auth before we load anything (prevents v2 signed-out -> v1-looking UI).
+    await refreshAuthState();
+
+    // Normal boot sequence (runInitialLoad already blocks preload/match when v2 signed out).
+    await runInitialLoad();
+  })();
 });
 
 // Buttons
@@ -3228,22 +3817,6 @@ async function rescanNow() {
 }
 window.rescanNow = rescanNow;
 
-// === Fill form button (no extra experience clicks) ===
-document.getElementById("fillForm")?.addEventListener("click", async () => {
-  await withActiveTab(async (tab) => {
-    if (!tab?.id) return;
-    // 1) Smart fill (adds what’s needed & fills it)
-    await sendToTab(tab.id, { action: "fillFormSmart" });
-
-    // 2) Small settle, then refresh popup counts
-    await new Promise(r => setTimeout(r, 350));
-    await rescanNow();    
-
-    // 3) (optional) recheck key skills
-    await sendToTab(tab.id, { action: "EXT_CHECK_KEY_SKILLS" });
-  });
-});
-
 // Also refresh once when popup opens so the initial numbers are right
 document.addEventListener('DOMContentLoaded', async () => {
   const t = await getActiveTabSimple();
@@ -3513,14 +4086,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
-
-// Bind the Fill button after DOM is ready (supports new or old id)
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("fillForm")
-  if (!btn) return;
-  btn.addEventListener("click", runFill); // use the unified handler you already have
-});
-
 
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("btnFill");

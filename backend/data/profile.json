@@ -9,26 +9,26 @@
   },
   "education": [
     {
-      "school": "Rutgers University",
-      "field": "Computer Science",
-      "gpa": "3.5",
-      "startMonth": "9",
-      "startYear": "2023",
+      "degreeLong": "Bachelor of Science",
+      "degreeShort": "BS",
       "endMonth": "5",
       "endYear": "2025",
-      "degreeShort": "BS",
-      "degreeLong": "Bachelor of Science"
+      "field": "Computer Science",
+      "gpa": "3.5",
+      "school": "Rutgers University",
+      "startMonth": "9",
+      "startYear": "2023"
     },
     {
-      "school": "Middlesex County College",
-      "field": "Computer Science",
-      "gpa": "3.6",
-      "startMonth": "9",
-      "startYear": "2021",
+      "degreeLong": "Associate of Science",
+      "degreeShort": "AS",
       "endMonth": "8",
       "endYear": "2023",
-      "degreeShort": "AS",
-      "degreeLong": "Associate of Science"
+      "field": "Computer Science",
+      "gpa": "3.6",
+      "school": "Middlesex County College",
+      "startMonth": "9",
+      "startYear": "2021"
     }
   ],
   "eligibility": {
@@ -46,23 +46,23 @@
   "experience": [
     {
       "company": "Target",
-      "jobTitle": "Learnig Ambassador",
       "description": "▪ Delivered training programs for new hires, accelerating onboarding and improving team performance.\n▪ Used in-store systems to schedule shipments, track trailer arrivals, and manage inventory operations.\n▪ Maintained communication with leadership teams to support logistics and resolve operational issues.\n▪ Supported daily warehouse operations by assisting with inventory movement, equipment handling, and task coordination to ensure smooth workflows.",
-      "startMonth": "2",
-      "startYear": "2021",
       "endMonth": "6",
       "endYear": "2024",
-      "isCurrent": false
+      "isCurrent": false,
+      "jobTitle": "Learnig Ambassador",
+      "startMonth": "2",
+      "startYear": "2021"
     },
     {
       "company": "Amazon",
-      "jobTitle": "Warehouse Associate",
       "description": "Daily warehouse operations.",
-      "startMonth": "8",
-      "startYear": "2025",
       "endMonth": "9",
       "endYear": "2025",
-      "isCurrent": true
+      "isCurrent": true,
+      "jobTitle": "Warehouse Associate",
+      "startMonth": "8",
+      "startYear": "2025"
     }
   ],
   "highestEducation": "Bachelor's",
@@ -79,28 +79,10 @@
     "lastName": "Done",
     "phoneNumber": "8482035240"
   },
-  "selectedResumeId": "361ed183-4d35-415c-a042-61a89a7ca1fe",
-  "selectedResumeName": "Jorgeluis_Done_Resume.pdf",
+  "selectedResumeId": "89cee15a-9e28-4e7b-a7ea-d6e823fbf30b",
+  "selectedResumeName": "minimal_match.pdf",
   "selectedResumeSkills": [
-    "aws",
-    "cicd",
-    "cpp",
-    "css",
-    "docker",
-    "flask",
-    "github",
-    "html",
-    "java",
-    "javascript",
-    "linux",
-    "mysql",
-    "numpy",
-    "pandas",
-    "python",
-    "react",
-    "rest",
-    "sql",
-    "sqlite"
+    "sql"
   ],
   "yearsOfExperience": "3"
 }

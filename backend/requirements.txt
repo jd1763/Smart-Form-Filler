@@ -19,3 +19,6 @@ python-docx
 boto3>=1.35.0
 botocore
 python-dotenv>=1.0.0
+
+PyJWT>=2.9.0
+pydantic[email]

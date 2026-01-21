@@ -131,36 +131,37 @@
           <label>Years of Professional Experience</label>
           <select id="yearsOfExperience">
             <option value="">—</option>
-            <option>0</option>
-            <option>1</option>
-            <option>2</option>
-            <option>3</option>
-            <option>4</option>
-            <option>5</option>
-            <option>6</option>
-            <option>7</option>
-            <option>8</option>
-            <option>9</option>
-            <option>10+</option>
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <!-- IMPORTANT: label shows 10+, but value is numeric -->
+            <option value="10">10+</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Highest Education</label>
+          <select id="highestEducation">
+            <option value="">—</option>
+            <option>High School</option>
+            <option>Certificate</option>
+            <option>Diploma</option>
+            <option>Associate's</option>
+            <option>Bachelor's</option>
+            <option>Master's</option>
+            <option>MBA</option>
+            <option>Doctorate</option>
           </select>
         </div>
       </div>
     </div>
-
-    <div>
-      <label>Highest Education</label>
-      <select id="highestEducation">
-        <option value="">—</option>
-        <option>High School</option>
-        <option>Certificate</option>
-        <option>Diploma</option>
-        <option>Associate's</option>
-        <option>Bachelor's</option>
-        <option>Master's</option>
-        <option>MBA</option>
-        <option>Doctorate</option>
-      </select>
-    </div>    
   
     <!-- Education -->
     <div class="card">
@@ -291,6 +292,7 @@
       <span id="status" class="muted"></span>
     </div>
   
-    <script src="profile.js"></script>
+    <script src="./skills_whitelist.js"></script>
+    <script src="./profile.js"></script>    
   </body>
   

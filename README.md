@@ -222,6 +222,50 @@ Full MVP of **AI Job Application Assistant**, combining the smart form filler an
 > - **Gated initialization**: a small global flag prevents data loads and auto-match work until a backend is confirmed alive.
 > - **Seamless handoff**: once connected, the overlay hides, the popup initializes (resumes list, detections, matching), and normal UX resumes without user action.
 
+## What’s new (Jan 2026)
+
+> **Two backend modes (v1 Local / v2 Cloud)**
+> - **v2 (FastAPI)**: multi-user accounts, JWT auth, per-user resumes + profile, optional S3.
+> - **v1 (Flask)**: single **Local Profile** stored in `backend/data/profile.json` + resumes under `backend/data/resumes/`.
+> - v1 is truly local-only (no accounts, no login/logout).
+
+> **Option A routing (Background = single resolver)**
+> - **background.js is the only resolver** for backend base URL + mode selection.
+> - Popup + pages **do not probe ports directly** anymore — they ask background for status and route through it.
+> - Less noise: when running in v1, the extension **stops probing v2 health/auth**.
+
+> **Dashboard pages now route correctly (v1 vs v2)**
+> - `profile.js`, `resumes.js`, `profile_dashboard.js` correctly use the background resolver in both modes.
+> - Fixed dashboard crashes introduced by mixed v1/v2 assumptions:
+>   - `backendReady is not defined` (resumes page)
+>   - `token is not defined` (dashboard)
+
+> **Auth + registration flow (v2)**
+> - v2 signup/login is now fully wired end-to-end (register → login → `/auth/me`).
+> - Registration payload upgraded to match real onboarding fields:
+>   - `username`, `email`, `firstName`, `lastName`, `password`
+> - Logout is routed through background and clears auth state correctly.
+
+> **Correct signed-out v2 popup experience (no “hybrid UI”)**
+> - After signing out in v2:
+>   - Top account section shows **Not signed in** + Sign in button.
+>   - **No match/suggestor/apply content rehydrates** from cached state.
+>   - Matching + resume restore logic is **gated** and does not run while unauthenticated.
+> - Job Match card renders **fully** (including the circle gauge + layout) but shows **empty placeholders** (no results) so the **v1/v2 toggle stays visible**.
+
+> **Toggle persistence**
+> - The popup now **restores the last selected backend** (v1 or v2) every time it opens.
+> - Mode preference is stored in `chrome.storage.sync` (`backendPref`) and mirrored to local storage for UI.
+
+> **v1 Local-only hardening**
+> - v1 backend now consistently reads/writes local data under `backend/data/` (profile + resumes) and ignores S3 when local-only is enabled.
+> - v1 resume indexing and defaults were fixed so local resumes are always discoverable.
+
+> **Tests updated**
+> - Auth tests updated to reflect the current FastAPI schema:
+>   - `/auth/register` expects `username, email, firstName, lastName, password`
+>   - `/auth/login` expects `username, password`
+> - `pytest` now passes cleanly after these auth/contract changes.
 
 ---
 ## Setup

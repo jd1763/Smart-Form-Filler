@@ -1,104 +1,139 @@
-let BACKEND_BASE = localStorage.getItem("backend_base") || "http://127.0.0.1:5000";
-let API_BASE = BACKEND_BASE;
+// ===============================
+// Option A: Background is resolver
+// profile.js must NOT probe ports.
+// ===============================
 
-// Prefer Docker (8000) if /resumes responds with JSON; else local (5000)
-(async function preferDockerOnProfilePage(){
-  const candidates = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
-  for (const base of candidates) {
+let BACKEND_BASE = null;
+let CURRENT_PREF = "v1";
+let LAST_RESOLVE_TS = 0;
+
+function bgGetBackendStatus(forceReprobe = false) {
+  return new Promise((resolve) => {
     try {
-      const r = await fetch(`${base}/resumes?t=${Date.now()}`, {
-        credentials: "omit",
-        headers: { "Accept": "application/json" },
-        cache: "no-store"
-      });
-      if (r.ok) {
-        BACKEND_BASE = base;
-        API_BASE = base;
-        try { localStorage.setItem("backend_base", base); } catch {}
-        break;
-      }
-    } catch {}
+      chrome.runtime.sendMessage(
+        { action: "getBackendStatus", forceReprobe: !!forceReprobe },
+        (res) => resolve(res || null)
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function ensureBackendResolved(force = false) {
+  const now = Date.now();
+  if (!force && BACKEND_BASE && (now - LAST_RESOLVE_TS) < 5000) {
+    return { ok: true, base: BACKEND_BASE, pref: CURRENT_PREF };
   }
-})();
 
-async function _probe(base, timeoutMs = 900) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const r = await fetch(`${base}/resumes?t=${Date.now()}`, {
-      signal: ctl.signal,
-      credentials: "omit",
-      headers: { "Accept": "application/json" },
-      cache: "no-store"
-    });
-    return r.ok;
-  } catch { return false; }
-  finally { clearTimeout(t); }
-}
+  const res = await bgGetBackendStatus(force);
+  if (!res || !res.success) {
+    BACKEND_BASE = null;
+    CURRENT_PREF = "v1";
+    LAST_RESOLVE_TS = now;
+    return { ok: false, base: null, pref: "v1" };
+  }
 
-async function _failoverBase() {
-  const order = ["http://127.0.0.1:8000", "http://127.0.0.1:5000"];
-  for (const b of order) if (await _probe(b)) return b;
-  return "http://127.0.0.1:5000";
-}
-async function fetchWithFailoverP(path, opts) {
-  const baseHeaders = Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {});
-  opts = Object.assign({ credentials: "omit", cache: "no-store", headers: baseHeaders }, opts || {});
-  const method = (opts.method || "GET").toUpperCase();
+  CURRENT_PREF = res.pref === "v2" ? "v2" : "v1";
+  BACKEND_BASE = res.base ? String(res.base).replace(/\/+$/, "") : null;
+  LAST_RESOLVE_TS = now;
 
-  try {
-    const r = await fetch(`${BACKEND_BASE}${path}`, opts);
-    if (r.ok) return r;
-
-    if (r.status === 403 && method === "GET") {
-      const r0 = await fetch(`${BACKEND_BASE}${path}`, Object.assign({}, opts, { credentials: "omit" }));
-      if (r0.ok) return r0;
-    }
-    throw new Error(`HTTP ${r.status}`);
-  } catch {
-    BACKEND_BASE = await _failoverBase();
-    API_BASE = BACKEND_BASE;
+  // optional: keep for debugging only; not used for routing
+  if (BACKEND_BASE) {
     try { localStorage.setItem("backend_base", BACKEND_BASE); } catch {}
+  }
 
-    const r2 = await fetch(`${BACKEND_BASE}${path}`, opts);
+  return { ok: !!res.ok, base: BACKEND_BASE, pref: CURRENT_PREF };
+}
+
+async function getAccessTokenP() {
+  // token may exist, but we only use it when CURRENT_PREF === "v2"
+  try {
+    const r = await chrome.storage.local.get(["sff_access_token"]);
+    return r.sff_access_token || null;
+  } catch {
+    return await new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(["sff_access_token"], (r) => resolve((r && r.sff_access_token) || null));
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+}
+
+async function getTokenIfV2() {
+  if (CURRENT_PREF !== "v2") return null;
+  return await getAccessTokenP();
+}
+
+async function fetchWithFailoverP(path, opts) {
+  const sel = await ensureBackendResolved(false);
+  if (!sel.base) throw new Error(`No backend base available (pref=${sel.pref}). Start the backend.`);
+
+  const token = sel.pref === "v2" ? await getTokenIfV2() : null;
+
+  const mergedHeaders = Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {});
+  if (token && !mergedHeaders["Authorization"]) mergedHeaders["Authorization"] = `Bearer ${token}`;
+
+  const finalOpts = Object.assign({ credentials: "omit", cache: "no-store" }, opts || {});
+  finalOpts.headers = mergedHeaders;
+
+  try {
+    const r = await fetch(`${sel.base}${path}`, finalOpts);
+    if (r.ok) return r;
+    throw new Error(`HTTP ${r.status}`);
+  } catch (e) {
+    // retry once after forcing background to re-probe ports
+    const sel2 = await ensureBackendResolved(true);
+    if (!sel2.base) throw e;
+
+    const token2 = sel2.pref === "v2" ? await getTokenIfV2() : null;
+    const mergedHeaders2 = Object.assign({ "Accept": "application/json" }, (opts && opts.headers) || {});
+    if (token2 && !mergedHeaders2["Authorization"]) mergedHeaders2["Authorization"] = `Bearer ${token2}`;
+
+    const finalOpts2 = Object.assign({ credentials: "omit", cache: "no-store" }, opts || {});
+    finalOpts2.headers = mergedHeaders2;
+
+    const r2 = await fetch(`${sel2.base}${path}`, finalOpts2);
     if (r2.ok) return r2;
-
-    if (r2.status === 403 && method === "GET") {
-      const r3 = await fetch(`${BACKEND_BASE}${path}`, Object.assign({}, opts, { credentials: "omit" }));
-      if (r3.ok) return r3;
-    }
-    throw new Error(`HTTP ${r2.status} (after failover)`);
+    throw new Error(`HTTP ${r2.status} (after reprobe)`);
   }
 }
 
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
 
-// light canonicalization + whitelist (keep in sync with popup/content)
-const _ALIASES = { "c++":"cpp","c#":"csharp",".net":"dotnet","node.js":"nodejs","react.js":"react","next.js":"nextjs","express.js":"express","k8s":"kubernetes","js":"javascript","ts":"typescript" };
-const _WHITELIST = new Set([
-  "python","java","c","cpp","csharp","go","golang","rust","kotlin","swift",
-  "javascript","typescript","html","css","sql","mysql","postgres","postgresql","sqlite","oracle","mongodb","redis",
-  "react","nextjs","angular","vue","node","nodejs","express","django","flask","fastapi","spring","springboot","aspnet","dotnet","rails","laravel",
-  "pandas","numpy","scikit-learn","sklearn","tensorflow","pytorch","keras","xgboost","spark","hadoop","kafka","airflow",
-  "aws","azure","gcp","docker","kubernetes","terraform","ansible","jenkins","github","gitlab","cicd","rest","graphql","grpc","linux","bash","powershell",
-  "bigquery","snowflake","databricks","tableau","postman","jira","confluence","s3","iam","eks","ecs"
-]);
-function _normTok(s){
-  let t = String(s||"").toLowerCase().trim().replace(/(^[^a-z0-9]+|[^a-z0-9]+$)/g,"");
-  return _ALIASES[t] || t;
+// ===== Skills extraction (shared) =====
+// Uses skills_whitelist.js + skill_terms.txt (single source of truth)
+async function _skillsFromTextShared(text) {
+  try {
+    if (window.SkillsWhitelist && typeof window.SkillsWhitelist.extractFromText === "function") {
+      return await window.SkillsWhitelist.extractFromText(text || "");
+    }
+  } catch (e) {
+    console.warn("[profile] SkillsWhitelist.extractFromText failed:", e);
+  }
+  return [];
 }
-function _extractSkillsFromText(text){
-  const toks = (String(text||"").toLowerCase().match(/[a-z][a-z0-9+.#/-]{1,}/g) || []).map(_normTok);
-  const out = new Set();
-  for (const tk of toks) if (tk && _WHITELIST.has(tk)) out.add(tk);
-  return Array.from(out).sort();
-}
+
 async function _getProfile(){
   try {
     const r = await fetchWithFailoverP(`/profile`);
-    return r.ok ? await r.json() : {};
-  } catch { return {}; }
+    const raw = r.ok ? await r.json() : {};
+
+    if (raw && typeof raw === "object") {
+      if (raw.profile && typeof raw.profile === "object") return raw.profile;
+      if (raw.data && raw.data.profile && typeof raw.data.profile === "object") return raw.data.profile;
+
+      // also accept { data: { ...actual profile... } }
+      if (raw.data && typeof raw.data === "object" && !Array.isArray(raw.data)) return raw.data;
+    }
+
+    return raw || {};
+  } catch {
+    return {};
+  }
 }
 
 async function _saveProfileSelected({ id, name, skills }){
@@ -122,11 +157,37 @@ async function _saveProfileSelected({ id, name, skills }){
 async function _listResumes(){
   try {
     const r = await fetchWithFailoverP(`/resumes`);
-    const js = r.ok ? await r.json() : {};    
-    const items = Array.isArray(js.items) ? js.items : [];
-    return items.map(it => ({ id: String(it.id), name: it.original_name || it.name || it.filename || String(it.id) }));
+    const js = r.ok ? await r.json() : null;
+
+    const arr =
+      Array.isArray(js) ? js :
+      Array.isArray(js?.items) ? js.items :
+      Array.isArray(js?.resumes) ? js.resumes :
+      Array.isArray(js?.files) ? js.files :
+      [];
+
+    const extractName = (v) => {
+      if (!v) return "";
+      const s = String(v);
+      const noQuery = s.split("?")[0];
+      return noQuery.split("/").pop().split("\\").pop() || s;
+    };
+
+    return arr
+      .map((it) => {
+        if (typeof it === "string") {
+          const id = it;
+          return { id: String(id), name: extractName(it) || String(id) };
+        }
+        const id = String(it?.id || it?.resume_id || it?.resumeId || it?.uuid || it?.path || it?.file_path || "").trim();
+        if (!id) return null;
+        const rawName = it?.original_name || it?.originalName || it?.name || it?.filename || it?.path || it?.file_path || id;
+        return { id, name: extractName(rawName) || id };
+      })
+      .filter(Boolean);
   } catch (e) {
-    console.warn("[profile] GET /resumes failed:", e); return [];
+    console.warn("[profile] _listResumes failed:", e);
+    return [];
   }
 }
 
@@ -230,7 +291,7 @@ async function initProfileResumeDropdown(profileData = {}) {
     const text = await _getResumeText(id);
 
     // 2) compute skills LOCALLY (no backend call → no 403)
-    const skills = _extractAllSkillsFromText(text);
+    const skills = await _skillsFromTextShared(text);
 
     // 3) stash pending (not saved until user clicks Save)
     window._pendingResume = { id, name, skills };
@@ -260,77 +321,6 @@ const DEGREE_OPTIONS = [
     "Associate's": 2, "Bachelor's": 3, "Master's": 4, "MBA": 4, "Doctorate": 5
   };
 
-  /* ==== Selected Resume → Skills (helpers) ==== */
-  function _normSkillToken(s){
-    let t = String(s||"").toLowerCase().trim();
-    t = t.replace(/\s+/g,"");
-    t = t
-      .replace(/^c\+\+$/,"cpp")
-      .replace(/^c#$/,"csharp")
-      .replace(/^\.net$/,"dotnet")
-      .replace(/^node\.?js$/,"nodejs")
-      .replace(/^react\.?js$/,"react")
-      .replace(/^next\.?js$/,"nextjs")
-      .replace(/^express\.?js$/,"express")
-      .replace(/^k8s$/,"kubernetes");
-    return t.replace(/[^a-z0-9]/g,"");
-  }
-  // very light extractor of "all skills" from resume text; whitelist helps avoid junk tokens
-function _extractAllSkillsFromText(text){
-  const raw = String(text||"");
-  const tokens = raw.match(/[A-Za-z][A-Za-z0-9+.#/-]{1,}/g) || [];
-  const WHITELIST = new Set([
-    // langs
-    "python","java","c","cpp","csharp","go","golang","rust","kotlin","swift",
-    "typescript","javascript","ts","js","sql","mysql","postgres","postgresql","sqlite","oracle",
-    // web
-    "html","css","react","reactjs","nextjs","angular","vue","node","nodejs","express",
-    // backends
-    "django","flask","fastapi","spring","springboot","aspnet","dotnet","rails","laravel",
-    // data/ml
-    "pandas","numpy","scikit-learn","sklearn","tensorflow","pytorch","keras","xgboost","spark","hadoop","kafka","airflow",
-    // devops/cloud
-    "aws","azure","gcp","docker","kubernetes","k8s","terraform","ansible","jenkins","github","gitlab","cicd",
-    // api/arch/tools
-    "rest","graphql","grpc","microservices","linux","bash","powershell","jira","confluence","postman","redis","mongodb","bigquery"
-  ]);
-  const out = new Set();
-  for (const tok of tokens) {
-    const n = _normSkillToken(tok);
-    if (n && WHITELIST.has(n)) out.add(n);
-  }
-  // expand common aliases to canonical forms
-  if (out.has("ts")) { out.delete("ts"); out.add("typescript"); }
-  if (out.has("js")) { out.delete("js"); out.add("javascript"); }
-  return Array.from(out).sort();
-}
-
-  function _tokenizeSkills(text){
-    const toks = (String(text||"").toLowerCase().match(/[a-z][a-z0-9+./-]{1,}/g) || []);
-    // a light vocab to avoid collecting random words (keep in sync with popup’s list as needed)
-    const WHITELIST = new Set([
-      "python","java","c","c++","c#","go","golang","rust","kotlin","swift",
-      "javascript","typescript","html","css","sql","mysql","postgresql","postgres","sqlite","oracle",
-      "mongodb","redis","kafka","spark","airflow","hadoop",
-      "pandas","numpy","scikit-learn","sklearn","tensorflow","pytorch","keras","xgboost",
-      "react","react.js","next.js","angular","vue","node","node.js","express","express.js",
-      "django","flask","fastapi","spring","springboot","asp.net",".net",".netcore","rails","laravel",
-      "docker","kubernetes","k8s","terraform","ansible","jenkins","github","gitlab","git","cicd","ci/cd",
-      "graphql","grpc","rest","microservices","linux","bash","powershell","jira","confluence","postman",
-      "aws","azure","gcp","s3","ec2","lambda","rds","eks","ecs","cloudformation","cdk","cloudwatch",
-      "bigquery","firebase","vercel","netlify","heroku","nginx","apache","redux","rxjs","vite","webpack"
-    ]);
-    const out = new Set();
-    for (const raw of toks){
-      const canon = _normSkillToken(raw);
-      if (!canon) continue;
-      // accept plain “ts” → “typescript” and “js” → “javascript”
-      const alias = canon === "ts" ? "typescript" : (canon === "js" ? "javascript" : canon);
-      if (WHITELIST.has(alias)) out.add(alias);
-    }
-    return Array.from(out).sort();
-  }
-
   /* ==== Selected Resume → Skills (UI wiring) ==== */
   const profileMatched = { required: [], preferred: [] };
 
@@ -348,18 +338,22 @@ function _extractAllSkillsFromText(text){
     if (prefBox){ prefBox.innerHTML=""; (profileMatched.preferred.length? profileMatched.preferred:["None"]).forEach(s => prefBox.appendChild(mkChip(s))); }
   }
 
-  document.getElementById("profileExtractSkills")?.addEventListener("click", ()=>{
+  document.getElementById("profileExtractSkills")?.addEventListener("click", async ()=>{
     const status = document.getElementById("profileSkillsStatus");
     const txt = document.getElementById("profileResumeText")?.value || "";
-    const skills = _tokenizeSkills(txt);
+  
+    const skills = await _skillsFromTextShared(txt);
+  
     // Put them in both buckets (your content script unions them)
     profileMatched.required  = skills.slice();
     profileMatched.preferred = skills.slice();
     renderProfileSkillChips();
-    status.textContent = `Found ${skills.length} skills`;
+  
+    if (status) status.textContent = `Found ${skills.length} skills`;
+  
     // mirror into chrome.storage for the content-script checker
     chrome.storage.local.set({ matchedSkills: { required: profileMatched.required, preferred: profileMatched.preferred } }, ()=>{});
-  });
+  });  
 
   // Normalize "BS", "BSc", "Bachelor of Science" → "Bachelor's", etc.
   function normalizeDegreeLabel(x){
@@ -375,6 +369,13 @@ function _extractAllSkillsFromText(text){
     if (/phd|doctor|d\.?phil/.test(s)) return "Doctorate";
     return "";
   }
+
+  function _normalizeYearsOfExperience(v) {
+    const s = String(v ?? "").trim();
+    if (!s) return "";
+    // support old stored "10+" and always store numeric-ish strings
+    return s.endsWith("+") ? s.slice(0, -1) : s;
+  }  
 
   // Highest from education[] using local normalizer
   function highestFromEducation(arr = []) {
@@ -532,7 +533,18 @@ function monthYearRow(prefix, item={}){
         </div>
   
         <div><label>Field</label><input data-k="field" value="${item.field || ""}"></div>
-        <div><label>GPA</label><input data-k="gpa" value="${item.gpa || ""}"></div>
+        <div>
+          <label>GPA</label>
+          <input
+            type="number"
+            min="0"
+            max="4"
+            step="0.01"
+            inputmode="decimal"
+            data-k="gpa"
+            value="${item.gpa || ""}"
+          >
+        </div>      
       </div>
     `;
   
@@ -634,69 +646,86 @@ function renderArray(container, arr, itemView){
 
 /* ---------- load / save ---------- */
 async function load(){
-    let data = {};
-    try {
-      const r = await fetchWithFailoverP("/profile");
-      if (r.ok) data = await r.json();
-    } catch (e) {
-      console.warn("[profile] backend /profile error:", e);
-    }
-  
-    // ---- render into the form (unchanged) ----
-    $("firstName").value = data?.personal?.firstName || "";
-    $("lastName").value  = data?.personal?.lastName  || "";
-    $("email").value     = data?.personal?.email     || "";
-    $("phoneNumber").value = data?.personal?.phoneNumber || "";
-    $("dob").value       = data?.personal?.dob       || "";
-    $("gender").value    = data?.personal?.gender    || "";
-  
-    $("street").value  = data?.address?.street  || "";
-    $("city").value    = data?.address?.city    || "";
-    $("county").value  = data?.address?.county  || "";   
-    $("state").value   = data?.address?.state   || "";
-    $("zip").value     = data?.address?.zip     || "";
-    $("country").value = data?.address?.country || "";
-  
-    $("linkedin").value = data?.links?.linkedin || "";
-    $("github").value   = data?.links?.github   || "";
-    $("website").value  = data?.links?.website  || "";
-  
-    const radioCheck = (name, val) => {
-      if (!val) return;
-      const el = document.querySelector(`input[name="${name}"][value="${val}"]`);
-      if (el) {
-        el.checked = true;
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+  // Always resolve base first so status text can be accurate
+  const sel = await ensureBackendResolved(true);
+
+  // Use the unwrapping helper so v1/v2 response shapes both work
+  const data = await _getProfile();
+
+  // ---- render into the form ----
+  $("firstName").value = data?.personal?.firstName || "";
+  $("lastName").value  = data?.personal?.lastName  || "";
+  $("email").value     = data?.personal?.email     || "";
+
+  // If the profile doesn't have an email yet, prefill from signed-in account (/auth/me)
+  // ONLY when current backend mode is v2.
+  try {
+    if (sel.pref === "v2" && !$("email").value.trim()) {
+      const token = await getTokenIfV2();
+      if (token) {
+        const meR = await fetchWithFailoverP("/auth/me");
+        if (meR.ok) {
+          const me = await meR.json();
+          const authEmail = (me && me.email ? String(me.email) : "").trim();
+          if (authEmail) $("email").value = authEmail;
+        }
       }
-    };
-    radioCheck("authUS", data?.eligibility?.authUS);
-    radioCheck("authCA", data?.eligibility?.authCA);
-    radioCheck("authUK", data?.eligibility?.authUK);
-    radioCheck("sponsorship", data?.eligibility?.sponsorship);
-  
-    $("disability").value = data?.eligibility?.disability || "";
-    $("lgbtq").value      = data?.eligibility?.lgbtq || "";
-    $("veteran").value    = data?.eligibility?.veteran || "";
-    $("ethnicity").value  = data?.eligibility?.ethnicity || "";
-    $("race").value           = data?.eligibility?.race || "";
-    $("hispanicLatinx").value = data?.eligibility?.hispanicLatinx || "";
-    $("yearsOfExperience").value = (data?.yearsOfExperience || data?.meta?.yearsOfExperience || "");
-    // Highest Education (prefer saved, otherwise infer from education[])
-    const he = data?.highestEducation || highestFromEducation(Array.isArray(data?.education) ? data.education : []);
-    const heSel = document.getElementById("highestEducation");
-    if (heSel) heSel.value = he;
+    }
+  } catch {}
 
-    window._edu = Array.isArray(data.education) ? data.education.slice() : [];
-    window._exp = Array.isArray(data.experience) ? data.experience.slice() : [];
-    renderArray($("eduList"), window._edu, eduItemView);
-    renderArray($("expList"), window._exp, expItemView);
+  $("phoneNumber").value = data?.personal?.phoneNumber || "";
+  $("dob").value       = data?.personal?.dob       || "";
+  $("gender").value    = data?.personal?.gender    || "";
 
-    setStatus("Loaded from backend.");
-    await initProfileResumeDropdown(data);
-    window._loadedProfile = data;
-  }  
-  
-  
+  $("street").value  = data?.address?.street  || "";
+  $("city").value    = data?.address?.city    || "";
+  $("county").value  = data?.address?.county  || "";
+  $("state").value   = data?.address?.state   || "";
+  $("zip").value     = data?.address?.zip     || "";
+  $("country").value = data?.address?.country || "";
+
+  $("linkedin").value = data?.links?.linkedin || "";
+  $("github").value   = data?.links?.github   || "";
+  $("website").value  = data?.links?.website  || "";
+
+  const radioCheck = (name, val) => {
+    if (!val) return;
+    const el = document.querySelector(`input[name="${name}"][value="${val}"]`);
+    if (el) {
+      el.checked = true;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  };
+  radioCheck("authUS", data?.eligibility?.authUS);
+  radioCheck("authCA", data?.eligibility?.authCA);
+  radioCheck("authUK", data?.eligibility?.authUK);
+  radioCheck("sponsorship", data?.eligibility?.sponsorship);
+
+  $("disability").value = data?.eligibility?.disability || "";
+  $("lgbtq").value      = data?.eligibility?.lgbtq || "";
+  $("veteran").value    = data?.eligibility?.veteran || "";
+  $("ethnicity").value  = data?.eligibility?.ethnicity || "";
+  $("race").value           = data?.eligibility?.race || "";
+  $("hispanicLatinx").value = data?.eligibility?.hispanicLatinx || "";
+
+  const yoRaw = (data?.yearsOfExperience ?? data?.meta?.yearsOfExperience ?? "");
+  $("yearsOfExperience").value = _normalizeYearsOfExperience(yoRaw);
+
+  // Highest Education (prefer saved, otherwise infer from education[])
+  const he = data?.highestEducation || highestFromEducation(Array.isArray(data?.education) ? data.education : []);
+  const heSel = document.getElementById("highestEducation");
+  if (heSel) heSel.value = he;
+
+  window._edu = Array.isArray(data.education) ? data.education.slice() : [];
+  window._exp = Array.isArray(data.experience) ? data.experience.slice() : [];
+  renderArray($("eduList"), window._edu, eduItemView);
+  renderArray($("expList"), window._exp, expItemView);
+
+  // status includes pref + base so we can PROVE what backend we read
+  setStatus(`Loaded from ${sel.pref} @ ${sel.base || "(no base)"}`);
+  await initProfileResumeDropdown(data);
+  window._loadedProfile = data;
+}
 
 function collectMain(){
   const radioVal = name => (document.querySelector(`input[name="${name}"]:checked`)?.value || "");
@@ -735,7 +764,7 @@ function collectMain(){
       hispanicLatinx: $("hispanicLatinx").value.trim()    
     },
     highestEducation: (document.getElementById("highestEducation")?.value || "").trim(),
-    yearsOfExperience: (document.getElementById("yearsOfExperience")?.value || "").trim(),
+    yearsOfExperience: _normalizeYearsOfExperience(document.getElementById("yearsOfExperience")?.value || ""),
   };
 }
 
@@ -761,7 +790,7 @@ $("addExp").addEventListener("click", ()=>{
       const out = collectMain();
     
       // Ensure these exist at the top level (used by filler)
-      out.yearsOfExperience = (document.getElementById("yearsOfExperience")?.value || "").trim();
+      out.yearsOfExperience = _normalizeYearsOfExperience(document.getElementById("yearsOfExperience")?.value || "");
       out.highestEducation  = (document.getElementById("highestEducation")?.value || "").trim();
     
       // ===== education array =====
@@ -835,7 +864,7 @@ $("addExp").addEventListener("click", ()=>{
         if (!Array.isArray(sr.skills) || !sr.skills.length) {
           try {
             const textRes = await _getResumeText(sr.id);
-            sr.skills = _extractAllSkillsFromText(textRes);
+            sr.skills = await _skillsFromTextShared(textRes);
           } catch (e) {
             console.warn("[profile] skills compute failed (local):", e);
             sr.skills = Array.isArray(sr.skills) ? sr.skills : [];
@@ -888,9 +917,9 @@ $("addExp").addEventListener("click", ()=>{
         try {
           // `out` is the profile you just constructed & PATCHed above
           await chrome.storage.local.set({
-            userData: out,
+            profile: out,
             profileVersion: Date.now()
-          });
+          });          
           // tell all extension pages & content scripts the profile is fresh
           chrome.runtime.sendMessage({
             type: "SFF_PROFILE_UPDATED",
@@ -908,6 +937,8 @@ $("addExp").addEventListener("click", ()=>{
       }
     });    
 
-document.addEventListener("DOMContentLoaded", () => {
-  load().catch(err => console.warn("[profile] load() failed:", err));
-});
+    document.addEventListener("DOMContentLoaded", async () => {
+      try { await ensureBackendResolved(true); } catch {}
+      load().catch(err => console.warn("[profile] load() failed:", err));
+    });
+    

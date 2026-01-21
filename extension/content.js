@@ -2502,9 +2502,22 @@ async function getUserData(){
     const { userData } = await chrome.storage.local.get("userData");
     if (userData && typeof userData === "object") return userData;
   } catch {}
-  // Fallback: runtime (background) cache
-  return await new Promise(r => chrome.runtime.sendMessage({ action: "getUserData" }, r));
-}  
+
+  // Fallback: runtime (background) cache / live backend
+  const resp = await new Promise(r => chrome.runtime.sendMessage({ action: "getUserData" }, r));
+
+  if (!resp) return {};
+
+  // Background might return:
+  //  - raw profile object
+  //  - { success:true, userData:{...} }
+  //  - { success:true, profile:{...} }
+  if (resp.userData && typeof resp.userData === "object") return resp.userData;
+  if (resp.profile && typeof resp.profile === "object") return resp.profile;
+  if (typeof resp === "object") return resp;
+
+  return {};
+}
   
 /* ================= NORMALIZED PREDICTIONS ================= */
 function _normalizeKey(k) {

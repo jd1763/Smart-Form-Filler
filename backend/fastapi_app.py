@@ -15,6 +15,7 @@ import io
 import json
 import os
 import random
+import re
 import shutil
 import socket
 import sys
@@ -24,14 +25,22 @@ from typing import Any, Dict, List, Optional
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, EmailStr
 
 # I reuse everything from my existing Flask api.py so I don't duplicate logic.
 # All the DB models, S3 helpers, and ML pieces still live there.
 from . import api as legacy  # type: ignore[attr-defined]
+from .auth_utils import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 
 # Short aliases so the rest of this file reads cleaner.
 SessionLocal = legacy.SessionLocal
 Resume = legacy.Resume
+User = legacy.User
 MAX_RESUMES = legacy.MAX_RESUMES
 PDF_DIR = legacy.PDF_DIR
 TEXT_DIR = legacy.TEXT_DIR
@@ -81,12 +90,55 @@ app.add_middleware(
 
 def _user_id_from_request(request: Request) -> str:
     """
-    Try to pull a user id in the same way I do in Flask:
-    - ?userId=... query param
-    - X-User-Id header
-    - falls back to DEFAULT_USER (good enough for local/dev)
+    Determine the current user id.
+
+    Priority:
+    1) Authorization: Bearer <JWT>  -> decode to user id
+    2) ?userId=... query param
+    3) X-User-Id header
+    4) DEFAULT_USER (dev fallback)
     """
+    # 1) Try JWT in Authorization header
+    auth_header = request.headers.get("Authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(None, 1)[1].strip()
+        try:
+            user_id_int = decode_access_token(token)
+            return str(user_id_int)
+        except ValueError:
+            # Invalid/expired token; fall through to legacy behaviour
+            pass
+
+    # 2) Legacy behaviour (keeps local/dev and old flows working)
     return request.query_params.get("userId") or request.headers.get("X-User-Id") or DEFAULT_USER
+
+
+_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,32}$")
+
+
+def normalize_username(raw: str) -> str:
+    u = (raw or "").strip()
+    if not u:
+        raise HTTPException(status_code=400, detail="Username is required")
+    if not _USERNAME_RE.match(u):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be 3–32 chars and only use letters, numbers, and underscore.",
+        )
+    return u.lower()
+
+
+class RegisterPayload(BaseModel):
+    username: str
+    email: EmailStr
+    firstName: str
+    lastName: str
+    password: str
+
+
+class LoginPayload(BaseModel):
+    username: str
+    password: str
 
 
 # === Health ===
@@ -100,6 +152,120 @@ async def health() -> Dict[str, Any]:
     Flask /health endpoint: just { "ok": true }.
     """
     return {"ok": True}
+
+
+@app.post("/auth/register")
+async def auth_register(payload: RegisterPayload) -> Dict[str, Any]:
+    """
+    Create a new user account and return an access token.
+    """
+    username = normalize_username(payload.username)
+    email = str(payload.email).strip().lower()
+    first_name = (payload.firstName or "").strip()
+    last_name = (payload.lastName or "").strip()
+    password = payload.password
+
+    if not first_name or not last_name:
+        raise HTTPException(status_code=400, detail="First and last name are required")
+
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    with SessionLocal() as s:
+        existing_username = s.query(User).filter(User.username == username).first()
+        if existing_username:
+            raise HTTPException(status_code=400, detail="Username is already taken")
+
+        # NOTE: email is NOT checked for duplicates anymore
+        user = User(
+            username=username,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            password_hash=hash_password(password),
+        )
+        s.add(user)
+        s.commit()
+        s.refresh(user)
+
+    token = create_access_token(user.id)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "firstName": user.first_name,
+            "lastName": user.last_name,
+            "created_at": (
+                user.created_at.isoformat() if getattr(user, "created_at", None) else None
+            ),
+        },
+    }
+
+
+@app.post("/auth/login")
+async def auth_login(payload: LoginPayload) -> Dict[str, Any]:
+    """
+    Log a user in and return an access token.
+    """
+    username = normalize_username(payload.username)
+    password = payload.password
+
+    with SessionLocal() as s:
+        user = s.query(User).filter(User.username == username).first()
+        if not user or not verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    token = create_access_token(user.id)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "firstName": user.first_name,
+            "lastName": user.last_name,
+            "created_at": (
+                user.created_at.isoformat() if getattr(user, "created_at", None) else None
+            ),
+        },
+    }
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request) -> Dict[str, Any]:
+    """
+    Return basic info about the currently authenticated user.
+    """
+    user_id_str = _user_id_from_request(request)
+
+    # If no JWT and no userId override, treat as not authenticated
+    if user_id_str == DEFAULT_USER:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid user id")
+
+    with SessionLocal() as s:
+        user = s.query(User).get(user_id)
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "firstName": user.first_name,
+            "lastName": user.last_name,
+            "created_at": (
+                user.created_at.isoformat() if getattr(user, "created_at", None) else None
+            ),
+        }
 
 
 # === Profile ===
@@ -233,16 +399,23 @@ async def patch_profile(
 
 
 @app.get("/resumes")
-async def list_resumes() -> Dict[str, Any]:
+async def list_resumes(request: Request) -> Dict[str, Any]:
     """
     Return all resumes in newest-first order.
 
     Same shape as Flask:
         200 { "items": [...], "max": <MAX_RESUMES> }
     """
+    user_id = _user_id_from_request(request)
     try:
         with SessionLocal() as s:
-            items = [to_dict(r) for r in s.query(Resume).order_by(Resume.created_at.desc()).all()]
+            items = [
+                to_dict(r)
+                for r in s.query(Resume)
+                .filter(Resume.user_id == str(user_id))
+                .order_by(Resume.created_at.desc())
+                .all()
+            ]
         return {"items": items, "max": MAX_RESUMES}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list resumes: {e}")
@@ -263,9 +436,11 @@ async def upload_resume(
     - extract text
     - write DB row + optionally push PDF/text to S3
     """
+    user_id = _user_id_from_request(request)
+
     # Enforce the same MAX_RESUMES limit I already have.
     with SessionLocal() as s:
-        if count_resumes(s) >= MAX_RESUMES:
+        if count_resumes(s, user_id) >= MAX_RESUMES:
             raise HTTPException(
                 status_code=400,
                 detail=f"Maximum of {MAX_RESUMES} resumes reached. Delete one to upload another.",
@@ -285,7 +460,7 @@ async def upload_resume(
             shutil.copyfileobj(file.file, out)
 
         # Prefer what the browser tells me; fall back to the filename.
-        mime = file.content_type or detect_mime(file.filename) or detect_mime(str(tmp_path))
+        mime = detect_mime(str(tmp_path)) or file.content_type or detect_mime(file.filename)
         if mime not in (
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -350,6 +525,7 @@ async def upload_resume(
         with SessionLocal() as s:
             rec = Resume(
                 id=rid,
+                user_id=str(user_id),
                 original_name=file.filename,
                 mime_type=mime,
                 pdf_path=pdf_path_db,
@@ -366,6 +542,21 @@ async def upload_resume(
     except HTTPException:
         # Re-raise HTTP errors without wrapping them again.
         raise
+
+    except ValueError as e:
+        # Bad file input (corrupt/unsupported) => 400, not 500
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            # If we already renamed tmp -> final, delete it too
+            if "final_pdf_path" in locals():
+                final_pdf_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=str(e))
+
     except Exception as e:
         # Clean up temp file on unexpected errors.
         try:
@@ -376,14 +567,15 @@ async def upload_resume(
 
 
 @app.get("/resumes/{rid}/file")
-async def get_resume_file(rid: str) -> StreamingResponse:
+async def get_resume_file(request: Request, rid: str) -> StreamingResponse:
     """
     Stream the original resume file (PDF/DOCX/etc.) back to the caller.
     Supports both S3-backed and local file paths.
     """
+    user_id = _user_id_from_request(request)
     with SessionLocal() as s:
         r = s.get(Resume, rid)
-        if not r:
+        if not r or getattr(r, "user_id", None) != str(user_id):
             raise HTTPException(status_code=404, detail="Resume not found")
 
     pdf_path = r.pdf_path
@@ -422,16 +614,17 @@ async def get_resume_file(rid: str) -> StreamingResponse:
 
 
 @app.get("/resumes/{rid}/text")
-async def get_resume_text(rid: str) -> Dict[str, Any]:
+async def get_resume_text(request: Request, rid: str) -> Dict[str, Any]:
     """
     Return the extracted text for a given resume id.
 
     Shape:
         { "id": "<id>", "text": "..." }
     """
+    user_id = _user_id_from_request(request)
     with SessionLocal() as s:
         r = s.get(Resume, rid)
-        if not r:
+        if not r or getattr(r, "user_id", None) != str(user_id):
             raise HTTPException(status_code=404, detail="Resume not found")
 
     text_path = r.text_path
@@ -463,13 +656,14 @@ async def get_resume_text(rid: str) -> Dict[str, Any]:
 
 
 @app.delete("/resumes/{rid}")
-async def delete_resume(rid: str) -> Dict[str, bool]:
+async def delete_resume(request: Request, rid: str) -> Dict[str, bool]:
     """
     Delete the resume + its text from DB and storage (local or S3).
     """
+    user_id = _user_id_from_request(request)
     with SessionLocal() as s:
         r = s.get(Resume, rid)
-        if not r:
+        if not r or getattr(r, "user_id", None) != str(user_id):
             raise HTTPException(status_code=404, detail="Not found")
 
         try:
@@ -518,7 +712,9 @@ async def skills_extract(body: Dict[str, Any] = Body(default_factory=dict)) -> D
 
 
 @app.post("/skills/by_resume")
-async def skills_by_resume(body: Dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
+async def skills_by_resume(
+    request: Request, body: Dict[str, Any] = Body(default_factory=dict)
+) -> JSONResponse:
     """
     Given a resume id, return the skills I can extract from its text.
 
@@ -548,6 +744,10 @@ async def skills_by_resume(body: Dict[str, Any] = Body(default_factory=dict)) ->
         with SessionLocal() as s:
             r = s.get(Resume, rid)
             if not r:
+                raise HTTPException(status_code=404, detail="Resume not found")
+
+            user_id = _user_id_from_request(request)
+            if getattr(r, "user_id", None) != str(user_id):
                 raise HTTPException(status_code=404, detail="Resume not found")
 
             if not name:

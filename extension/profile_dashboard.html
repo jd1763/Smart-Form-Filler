@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smart Form Filler — Profile</title>
+    <link rel="stylesheet" href="styles.css" />
+
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+        background: #f3f4f6;
+        color: #111827;
+      }
+
+      .shell { display: flex; height: 100vh; }
+
+      /* Sidebar stays dark */
+      .sidebar {
+        width: 270px;
+        background: #0f172a;
+        border-right: 1px solid rgba(255,255,255,.08);
+        padding: 16px;
+        box-sizing: border-box;
+      }
+
+      .brand {
+        font-weight: 800;
+        font-size: 14px;
+        color: rgba(232,238,252,.95);
+        margin-bottom: 12px;
+      }
+
+      .navbtn {
+        width: 100%;
+        text-align: left;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: rgba(232,238,252,.92);
+        cursor: pointer;
+        margin-bottom: 8px;
+      }
+      .navbtn:hover { background: rgba(255,255,255,.06); }
+      .navbtn.active {
+        background: rgba(99,102,241,.18);
+        border-color: rgba(99,102,241,.35);
+      }
+
+      /* Main is light */
+      .content {
+        flex: 1;
+        padding: 18px;
+        box-sizing: border-box;
+        overflow: auto;
+        background: #f3f4f6;
+      }
+
+      .card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        padding: 14px;
+        margin-bottom: 14px;
+        color: #111827;
+      }
+
+      /* Sidebar cards stay dark even though .card is white */
+      .sidebarCard {
+        background: #0b1220;
+        border: 1px solid rgba(255,255,255,.10);
+        border-radius: 16px;
+        padding: 14px;
+        color: rgba(232,238,252,.92);
+        margin-top: 14px;
+      }
+      .sidebarCard .muted { color: rgba(232,238,252,.70); }
+      .sidebarCard .btn {
+        background: rgba(255,255,255,.06);
+        border-color: rgba(255,255,255,.14);
+        color: rgba(232,238,252,.92);
+      }
+      .sidebarCard .btn:hover { background: rgba(255,255,255,.10); }
+
+      .row { display: flex; gap: 12px; flex-wrap: wrap; }
+      .field { display: flex; flex-direction: column; gap: 6px; min-width: 240px; flex: 1; }
+
+      label { font-size: 12px; color: #6b7280; }
+
+      input {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #d1d5db;
+        background: #ffffff;
+        color: #111827;
+      }
+
+      select, textarea {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #d1d5db;
+        background: #ffffff;
+        color: #111827;
+        font-family: inherit;
+        font-size: 14px;
+      }
+      textarea { min-height: 96px; resize: vertical; }
+      input[type="month"] { padding: 10px 12px; }
+
+      .btn {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #d1d5db;
+        background: #ffffff;
+        color: #111827;
+        cursor: pointer;
+      }
+      .btn:hover { background: #f9fafb; }
+      .btn.primary {
+        background: rgba(99,102,241,.12);
+        border-color: rgba(99,102,241,.35);
+      }
+      .btn.primary:hover { background: rgba(99,102,241,.18); }
+      .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+      .muted { color: #6b7280; font-size: 13px; }
+
+      .avatar {
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(99,102,241,.14);
+        border: 1px solid rgba(99,102,241,.35);
+        font-weight: 900;
+        color: #111827;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: #f3f4f6;
+        border: 1px solid #e5e7eb;
+        font-size: 12px;
+        color: #374151;
+      }
+
+      .resItem {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid #e5e7eb;
+        background: #ffffff;
+        margin-bottom: 10px;
+      }
+
+      .linkrow { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+      .tiny { font-size: 12px; color: #6b7280; }
+      .divider { height: 1px; background: #e5e7eb; margin: 10px 0; }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+
+    <!-- React (local) -->
+    <script src="./vendor/react.production.min.js"></script>
+    <script src="./vendor/react-dom.production.min.js"></script>
+
+    <!-- App -->
+    <script src="./skills_whitelist.js"></script>
+    <script src="./profile_dashboard.js"></script>    
+  </body>
+</html>

@@ -391,3 +391,171 @@ select:focus {
   color: #e67e22; /* orange warning color */
   text-align: center;
 }
+
+/* --- Auth / profile strip in popup header --- */
+
+.auth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: #f9fafb;
+  border: 1px solid var(--bd-2);
+}
+
+.auth-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.auth-status {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.auth-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  background: #eef2ff;
+  color: #1d4ed8;
+}
+
+/* Auth card */
+
+.auth-card {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 10px 8px;
+  margin-bottom: 10px;
+}
+
+.auth-card-header {
+  margin-bottom: 8px;
+}
+
+.auth-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.auth-card-subtitle {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.auth-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.auth-field {
+  width: 100%;
+}
+
+.auth-field label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.auth-field input {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 6px;
+  border: 1px solid var(--bd);
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.auth-field input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb1a;
+}
+
+.auth-footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.auth-error {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #b91c1c;
+}
+
+/* Small text-link style buttons for auth actions */
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+/* ===== Avatar dropdown menu (Account strip) ===== */
+.auth-right { position: relative; }
+
+.auth-menu {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  z-index: 9999;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.14);
+  padding: 6px;
+  display: none;
+}
+.auth-menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #111;
+}
+.auth-menu-item:hover { background: #f3f4f6; }
+.auth-menu-divider { height: 1px; background: #e5e7eb; margin: 6px 6px; }

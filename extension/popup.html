@@ -84,6 +84,108 @@
   
   <h1>Smart Form Filler</h1>
 
+  <!-- Auth / profile row -->
+  <div id="authRow" class="auth-row">
+    <div class="auth-left">
+      <div class="auth-label">Account</div>
+      <div class="auth-status" id="authStatusLabel">Not signed in</div>
+    </div>
+    <div class="auth-right" id="authChip">
+      <div class="auth-avatar" id="authAvatar" style="display: none;">?</div>
+      <button id="authShowFormBtn" class="link-button">Sign in</button>
+      <button id="authLogoutBtn" class="link-button" style="display: none;">
+        Sign out
+      </button>
+    
+      <!-- Avatar dropdown menu (shown when signed in) -->
+      <div class="auth-menu" id="authMenu" role="menu" aria-label="Account menu">
+        <button id="authMenuProfileBtn" class="auth-menu-item" type="button">Profile</button>
+        <div class="auth-menu-divider"></div>
+        <button id="authMenuLogoutBtn" class="auth-menu-item" type="button">Sign out</button>
+      </div>
+    </div>    
+  </div>
+
+  <!-- Inline auth card -->
+  <div class="card auth-card" id="authFormCard" style="display: none;">
+    <div class="auth-card-header">
+      <div class="auth-card-title" id="authCardTitle">Sign in to Smart Form Filler</div>
+      <div class="auth-card-subtitle" id="authCardSubtitle">
+        Use the same account across jobs and browsers.
+      </div>      
+    </div>
+
+    <div class="auth-body">
+      <!-- Always shown -->
+      <div class="auth-field">
+        <label for="authUsername">Username</label>
+        <input type="text" id="authUsername" autocomplete="username" />
+      </div>
+    
+      <!-- Register-only fields -->
+      <div id="authRegisterFields" style="display:none;">
+        <div class="auth-field">
+          <label for="authFirstName">First name</label>
+          <input type="text" id="authFirstName" autocomplete="given-name" />
+        </div>
+    
+        <div class="auth-field">
+          <label for="authLastName">Last name</label>
+          <input type="text" id="authLastName" autocomplete="family-name" />
+        </div>
+    
+        <div class="auth-field">
+          <label for="authEmail">Email</label>
+          <input type="email" id="authEmail" autocomplete="email" />
+        </div>
+      </div>
+    
+      <!-- Password (always shown) -->
+      <div class="auth-field">
+        <label for="authPassword">Password</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input
+            type="password"
+            id="authPassword"
+            autocomplete="current-password"
+            style="flex:1;"
+          />
+          <button id="authShowPasswordBtn" type="button" class="btn btn-ghost" style="white-space:nowrap;">
+            Show
+          </button>
+        </div>
+      </div>
+
+      <!-- Confirm password (register-only) -->
+      <div class="auth-field" id="authConfirmPasswordField" style="display:none;">
+        <label for="authPasswordConfirm">Confirm password</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input
+            type="password"
+            id="authPasswordConfirm"
+            autocomplete="new-password"
+            style="flex:1;"
+          />
+          <button id="authShowPasswordConfirmBtn" type="button" class="btn btn-ghost" style="white-space:nowrap;">
+            Show
+          </button>
+        </div>
+      </div>
+    </div>   
+
+    <div class="auth-footer">
+      <button id="authCancelBtn" class="btn btn-ghost">Cancel</button>
+      <button id="authLoginBtn" class="btn btn-primary">Sign in</button>
+    </div>
+    
+    <div class="muted" style="margin-top:8px;">
+      <span id="authModeHelpText">No account?</span>
+      <button id="authModeToggleBtn" class="link-button">Create account</button>
+    </div>
+    
+    <div id="authErrorMsg" class="auth-error"></div>    
+  </div>
+
   <!-- Tabs -->
   <div class="tabs">
     <button class="tab active" data-tab="main">Main</button>
@@ -130,11 +232,11 @@
           class="muted"
           style="margin-top:4px; font-size:11px; display:none;">
         </div>
-      </div>
 
-      <div class="backend-toggle-group" id="backendToggleGroup">
-        <img src="ai.png" alt="AI icon" class="backend-icon" />
-        <span class="muted"><strong>Use V2 (FastAPI) for the new AI features</strong></span>
+        <div id="backendInfoMessage"
+          class="muted"
+          style="margin-top:4px; font-size:11px; display:none;">
+        </div>
       </div>
 
       <div style="margin-top:8px;" class="muted"><strong>Matched skills</strong></div>
@@ -202,6 +304,12 @@
         class="muted"
         style="margin-top:4px; display:none;">
       </div>
+
+      <div id="onboardingGate" class="muted" style="margin-top:6px; display:none;">
+        <div id="onboardingGateText"></div>
+        <button id="completeSetupBtn" class="btn" style="margin-top:6px;">Complete setup</button>
+      </div>
+
       <div id="status">Ready…</div>
     </div>
     
@@ -255,5 +363,6 @@
            style="white-space:pre-wrap; max-height:140px; overflow:auto; background:#fafafa; padding:6px; border-radius:6px; border:1px solid #eee;"></pre>      
     </div>
   </div>
-  <script src="popup.js"></script>
+  <script src="./skills_whitelist.js"></script>
+  <script src="./popup.js"></script>  
 </body>

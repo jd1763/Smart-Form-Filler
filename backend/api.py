@@ -43,27 +43,82 @@ from ml.matcher_baseline import BaselineMatcher
 from ml.matcher_embeddings import MatcherEmbeddings
 
 from .matcher.resume_selector import select_best_resume
-from .storage.s3_storage import delete_object, get_bytes, put_bytes
 
 # Load .env early so S3/boto3 see AWS_* variables before we import s3_storage
 load_dotenv()
+
+from .storage.s3_storage import delete_object, get_bytes, put_bytes  # noqa: E402
+
 # Add the project root to Python path so we can import ml/ and backend/ modules
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
 def detect_mime(path: str) -> str:
+    """Best-effort MIME detection.
+
+    We prefer sniffing actual file bytes when `path` exists on disk,
+    and fall back to filename-based detection otherwise.
+    """
+    # 1) If this is a real file on disk, sniff headers first.
+    try:
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                head = f.read(16)
+
+            # PDF magic header
+            if head.startswith(b"%PDF-"):
+                return "application/pdf"
+
+            # ZIP magic header (DOCX is a ZIP container)
+            if head.startswith(b"PK"):
+                try:
+                    import zipfile
+
+                    with zipfile.ZipFile(path) as z:
+                        names = z.namelist()
+                        # DOCX files have a /word/ directory
+                        if any(n.startswith("word/") for n in names):
+                            return (
+                                "application/vnd.openxmlformats-officedocument."
+                                "wordprocessingml.document"
+                            )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 2) Fallback: filename / extension based.
     mt, _ = mimetypes.guess_type(path)
     return mt or "application/octet-stream"
 
 
 def extract_text_any(path: str) -> str:
+    """Extract plain text from PDF or DOCX.
+
+    Raises ValueError for unsupported/corrupt inputs so callers can map to HTTP 400.
+    """
     mime = detect_mime(path)
+
     if mime == "application/pdf":
-        return pdf_extract_text(path) or ""
+        try:
+            return pdf_extract_text(path) or ""
+        except Exception as e:
+            raise ValueError(
+                "PDF parse failed (file may be corrupt or not a real PDF). "
+                "Please upload a valid PDF."
+            ) from e
+
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        doc = Document(path)
-        return "\n".join(p.text for p in doc.paragraphs)
-    raise ValueError(f"Unsupported file type: {mime}")
+        try:
+            doc = Document(path)
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception as e:
+            raise ValueError(
+                "DOCX parse failed (file may be corrupt or not a real DOCX). "
+                "Please upload a valid DOCX."
+            ) from e
+
+    raise ValueError(f"Unsupported file type: {mime}. Please upload a PDF or DOCX.")
 
 
 # === Path to the model file ===
@@ -99,24 +154,20 @@ KEEP_LOCAL_TEXT_CACHE = os.getenv("KEEP_LOCAL_TEXT_CACHE", "false").lower() == "
 S3_BUCKET = os.getenv("S3_BUCKET")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 
+# ------------------------------------------------------------
+# Legacy Flask backend (v1) must be LOCAL-ONLY by default.
+# This prevents v1 from reading/writing S3 even if your global .env enables S3 for v2.
+# Set SFF_V1_LOCAL_ONLY=false if you ever want v1 to use S3 again.
+# ------------------------------------------------------------
+SFF_V1_LOCAL_ONLY = os.getenv("SFF_V1_LOCAL_ONLY", "true").lower() == "true"
+if SFF_V1_LOCAL_ONLY:
+    USE_S3 = False
+    USE_S3_TEXT = False
+    USE_S3_PROFILE = False
+    KEEP_LOCAL_TEXT_CACHE = True
+
 # Default user id if the caller doesn’t pass one (good for local/dev)
 DEFAULT_USER = os.getenv("DEFAULT_USER", "default")
-
-print(
-    "[api] S3 config:",
-    "USE_S3=",
-    USE_S3,
-    "USE_S3_TEXT=",
-    USE_S3_TEXT,
-    "USE_S3_PROFILE=",
-    USE_S3_PROFILE,
-    "KEEP_LOCAL_TEXT_CACHE=",
-    KEEP_LOCAL_TEXT_CACHE,
-    "S3_BUCKET=",
-    S3_BUCKET,
-    "AWS_REGION=",
-    AWS_REGION,
-)
 
 
 def _user_id_from_request() -> str:
@@ -233,9 +284,29 @@ except Exception as e:
     print(f"[WARNING] Could not load embeddings matcher: {e}")
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # NEW: username is the login identity (unique)
+    username = Column(String, unique=True, nullable=False, index=True)
+
+    # Email is just contact info (NOT unique anymore)
+    email = Column(String, nullable=False, index=True)
+
+    # NEW: names
+    first_name = Column(String, nullable=False, default="")
+    last_name = Column(String, nullable=False, default="")
+
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+
+
 class Resume(Base):
     __tablename__ = "resumes"
     id = Column(String, primary_key=True)  # uuid
+    user_id = Column(String, nullable=False, default=DEFAULT_USER, index=True)
     original_name = Column(String, nullable=False)
     mime_type = Column(String, nullable=False)
     pdf_path = Column(String, nullable=False)  # original file path (pdf or docx)
@@ -449,8 +520,68 @@ def to_dict(r: Resume):
     }
 
 
-def count_resumes(session):
-    return session.query(Resume).count()
+def count_resumes(session, user_id: str | None = None):
+    uid = str(user_id or DEFAULT_USER)
+    return session.query(Resume).filter(Resume.user_id == uid).count()
+
+
+def _guess_mime_from_path(p: Path) -> str:
+    ext = p.suffix.lower()
+    if ext == ".pdf":
+        return "application/pdf"
+    if ext == ".docx":
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "application/octet-stream"
+
+
+def ensure_local_resume_index(session, user_id: str):
+    """
+    v1 local-only: scan backend/data/resumes and ensure every file has a DB record.
+    This makes existing local files visible via GET /resumes without needing manual DB inserts.
+    """
+    # If S3 is active, do not index local files.
+    if USE_S3 and S3_BUCKET:
+        return
+
+    try:
+        PDF_DIR.mkdir(parents=True, exist_ok=True)
+        TEXT_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    changed = False
+    for p in PDF_DIR.glob("*"):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in (".pdf", ".docx"):
+            continue
+
+        rid = p.stem  # stable id based on filename stem
+        existing = session.get(Resume, rid)
+        if existing:
+            # Ensure user_id is correct for local mode
+            if existing.user_id != str(user_id):
+                existing.user_id = str(user_id)
+                session.add(existing)
+                changed = True
+            continue
+
+        txt_candidate = TEXT_DIR / f"{rid}.txt"
+        session.add(
+            Resume(
+                id=rid,
+                user_id=str(user_id),
+                original_name=p.name,
+                mime_type=_guess_mime_from_path(p),
+                pdf_path=str(p),
+                text_path=str(txt_candidate) if txt_candidate.exists() else "",
+                size_bytes=p.stat().st_size if p.exists() else 0,
+            )
+        )
+        changed = True
+
+    if changed:
+        session.commit()
 
 
 # --- Deep merge ---
@@ -640,23 +771,28 @@ def patch_profile():
 @app.get("/resumes")
 def list_resumes():
     """
-    Return all resumes in newest-first order.
+    Return resumes in newest-first order.
 
-    Success:
-        200 { "items": [...], "max": <MAX_RESUMES> }
-
-    Failure:
-        500 { "error": "...", "code": 500 }
+    v1 local-only behavior:
+      - index backend/data/resumes into DB
+      - return only DEFAULT_USER (or passed userId) records
     """
     try:
+        user_id = _user_id_from_request()
         with SessionLocal() as s:
-            items = [to_dict(r) for r in s.query(Resume).order_by(Resume.created_at.desc()).all()]
+            ensure_local_resume_index(s, user_id)
+            items = [
+                to_dict(r)
+                for r in (
+                    s.query(Resume)
+                    .filter(Resume.user_id == str(user_id))
+                    .order_by(Resume.created_at.desc())
+                    .all()
+                )
+            ]
         return jsonify({"items": items, "max": MAX_RESUMES}), 200
     except Exception as e:
-        return (
-            jsonify({"error": f"Failed to list resumes: {e}", "code": 500}),
-            500,
-        )
+        return jsonify({"error": f"Failed to list resumes: {e}", "code": 500}), 500
 
 
 # --------- Upload ----------
@@ -664,7 +800,9 @@ def list_resumes():
 def upload_resume():
     # Enforce limit
     with SessionLocal() as s:
-        if count_resumes(s) >= MAX_RESUMES:
+        user_id = _user_id_from_request()
+        ensure_local_resume_index(s, user_id)
+        if count_resumes(s, user_id) >= MAX_RESUMES:
             return (
                 jsonify(
                     {
@@ -770,6 +908,7 @@ def upload_resume():
         with SessionLocal() as s:
             rec = Resume(
                 id=rid,
+                user_id=str(user_id),
                 original_name=f.filename,
                 mime_type=mime,
                 pdf_path=pdf_path_db,
@@ -804,6 +943,7 @@ def get_file(rid):
         500 JSON if something unexpected goes wrong
     """
     with SessionLocal() as s:
+        ensure_local_resume_index(s, _user_id_from_request())
         r = s.get(Resume, rid)
         if not r:
             return jsonify({"error": "Resume not found", "code": 404}), 404
